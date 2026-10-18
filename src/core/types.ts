@@ -818,3 +818,22 @@ export interface DocumentSummary {
   /** Moved to the trash at this time (restorable until deleted permanently). */
   trashed?: number;
 }
+
+/**
+ * A snapshot of a document (Onshape versions and history): a version made by the user (named, with a description),
+ * or an entry of the history saved by itself — when the document is opened, every while during edits, and before a
+ * version is restored. The document itself is stored apart (listing the versions does not load them).
+ */
+export interface DocumentVersion {
+  id: string;
+  docId: string;
+  kind: 'version' | 'auto';
+  /** A version's name ("V1"); the history's entries have none. */
+  name: string;
+  description?: string;
+  /** Why the history saved it. */
+  reason?: 'open' | 'edit' | 'restore';
+  created: number;
+  /** Of the snapshot's content (units and tabs): the same content is not saved twice in a row. */
+  hash: string;
+}

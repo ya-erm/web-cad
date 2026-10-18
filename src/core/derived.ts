@@ -32,7 +32,8 @@ export function derivableStudios(doc: Doc, studioId: string): PartStudioTab[] {
   return doc.tabs.filter((t): t is PartStudioTab => t.type === 'partStudio' && t.id !== studioId && !derivesFrom(doc, t.id, studioId));
 }
 
-function hash(str: string): string {
+/** A short hash of a string (cyrb53). */
+export function hash(str: string): string {
   // cyrb53
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;

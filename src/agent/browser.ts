@@ -144,6 +144,7 @@ export const webcadApi = {
   },
 
   async run(ops: DocumentOp[], opts: { atomic?: boolean } = {}): Promise<RunReport> {
+    if (useDoc.getState().readOnly) throw new AgentError('A version of the document is open for viewing in the app: return to the workspace first');
     if (needsDocument(ops)) {
       // assemblies / several tabs: the whole document, as one undo step
       const doc = useDoc.getState().doc;

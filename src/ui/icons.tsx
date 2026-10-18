@@ -1033,6 +1033,14 @@ const ICONS = {
       <rect x={8} y={8} width={12} height={12} rx={1.5} fill={WHITE} />
     </>
   ),
+  /** Versions and history: a clock with the arrow turning back. */
+  history: (
+    <>
+      <path d="M4.6 9.2 A8 8 0 1 1 4 12" />
+      <path d="M2.2 7.4 L4.6 9.6 L7 7.2" />
+      <path d="M12 7.5 V12 L15 14" stroke={BLUE} strokeWidth={1.75} />
+    </>
+  ),
   lock: (
     <>
       <path d="M8 10.5 V7.5 A4 4 0 0 1 16 7.5 V10.5" />

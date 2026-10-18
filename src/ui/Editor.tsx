@@ -26,6 +26,7 @@ import { DrawingEditor } from '../drawing/DrawingEditor';
 import { Icon } from './icons';
 import { t } from '../i18n';
 import { AppSettingsItems } from './AppSettings';
+import { VersionBanner, VersionsButton } from './VersionsPanel';
 import { contextHelpPage, openHelp } from '../help/context';
 
 /** A document that is a file of a folder on the computer: its file, or a button to allow writing it again. */
@@ -76,6 +77,7 @@ function TopBar({ onBack }: { onBack: () => void }) {
       />
       <span className="save-state">{saving ? t('Saving…') : t('Saved')}</span>
       <FolderState docId={doc.id} />
+      <VersionsButton />
       <div className="spacer" />
       <button className="icon-btn" title={`${t('Help')} (F1)`} onClick={() => openHelp(contextHelpPage())}>
         <Icon name="help" size={18} />
@@ -269,6 +271,7 @@ function BottomBar() {
 
 export function Editor({ onBack }: { onBack: () => void }) {
   const doc = useDoc((s) => s.doc);
+  const readOnly = useDoc((s) => s.readOnly);
   const tab = activeTab(doc);
   const tabId = tab?.id;
   useEffect(() => {
@@ -283,15 +286,22 @@ export function Editor({ onBack }: { onBack: () => void }) {
       if (d && s) exportSketch(d, s.entities, f?.name ?? 'sketch', 'dxf');
     };
     window.addEventListener('webcad:export-sketch', onExportSketch);
-    // periodic thumbnail for the documents page
+    // an edit of a version being viewed
+    const onReadOnly = () => {
+      useEditor.setState({ editing: null, sketch: null });
+      useEditor.getState().showToast('A version is open for viewing: return to the workspace to edit', 'error');
+    };
+    window.addEventListener('webcad:read-only', onReadOnly);
+    // periodic thumbnail for the documents page (of the workspace, not of a version being viewed)
     const timer = setInterval(() => {
       const e = getEngine();
       const d = useDoc.getState().doc;
-      if (e && d && !useEditor.getState().editing) void saveThumbnail(d.id, e.thumbnail());
+      if (e && d && !useEditor.getState().editing && !useDoc.getState().readOnly) void saveThumbnail(d.id, e.thumbnail());
     }, 15000);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('webcad:export-sketch', onExportSketch);
+      window.removeEventListener('webcad:read-only', onReadOnly);
       clearInterval(timer);
     };
   }, []);
@@ -305,13 +315,14 @@ export function Editor({ onBack }: { onBack: () => void }) {
   if (!doc || !tab) return null;
   const back = () => {
     const e = getEngine();
-    if (e) void saveThumbnail(doc.id, e.thumbnail());
+    if (e && !useDoc.getState().readOnly) void saveThumbnail(doc.id, e.thumbnail());
     useEditor.setState({ editing: null, sketch: null, selection: [], build: null });
     onBack();
   };
   return (
-    <div className={'editor' + (tab.type === 'drawing' ? ' editor-drawing' : '')}>
+    <div className={'editor' + (tab.type === 'drawing' ? ' editor-drawing' : '') + (readOnly ? ' editor-viewing' : '')}>
       <TopBar onBack={back} />
+      <VersionBanner />
       {tab.type === 'partStudio' && <Toolbar />}
       {tab.type === 'assembly' && <AssemblyToolbar />}
       <div className="workspace">

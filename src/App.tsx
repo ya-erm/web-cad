@@ -4,6 +4,7 @@ import { DocumentsPage } from './ui/DocumentsPage';
 import { Editor } from './ui/Editor';
 import { requestPersistentStorage } from './store/persistence';
 import { startFolder } from './store/folderStore';
+import { startVersions } from './store/versions';
 import { TooltipLayer } from './ui/Tooltip';
 import { isHelpHash } from './help/toc';
 
@@ -25,6 +26,8 @@ export default function App() {
     void requestPersistentStorage();
     // a folder on the computer chosen earlier (Chrome / Edge): its linked documents are saved to their files
     void startFolder();
+    // versions and history of the open document
+    startVersions();
     const onHash = () => {
       setDocId(docIdFromHash());
       setHelp(isHelpHash(location.hash));

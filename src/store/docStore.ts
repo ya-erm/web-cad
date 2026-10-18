@@ -16,6 +16,10 @@ export interface DocState {
   saving: boolean;
   /** Coalesces consecutive edits with the same key into one undo step. */
   lastKey: string | null;
+  /** A version is open for viewing: no edits (switching tabs and options is fine) and nothing is saved. */
+  readOnly: boolean;
+  /** Save now what is waiting to be saved. */
+  flushSave(): Promise<void>;
 
   loadList(): Promise<void>;
   createDocument(name?: string): Promise<string>;
@@ -73,11 +77,14 @@ export const useDoc = create<DocState>()((set, get) => {
   const scheduleSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     set({ saving: true });
-    saveTimer = setTimeout(async () => {
-      const d = get().doc;
-      if (d) await db.saveDocument(d);
-      set({ saving: false });
-    }, 400);
+    saveTimer = setTimeout(save, 400);
+  };
+  const save = async () => {
+    saveTimer = null;
+    const d = get().doc;
+    // never a version being viewed over the document
+    if (d && !get().readOnly) await db.saveDocument(d);
+    set({ saving: false });
   };
 
   return {
@@ -87,6 +94,13 @@ export const useDoc = create<DocState>()((set, get) => {
     future: [],
     saving: false,
     lastKey: null,
+    readOnly: false,
+
+    async flushSave() {
+      if (!saveTimer) return;
+      clearTimeout(saveTimer);
+      await save();
+    },
 
     async loadList() {
       set({ docs: await db.listDocuments() });
@@ -102,12 +116,12 @@ export const useDoc = create<DocState>()((set, get) => {
     async openDocument(id) {
       const doc = await db.loadDocument(id);
       if (!doc) return false;
-      set({ doc, past: [], future: [], lastKey: null });
+      set({ doc, past: [], future: [], lastKey: null, readOnly: false });
       return true;
     },
 
     closeDocument() {
-      set({ doc: null, past: [], future: [] });
+      set({ doc: null, past: [], future: [], readOnly: false });
       void get().loadList();
     },
 
@@ -163,14 +177,19 @@ export const useDoc = create<DocState>()((set, get) => {
     },
 
     update(fn, opts = {}) {
-      const { doc, past, lastKey } = get();
+      const { doc, past, lastKey, readOnly } = get();
       if (!doc) return;
+      const undoable = opts.undoable !== false;
+      if (readOnly && undoable) {
+        // a version being viewed: say why nothing happens
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('webcad:read-only'));
+        return;
+      }
       const next = produce(doc, (d) => {
         fn(d);
-        d.modified = Date.now();
+        if (!readOnly) d.modified = Date.now();
       });
       if (next === doc) return;
-      const undoable = opts.undoable !== false;
       const coalesce = undoable && opts.key && opts.key === lastKey;
       set({
         doc: next,
@@ -178,20 +197,20 @@ export const useDoc = create<DocState>()((set, get) => {
         future: undoable ? [] : get().future,
         lastKey: opts.key ?? null,
       });
-      scheduleSave();
+      if (!readOnly) scheduleSave();
     },
 
     undo() {
-      const { doc, past, future } = get();
-      if (!doc || !past.length) return;
+      const { doc, past, future, readOnly } = get();
+      if (!doc || !past.length || readOnly) return;
       const prev = past[past.length - 1];
       set({ doc: { ...prev, activeTab: doc.activeTab }, past: past.slice(0, -1), future: [doc, ...future], lastKey: null });
       scheduleSave();
     },
 
     redo() {
-      const { doc, past, future } = get();
-      if (!doc || !future.length) return;
+      const { doc, past, future, readOnly } = get();
+      if (!doc || !future.length || readOnly) return;
       const next = future[0];
       set({ doc: { ...next, activeTab: doc.activeTab }, past: [...past, doc], future: future.slice(1), lastKey: null });
       scheduleSave();

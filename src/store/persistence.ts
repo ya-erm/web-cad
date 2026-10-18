@@ -1,11 +1,14 @@
 // Local persistence in IndexedDB: no accounts, everything stays in the browser.
 
-import type { CadDocument, DocumentSummary } from '../core/types';
+import type { CadDocument, DocumentSummary, DocumentVersion } from '../core/types';
 
 const DB_NAME = 'webcad';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const DOCS = 'documents';
 const SUMMARIES = 'summaries';
+/** Versions and history of the documents (`DocumentVersion`, by `docId`), and their snapshots apart (by version id). */
+const VERSIONS = 'versions';
+const VERSION_DATA = 'versionData';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -17,8 +20,17 @@ function db(): Promise<IDBDatabase> {
         const d = req.result;
         if (!d.objectStoreNames.contains(DOCS)) d.createObjectStore(DOCS, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(SUMMARIES)) d.createObjectStore(SUMMARIES, { keyPath: 'id' });
+        if (!d.objectStoreNames.contains(VERSIONS)) d.createObjectStore(VERSIONS, { keyPath: 'id' }).createIndex('docId', 'docId');
+        if (!d.objectStoreNames.contains(VERSION_DATA)) d.createObjectStore(VERSION_DATA, { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        // a newer version of the app opened in another tab: let it upgrade the database (reopened when needed)
+        req.result.onversionchange = () => {
+          req.result.close();
+          dbPromise = null;
+        };
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error);
     });
   }
@@ -84,11 +96,45 @@ export async function setTrashed(id: string, trashed: number | null): Promise<vo
   });
 }
 
-/** Permanent deletion. */
+/** Permanent deletion (with its versions and history). */
 export async function deleteDocument(id: string): Promise<void> {
-  await tx([DOCS, SUMMARIES], 'readwrite', (t) => {
+  const versions = await listVersions(id);
+  await tx([DOCS, SUMMARIES, VERSIONS, VERSION_DATA], 'readwrite', (t) => {
     t.objectStore(DOCS).delete(id);
     t.objectStore(SUMMARIES).delete(id);
+    for (const v of versions) {
+      t.objectStore(VERSIONS).delete(v.id);
+      t.objectStore(VERSION_DATA).delete(v.id);
+    }
+  });
+}
+
+/** The versions and history of a document, newest first (without their snapshots). */
+export async function listVersions(docId: string): Promise<DocumentVersion[]> {
+  const all = await tx<DocumentVersion[]>([VERSIONS], 'readonly', (t) => t.objectStore(VERSIONS).index('docId').getAll(docId));
+  return (all ?? []).sort((a, b) => b.created - a.created);
+}
+
+export async function saveVersion(version: DocumentVersion, doc: CadDocument): Promise<void> {
+  await tx([VERSIONS, VERSION_DATA], 'readwrite', (t) => {
+    t.objectStore(VERSIONS).put(version);
+    t.objectStore(VERSION_DATA).put({ id: version.id, doc });
+  });
+}
+
+/** The snapshot of a version. */
+export async function loadVersion(id: string): Promise<CadDocument | undefined> {
+  const r = await tx<{ id: string; doc: CadDocument }>([VERSION_DATA], 'readonly', (t) => t.objectStore(VERSION_DATA).get(id));
+  return r?.doc;
+}
+
+export async function deleteVersions(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await tx([VERSIONS, VERSION_DATA], 'readwrite', (t) => {
+    for (const id of ids) {
+      t.objectStore(VERSIONS).delete(id);
+      t.objectStore(VERSION_DATA).delete(id);
+    }
   });
 }
 

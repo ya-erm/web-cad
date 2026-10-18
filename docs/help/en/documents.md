@@ -48,6 +48,7 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 - All changes are saved automatically; the status is shown next to the document name: **Saved** or **Saving…**.
 - **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Y` or `Ctrl+Shift+Z`) work for the whole document. While a feature dialog is open, document undo is unavailable; a sketch has its own undo history.
 - If you reload the page in the middle of editing a sketch or feature, the unfinished work is restored.
+- The undo history lives while the document is open. To come back to a state of the document later, make a [version](versions); the autosaves of the [history](versions#history) are made by themselves.
 
 ## Project files {#project-files}
 

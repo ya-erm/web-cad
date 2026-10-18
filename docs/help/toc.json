@@ -10,6 +10,7 @@
         { "id": "getting-started", "icon": "home", "title": { "ru": "Начало работы", "en": "Getting started" } },
         { "id": "interface", "icon": "partStudio", "title": { "ru": "Интерфейс", "en": "User interface" } },
         { "id": "documents", "icon": "document", "title": { "ru": "Документы и вкладки", "en": "Documents and tabs" } },
+        { "id": "versions", "icon": "history", "title": { "ru": "Версии и история", "en": "Versions and history" } },
         { "id": "view-controls", "icon": "isoView", "title": { "ru": "Управление видом", "en": "View controls" } },
         { "id": "keyboard-shortcuts", "title": { "ru": "Горячие клавиши", "en": "Keyboard shortcuts" } }
       ]
