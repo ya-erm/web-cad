@@ -2,6 +2,7 @@
 // instances use it — structured (sub-assemblies with their parts by levels), flattened or top-level only.
 
 import type { AssemblyInstance, AssemblyTab, CadDocument } from '../core/types';
+import { inputName } from '../core/config';
 import { sourceKey, sourceMesh, type AssemblySources } from './compose';
 import { expandAssembly } from './expand';
 
@@ -55,11 +56,14 @@ function rowOf(doc: CadDocument, sources: AssemblySources, inst: AssemblyInstanc
   }
   const studio = doc.tabs.find((x) => x.id === inst.studioId);
   const meta = studio?.type === 'partStudio' ? studio.parts[inst.partId] : undefined;
-  // a variant of its own configuration: named with its options, "Plate (Large)"
+  // a variant of its own configuration: named with its options, "Plate (Large)", "Plate (#length = 50 mm)"
   const options =
     studio?.type === 'partStudio'
       ? (studio.configuration ?? []).flatMap((i) => {
-          const o = inst.configuration?.[i.id] && i.options.find((x) => x.id === inst.configuration![i.id]);
+          const v = inst.configuration?.[i.id];
+          if (!v) return [];
+          if (i.kind === 'variable') return [`${inputName(studio.features, i)} = ${v}`];
+          const o = i.options.find((x) => x.id === v);
           return o ? [o.name] : [];
         })
       : [];

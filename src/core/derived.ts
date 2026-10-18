@@ -58,11 +58,15 @@ export function studioVersion(doc: Doc, id: string, seen: string[] = []): string
   return hash(JSON.stringify([doc.units, feats, sources]));
 }
 
+/** The tab of a Part Studio built in a configuration of its own ("studio#input=option"). */
+const tabIdOf = (studioId: string) => studioId.split('#')[0];
+
 /**
  * Features of Part Studio `studioId` ready for a build: each Derived feature gets its source's builder key
  * (`keyOf`) and version, or why it cannot be built — the source is gone, or it uses this Part Studio (a cycle).
  */
 export function prepareDerived(doc: Doc, studioId: string, features: Feature[], keyOf: (id: string) => string): Feature[] {
+  studioId = tabIdOf(studioId);
   return features.map((f) => {
     if (f.type !== 'derived' || !f.params.studioId) return f;
     const src = f.params.studioId;
@@ -83,7 +87,7 @@ export function derivedBuildOrder(doc: Doc, studioId: string, features: Feature[
       if (!out.includes(id)) out.push(id);
     }
   };
-  visit(features, [studioId]);
+  visit(features, [tabIdOf(studioId)]);
   return out;
 }
 

@@ -60,6 +60,11 @@ const RU: Record<string, string> = {
   Disabled: 'Отключена',
   'Add input': 'Добавить вход',
   'Delete input': 'Удалить вход',
+  Type: 'Тип',
+  'Default value': 'По умолчанию',
+  'Rename it in its dialog in the feature list': 'Переименуйте её в её диалоге в списке фич',
+  'Its value is typed above the feature list, for an assembly instance and for a drawing view.':
+    'Значение вводится над списком фич, у экземпляра сборки и у вида чертежа.',
   Option: 'Вариант',
   'Delete option': 'Удалить вариант',
   'Show this option': 'Показать этот вариант',

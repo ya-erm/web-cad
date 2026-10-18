@@ -2,7 +2,8 @@
 // them, mate them, group them, relate mates — the same operations as the assembly tab of the app. Faces and
 // edges for mates are found with the usual queries, in assembly coordinates, on the instance's placed part.
 
-import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
+import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, ConfigInput, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
+import { chosenLabel, inputName, inputVariable } from '../core/config';
 import { uid } from '../core/ids';
 import { LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { makeEvalContext } from '../core/features';
@@ -39,14 +40,13 @@ export async function studioSources(doc: CadDocument, host: AssemblyHost): Promi
   return out;
 }
 
-/** An instance's own configuration by names: input → option. */
+/** An instance's own configuration by names: input → option (a variable input: its variable → value). */
 function configurationNames(doc: CadDocument, inst: AssemblyInstance): Record<string, string> {
   const s = doc.tabs.find((t): t is PartStudioTab => t.id === inst.studioId && t.type === 'partStudio');
   const out: Record<string, string> = {};
-  for (const [inputId, optionId] of Object.entries(inst.configuration ?? {})) {
+  for (const inputId of Object.keys(inst.configuration ?? {})) {
     const input = s?.configuration?.find((x) => x.id === inputId);
-    const o = input?.options.find((x) => x.id === optionId);
-    if (input && o) out[input.name] = o.name;
+    if (s && input) out[inputName(s.features, input).replace(/^#/, '')] = chosenLabel(s.features, input, inst.configuration);
   }
   return out;
 }
@@ -118,15 +118,24 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
     if (!i) throw new AgentError(`No instance "${n}". Instances: ${a.instances.map((x) => x.name).join(', ') || '(none)'}`);
     return i;
   };
-  /** An instance's own configuration of its Part Studio from names: input → option. */
-  const configurationOf = (inst: AssemblyInstance, names: Record<string, string>): Record<string, string> => {
+  /** An instance's own configuration of its Part Studio from names: input → option (a variable input: its value). */
+  const configurationOf = (inst: AssemblyInstance, names: Record<string, string | number>): Record<string, string> => {
     if (inst.assemblyId) throw new AgentError('"configuration" is for an instance of a part');
     const s = d.tabs.find((t): t is PartStudioTab => t.id === inst.studioId && t.type === 'partStudio');
     const inputs = s?.configuration ?? [];
+    const label = (x: ConfigInput) => (s ? inputName(s.features, x) : x.name);
     const out: Record<string, string> = {};
-    for (const [inputName, optionName] of Object.entries(names)) {
-      const input = inputs.find((x) => x.name === inputName) ?? inputs.find((x) => x.name.toLowerCase() === inputName.toLowerCase());
-      if (!input) throw new AgentError(`No configuration "${inputName}" in ${s?.name ?? 'the Part Studio'}. Configurations: ${inputs.map((x) => x.name).join(', ') || '(none)'}`);
+    for (const [name, optionName] of Object.entries(names)) {
+      const n = name.replace(/^#/, '').toLowerCase();
+      const input = inputs.find((x) => x.name === name) ?? inputs.find((x) => x.name.toLowerCase() === n || label(x).replace(/^#/, '').toLowerCase() === n);
+      if (!input) throw new AgentError(`No configuration "${name}" in ${s?.name ?? 'the Part Studio'}. Configurations: ${inputs.map(label).join(', ') || '(none)'}`);
+      const v = s && inputVariable(s.features, input);
+      if (v) {
+        // a variable: any value of its type, a bare number in the document's units
+        const type = v.params.varType ?? 'any';
+        out[input.id] = typeof optionName === 'number' && type !== 'any' && type !== 'number' ? `${optionName} ${type === 'angle' ? 'deg' : d.units.length}` : String(optionName);
+        continue;
+      }
       const o = input.options.find((x) => x.name === optionName) ?? input.options.find((x) => x.name.toLowerCase() === String(optionName).toLowerCase());
       if (!o) throw new AgentError(`No option "${optionName}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
       out[input.id] = o.id;

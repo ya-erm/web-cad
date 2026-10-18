@@ -3,7 +3,7 @@ import type { Draft } from 'immer';
 import type { ConfigInput, Feature, FeatureType, PartStudioTab, SelRef } from '../core/types';
 import { FIELD_SPECS } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
-import { chosenOption, configuredOf, configuredParams } from '../core/config';
+import { chosenLabel, configuredOf, configuredParams, inputName } from '../core/config';
 import { derivableStudios } from '../core/derived';
 import { sourcePartList } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
@@ -352,9 +352,8 @@ export function FeatureDialog() {
   const configured = studio ? configuredParams(studio, draft.id) : new Map<string, ConfigInput>();
   const configMark = (key: string) => {
     const input = configured.get(key);
-    const opt = input && chosenOption(input, studio?.configChoice);
-    return input && opt ? (
-      <span className="cfg-mark" title={`${t('Set by the configuration')} «${input.name}»: ${opt.name}`}>
+    return input && studio ? (
+      <span className="cfg-mark" title={`${t('Set by the configuration')} «${inputName(studio.features, input)}»: ${chosenLabel(studio.features, input, studio.configChoice)}`}>
         <Icon name="layers" size={13} />
       </span>
     ) : null;

@@ -1,8 +1,8 @@
 // Assembly tab UI (Onshape-like): Insert, the Instances list, and the placement of the selected instance.
 
 import { useEffect, useState } from 'react';
-import { chosenOption } from '../core/config';
 import { create } from 'zustand';
+import { ConfigurationFields } from '../ui/ConfigurationFields';
 import type { AssemblyInstance, AssemblyTab, CadDocument, PartStudioTab, SelRef, Vec3 } from '../core/types';
 import type { PartMesh } from '../kernel/protocol';
 import { activeAssembly, useDoc, withAssembly } from '../store/docStore';
@@ -498,34 +498,16 @@ export function InstancePanel() {
           // its own configuration of the Part Studio (Onshape): an input left as in the Part Studio follows it
           <>
             <div className="fd-section">{t('Configuration')}</div>
-            {source.configuration.map((input) => (
-              <div className="fd-row fd-stacked" key={input.id}>
-                <label>{input.name}</label>
-                <div className="fd-control">
-                  <select
-                    value={inst.configuration?.[input.id] ?? ''}
-                    onChange={(e) =>
-                      set((i) => {
-                        const c = { ...i.configuration };
-                        if (e.target.value) c[input.id] = e.target.value;
-                        else delete c[input.id];
-                        if (Object.keys(c).length) i.configuration = c;
-                        else delete i.configuration;
-                      })
-                    }
-                  >
-                    <option value="">
-                      {t('As in the Part Studio')} ({chosenOption(input, source.configChoice)?.name})
-                    </option>
-                    {input.options.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ))}
+            <ConfigurationFields
+              studio={source}
+              value={inst.configuration}
+              onChange={(c) =>
+                set((i) => {
+                  if (c) i.configuration = c;
+                  else delete i.configuration;
+                })
+              }
+            />
           </>
         )}
         {part ? (

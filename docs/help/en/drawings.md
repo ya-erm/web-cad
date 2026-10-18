@@ -52,7 +52,7 @@ Click the title block at the bottom right of the sheet, or **Title block** in th
 
 - The **Views** list shows all views and their scale. Click a view in the list or on the sheet to select it.
 - Drag views with the mouse. Projected views stay aligned with their parent view.
-- **View properties**: **Orientation**, **Scale** (also changes linked projected views at once), **Show hidden lines**, **Label**, **Delete view**.
+- **View properties**: **Orientation**, **Scale** (also changes linked projected views at once), **Show hidden lines**, **Configuration** (when the Part Studio has a [configuration](configurations#uses): the view's own variant, also together with its linked projected views), **Label**, **Delete view**.
 
 ## Dimensions and notes {#annotations}
 

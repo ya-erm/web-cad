@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { CadDocument, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
+import type { CadDocument, ConfigInput, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
 import { uid } from '../core/ids';
-import { configuredFeatures } from '../core/config';
+import { chosenLabel, configuredFeatures, inputName, variantStudio } from '../core/config';
+import { ConfigurationFields } from '../ui/ConfigurationFields';
 import { derivedBuildOrder, derivedInputs, studioVersion } from '../core/derived';
 import { withDerivedSources } from '../store/rebuild';
 import { LENGTH_FACTOR } from '../core/expr';
@@ -74,6 +75,15 @@ function viewKey(v: DrawingView, studio: PartStudioTab, doc?: CadDocument) {
   return `${studioKeyOf(studio, doc)}|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`;
 }
 
+/** The Part Studio of a view as the view's own configuration has it (its id: the variant's key). */
+function viewStudio(doc: CadDocument, v: DrawingView): PartStudioTab | undefined {
+  const studio = doc.tabs.find((x) => x.id === v.studioId);
+  return studio?.type === 'partStudio' ? variantStudio(studio, v.configuration) : undefined;
+}
+
+/** A view and the views projected with it (its parent, the parent's other views): they share scale and configuration. */
+const sameFamily = (a: DrawingView, b: DrawingView) => a.id === b.id || a.parent === b.id || b.parent === a.id || (!!a.parent && a.parent === b.parent);
+
 function useProjections(doc: CadDocument, drawing: DrawingData) {
   const [, force] = useState(0);
   const pending = useRef(new Set<string>());
@@ -81,8 +91,8 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
     (async () => {
       await kernel().ready();
       for (const v of drawing.views) {
-        const studio = doc.tabs.find((x) => x.id === v.studioId) as PartStudioTab | undefined;
-        if (!studio || studio.type !== 'partStudio') continue;
+        const studio = viewStudio(doc, v);
+        if (!studio) continue;
         const key = viewKey(v, studio, doc);
         if (projCache.has(key) || pending.current.has(key)) continue;
         pending.current.add(key);
@@ -101,8 +111,8 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
     })();
   }, [doc, drawing.views]);
   return (v: DrawingView): ProjectionData | undefined => {
-    const studio = doc.tabs.find((x) => x.id === v.studioId) as PartStudioTab | undefined;
-    if (!studio || studio.type !== 'partStudio') return undefined;
+    const studio = viewStudio(doc, v);
+    if (!studio) return undefined;
     const exact = projCache.get(viewKey(v, studio, doc));
     if (exact) return exact;
     // stale projection of the same view while the new one is computed
@@ -685,6 +695,14 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   }
   const snapHint = tool === 'dimension' && cursor ? snapPoint(cursor) : null;
   const selView = selected?.kind === 'view' ? d.views.find((v) => v.id === selected.id) : undefined;
+  const studioOf = (v: DrawingView) => doc.tabs.find((x): x is PartStudioTab => x.id === v.studioId && x.type === 'partStudio');
+  const selStudio = selView && studioOf(selView);
+  /** A view's own options in the list of views: "Front · 1:2 · Large · #len = 50 mm". */
+  const viewOptions = (v: DrawingView) => {
+    const s = studioOf(v);
+    const label = (i: ConfigInput) => (i.kind === 'variable' ? `${inputName(s!.features, i)} = ` : '') + chosenLabel(s!.features, i, v.configuration);
+    return s ? (s.configuration ?? []).filter((i) => v.configuration?.[i.id]).map(label) : [];
+  };
 
   // sheet → screen transform for the svg group
   const tx = size.w / 2 - c.x * c.zoom;
@@ -747,7 +765,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                 <Icon name={v.orientation === 'iso' ? 'isoView' : 'drawingView'} size={16} />
               </span>
               <span className="tree-name">
-                {t(VIEW_NAMES[v.orientation])} · {scaleLabel(v.scale)}
+                {[t(VIEW_NAMES[v.orientation]), scaleLabel(v.scale), ...viewOptions(v)].join(' · ')}
               </span>
             </div>
           ))}
@@ -776,7 +794,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                     onChange={(e) =>
                       upd((dd) => {
                         const s = Number(e.target.value);
-                        for (const v of dd.views) if (v.id === selView.id || v.parent === selView.id || (selView.parent && (v.id === selView.parent || v.parent === selView.parent))) v.scale = s;
+                        for (const v of dd.views) if (sameFamily(v, selView)) v.scale = s;
                       })
                     }
                   >
@@ -792,6 +810,25 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                 <input type="checkbox" checked={selView.showHidden} onChange={(e) => upd((dd) => void (dd.views.find((x) => x.id === selView.id)!.showHidden = e.target.checked))} />
                 {t('Show hidden lines')}
               </label>
+              {selStudio?.configuration?.length ? (
+                // its own configuration of the Part Studio (Onshape): the views projected with it follow
+                <>
+                  <div className="fd-section">{t('Configuration')}</div>
+                  <ConfigurationFields
+                    studio={selStudio}
+                    value={selView.configuration}
+                    onChange={(c) =>
+                      upd((dd) => {
+                        for (const v of dd.views)
+                          if (sameFamily(v, selView)) {
+                            if (c) v.configuration = c;
+                            else delete v.configuration;
+                          }
+                      })
+                    }
+                  />
+                </>
+              ) : null}
               <div className="fd-row">
                 <label>{t('Label')}</label>
                 <div className="fd-control">

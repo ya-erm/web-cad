@@ -120,6 +120,34 @@ describe('agent API', () => {
     expect(r4.assembly!.instances[1].bboxMax).toEqual([20, 115, 10]);
   }, 90000);
 
+  it('a variable input: any value, in the Part Studio and for each assembly instance', async () => {
+    const s = await session();
+    const r1 = await s.run([
+      // the variable first: the sketch uses it
+      { op: 'configuration', name: 'len', variable: { value: 40 } },
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: '#len', h: 20 }] },
+      { op: 'extrude', depth: 5 },
+      { op: 'part', part: 'Part 1', name: 'Bar' },
+    ]);
+    expect(r1.error).toBeUndefined();
+    expect(r1.model!.configuration).toEqual([{ name: 'len', options: [], chosen: '40 mm', params: ['#len'], variable: true }]);
+    expect(r1.model!.features[0]).toMatchObject({ type: 'variable' });
+    expect(r1.model!.parts[0].size).toEqual([40, 20, 5]);
+    expect((await s.run([{ op: 'configure', values: { len: 65 } }])).model!.parts[0].size).toEqual([65, 20, 5]);
+    // "" — the variable's own value again
+    expect((await s.run([{ op: 'configure', values: { '#len': '' } }])).model!.parts[0].size).toEqual([40, 20, 5]);
+    const r2 = await s.run([
+      { op: 'assembly', name: 'Rack' },
+      { op: 'insert', part: 'Bar', name: 'A', position: [0, 0, 0], fixed: true },
+      { op: 'insert', part: 'Bar', name: 'B', position: [0, 50, 0], configuration: { len: 90 } },
+    ]);
+    expect(r2.error).toBeUndefined();
+    const [a, b] = r2.assembly!.instances;
+    expect(a.bboxMax![0] - a.bboxMin![0]).toBeCloseTo(40, 6);
+    expect(b.configuration).toEqual({ len: '90 mm' });
+    expect(b.bboxMax![0] - b.bboxMin![0]).toBeCloseTo(90, 6);
+  }, 90000);
+
   it('reports bad queries without changing the document', async () => {
     const s = await session();
     await s.run([{ op: 'sketch', shapes: [{ type: 'rect', w: 20, h: 20 }] }, { op: 'extrude', depth: 5 }]);

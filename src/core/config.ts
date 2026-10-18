@@ -1,8 +1,9 @@
 // Configurations (Onshape): variants of a Part Studio from a table. Each input is a list of options (rows); the
 // chosen option sets the configured parameters (columns) of the features — an expression or a checkbox of a
-// feature, its suppression, a variable's value. What is built is the features as the chosen options have them.
+// feature, its suppression, a variable's value. A variable input sets one variable to any value typed for it.
+// What is built is the features as the chosen options have them.
 
-import type { ConfigInput, Feature, PartStudioTab } from './types';
+import type { AssemblyInstance, ConfigInput, Feature, FeatureOf, PartStudioTab } from './types';
 
 /** A configured parameter: `featureId/param`; `featureId/suppressed` — whether the feature is suppressed. */
 export const configKey = (featureId: string, param: string) => `${featureId}/${param}`;
@@ -14,9 +15,40 @@ export function splitConfigKey(key: string): { featureId: string; param: string 
 
 type Configured = Pick<PartStudioTab, 'features' | 'configuration' | 'configChoice'>;
 
-/** The option of `input` chosen in `choice` (the first one by default). */
+/** The option of `input` chosen in `choice` (the first one by default; a variable input has none). */
 export function chosenOption(input: ConfigInput, choice?: Record<string, string>) {
   return input.options.find((o) => o.id === choice?.[input.id]) ?? input.options[0];
+}
+
+/** The variable feature a variable input sets. */
+export function inputVariable(features: Feature[], input: ConfigInput): FeatureOf<'variable'> | undefined {
+  if (input.kind !== 'variable' || !input.params[0]) return undefined;
+  const id = splitConfigKey(input.params[0]).featureId;
+  return features.find((f): f is FeatureOf<'variable'> => f.id === id && f.type === 'variable');
+}
+
+/** An input's name: a variable input is its variable, "#length". */
+export function inputName(features: Feature[], input: ConfigInput): string {
+  const v = inputVariable(features, input);
+  return v ? `#${v.params.name}` : input.name;
+}
+
+/** What `choice` makes of an input, for people: the option's name, a variable input's value (its own by default). */
+export function chosenLabel(features: Feature[], input: ConfigInput, choice?: Record<string, string>): string {
+  if (input.kind === 'variable') return choice?.[input.id] || (inputVariable(features, input)?.params.value ?? '');
+  return chosenOption(input, choice)?.name ?? '';
+}
+
+/** The key of a Part Studio as a configuration of its own builds it: "studio#input=option,…" (the id alone without one). */
+export function sourceKey(inst: Pick<AssemblyInstance, 'studioId' | 'configuration'>): string {
+  const pairs = Object.entries(inst.configuration ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return pairs.length ? `${inst.studioId}#${pairs.map(([k, v]) => `${k}=${v}`).join(',')}` : inst.studioId;
+}
+
+/** A Part Studio as an instance's (a drawing view's) own configuration builds it (its id: the source key). */
+export function variantStudio(studio: PartStudioTab, configuration?: Record<string, string>): PartStudioTab {
+  if (!configuration || !Object.keys(configuration).length) return studio;
+  return { ...studio, id: sourceKey({ studioId: studio.id, configuration }), configChoice: { ...studio.configChoice, ...configuration } };
 }
 
 /** A sketch dimension as a configured parameter: `dim:<constraint id>`. */
@@ -34,6 +66,15 @@ export function ownValue(f: Feature, param: string): string | undefined {
 export function configOverrides(inputs: ConfigInput[] | undefined, choice?: Record<string, string>): Map<string, Record<string, string>> {
   const out = new Map<string, Record<string, string>>();
   for (const input of inputs ?? []) {
+    if (input.kind === 'variable') {
+      // the value typed for the variable (none: its own)
+      const v = choice?.[input.id];
+      if (v && input.params[0]) {
+        const { featureId, param } = splitConfigKey(input.params[0]);
+        out.set(featureId, { ...out.get(featureId), [param]: v });
+      }
+      continue;
+    }
     const opt = chosenOption(input, choice);
     const cells = opt ? input.values[opt.id] : undefined;
     if (!cells) continue;
@@ -88,11 +129,16 @@ function owner(studio: Configured, key: string): ConfigInput | undefined {
 
 /**
  * Set a parameter by hand (in a dialog, the feature list, the variable table): a configured one goes into the
- * chosen option's cell — in a draft of the studio. False when it is not configured (set the feature itself).
+ * chosen option's cell (a variable input's: its value now) — in a draft of the studio. False when it is not
+ * configured (set the feature itself).
  */
 export function setConfigured(studio: Configured, featureId: string, param: string, value: string): boolean {
   const key = configKey(featureId, param);
   const input = owner(studio, key);
+  if (input?.kind === 'variable') {
+    studio.configChoice = { ...studio.configChoice, [input.id]: value };
+    return true;
+  }
   const opt = input && chosenOption(input, studio.configChoice);
   if (!input || !opt) return false;
   input.values[opt.id] = { ...input.values[opt.id], [key]: value };
@@ -130,7 +176,7 @@ export function commitConfigured(studio: Configured, original: Feature, draft: F
   return out;
 }
 
-/** Drop the configured parameters of features that are gone. */
+/** Drop the configured parameters of features that are gone (and the variable inputs of variables that are). */
 export function pruneConfiguration(studio: Configured) {
   const ids = new Set(studio.features.map((f) => f.id));
   for (const input of studio.configuration ?? []) {
@@ -139,4 +185,9 @@ export function pruneConfiguration(studio: Configured) {
     input.params = input.params.filter((k) => !gone.includes(k));
     for (const cells of Object.values(input.values)) for (const k of gone) delete cells[k];
   }
+  const orphans = (studio.configuration ?? []).filter((i) => i.kind === 'variable' && !i.params.length);
+  if (!orphans.length) return;
+  studio.configuration = studio.configuration!.filter((i) => !orphans.includes(i));
+  if (studio.configChoice) for (const i of orphans) delete studio.configChoice[i.id];
+  if (!studio.configuration.length) delete studio.configuration;
 }

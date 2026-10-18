@@ -542,6 +542,8 @@ export interface DrawingView {
   /** For projected views: the parent view they stay aligned with. */
   parent?: string;
   label?: string;
+  /** The view's own configuration of the Part Studio: input id → option id (a variable input: its value). */
+  configuration?: Record<string, string>;
 }
 
 export interface DrawingDimension {
@@ -624,7 +626,7 @@ export interface PartStudioTab {
   folders?: FeatureFolder[];
   /** Configurations (Onshape): inputs whose chosen options set configured parameters of the features. */
   configuration?: ConfigInput[];
-  /** The chosen option of each configuration input (by ids; the first option when missing). */
+  /** The chosen option of each configuration input (by ids; the first option when missing; a variable input: its value). */
   configChoice?: Record<string, string>;
 }
 
@@ -636,8 +638,12 @@ export interface PartStudioTab {
 export interface ConfigInput {
   id: string;
   name: string;
-  /** A list (options in rows), or a checkbox (Onshape Checkbox input): two options — off and on. */
-  kind?: 'list' | 'checkbox';
+  /**
+   * A list (options in rows), a checkbox (Onshape Checkbox input): two options — off and on, or a variable (Onshape
+   * Configuration variable): a variable feature of the studio (its value is `params[0]`) whose value is typed in
+   * the choice — any expression, not one of options; none typed: the variable's own value.
+   */
+  kind?: 'list' | 'checkbox' | 'variable';
   options: { id: string; name: string }[];
   params: string[];
   /** Cells: option id → parameter → value (an expression; 'true' / 'false'). A missing cell keeps the feature's own value. */
@@ -667,8 +673,8 @@ export interface AssemblyInstance {
   flexible?: boolean;
   flex?: Record<string, { position: Vec3; rotation: Vec3 }>;
   /**
-   * Its own configuration of the Part Studio (Onshape): input id → option id; the inputs it does not set follow
-   * the option chosen in the Part Studio.
+   * Its own configuration of the Part Studio (Onshape): input id → option id (a variable input: its value); the
+   * inputs it does not set follow the option chosen in the Part Studio.
    */
   configuration?: Record<string, string>;
   /** Placement of the part's studio coordinates: translation (document length units in mm) and rotation. */

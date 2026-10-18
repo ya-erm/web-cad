@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { produce } from 'immer';
 import type { ConfigInput, Feature, PartStudioTab } from './types';
-import { commitConfigured, configKey, configuredFeatures, DIM, pruneConfiguration, setConfigured } from './config';
+import { chosenLabel, commitConfigured, configKey, configuredFeatures, DIM, inputName, pruneConfiguration, setConfigured, sourceKey, variantStudio } from './config';
 
 const extrude = { id: 'e', type: 'extrude', name: 'Extrude 1', params: { depth: '10 mm', thin: false } } as unknown as Feature;
 const fillet = { id: 'f', type: 'fillet', name: 'Fillet 1', params: { radius: '3 mm' } } as unknown as Feature;
@@ -87,5 +87,33 @@ describe('configurations', () => {
     });
     expect(dim(next.features[0])).toBe('40 mm');
     expect(next.configuration![0].values.v[`sk/${DIM}c1`]).toBe('90 mm');
+  });
+
+  it('a variable input: any value typed for it, its own by default; an edit sets the value; gone with its variable', () => {
+    const len = { id: 'v', type: 'variable', name: 'Variable 1', params: { name: 'len', value: '40 mm', description: '', varType: 'length' } } as Feature;
+    const input: ConfigInput = { id: 'cv', name: 'len', kind: 'variable', options: [], params: [configKey('v', 'value')], values: {} };
+    const s = { id: 'ps', type: 'partStudio', name: 'PS', features: [len, extrude], rollback: null, parts: {}, configuration: [input] } as unknown as PartStudioTab;
+    const value = (f: Feature) => (f.type === 'variable' ? f.params.value : undefined);
+    expect(value(configuredFeatures(s)[0])).toBe('40 mm');
+    expect(value(configuredFeatures(s, { cv: '65 mm' })[0])).toBe('65 mm');
+    expect(inputName(s.features, input)).toBe('#len');
+    expect(chosenLabel(s.features, input)).toBe('40 mm');
+    expect(chosenLabel(s.features, input, { cv: '65 mm' })).toBe('65 mm');
+    // an instance's (a view's) own value: a variant of its own
+    const v = variantStudio(s, { cv: '70 mm' });
+    expect(v.id).toBe('ps#cv=70 mm');
+    expect(sourceKey({ studioId: 'ps', configuration: { cv: '70 mm' } })).toBe(v.id);
+    expect(value(configuredFeatures(v)[0])).toBe('70 mm');
+    // typed in the variable table: the value now, the variable keeps its own
+    const typed = produce(s, (d) => void setConfigured(d, 'v', 'value', '50 mm'));
+    expect(typed.configChoice).toEqual({ cv: '50 mm' });
+    expect(value(typed.features[0])).toBe('40 mm');
+    // the variable deleted: its input goes too
+    const pruned = produce(typed, (d) => {
+      d.features = d.features.filter((f) => f.id !== 'v');
+      pruneConfiguration(d);
+    });
+    expect(pruned.configuration).toBeUndefined();
+    expect(pruned.configChoice).toEqual({});
   });
 });

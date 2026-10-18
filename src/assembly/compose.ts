@@ -2,8 +2,9 @@
 // assembly as an ordinary build result whose "parts" are the instances (meshes moved into place),
 // so selection, highlighting and the camera work as in a Part Studio.
 
-import type { AssemblyInstance, AssemblyTab, PartStudioTab, Vec3 } from '../core/types';
+import type { AssemblyInstance, AssemblyTab, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, MateResult, PartMesh } from '../kernel/protocol';
+import { sourceKey, variantStudio } from '../core/config';
 import { expandAssembly } from './expand';
 
 /** Rigid placement: p' = R·p + t (R row-major 3×3). */
@@ -134,18 +135,9 @@ export type AssemblySources = Map<string, StudioData>;
 
 /**
  * The source of an instance: its Part Studio's id, or — when the instance chooses configuration options of its
- * own — that variant of it: `studio#input=option,…`.
+ * own — that variant of it: `studio#input=option,…` (`variantStudio` builds it).
  */
-export function sourceKey(inst: Pick<AssemblyInstance, 'studioId' | 'configuration'>): string {
-  const pairs = Object.entries(inst.configuration ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return pairs.length ? `${inst.studioId}#${pairs.map(([k, v]) => `${k}=${v}`).join(',')}` : inst.studioId;
-}
-
-/** A Part Studio as an instance's own configuration builds it (its id: the instance's source key). */
-export function variantStudio(studio: PartStudioTab, configuration?: Record<string, string>): PartStudioTab {
-  if (!configuration || !Object.keys(configuration).length) return studio;
-  return { ...studio, id: sourceKey({ studioId: studio.id, configuration }), configChoice: { ...studio.configChoice, ...configuration } };
-}
+export { sourceKey, variantStudio };
 
 export const sourceMesh = (sources: AssemblySources, inst: Pick<AssemblyInstance, 'studioId' | 'partId' | 'configuration'>) => sources.get(sourceKey(inst))?.parts.get(inst.partId);
 

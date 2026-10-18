@@ -2,7 +2,7 @@
 // are resolved against the model built just before the feature that uses them, so references
 // carry the same persistent signatures as picks made in the UI.
 
-import type { CadDocument, ConfigInput, Feature, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
+import type { CadDocument, ConfigInput, Feature, FeatureOf, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, PartMesh } from '../kernel/protocol';
 import { collectVariables, defaultParams, FEATURE_LABELS, isDimension, makeEvalContext, nextFeatureName } from '../core/features';
 import { formatQuantity, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
@@ -10,7 +10,7 @@ import { uid } from '../core/ids';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { computeRegions, regionAt, type SketchRegion } from '../sketch/regions';
 import { pointInPolygon } from '../sketch/curves';
-import { chosenOption, configKey, configuredFeatures, DIM, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
+import { chosenLabel, configKey, configuredFeatures, DIM, inputName, inputVariable, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
 import { derivesFrom } from '../core/derived';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
@@ -154,6 +154,23 @@ class Runner {
     if (typeof v === 'number') return kind === 'length' ? `${v} ${this.units.length}` : kind === 'angle' ? `${v} deg` : `${v}`;
     if (tryEvaluate(v, kind, this.ctx()) === null) throw new AgentError(`Invalid ${kind} expression "${v}"`);
     return v;
+  }
+
+  /** A value for a variable of its type (a bare number takes the document's units; "any" — as it is). */
+  varValue(v: FeatureOf<'variable'>, value: Num): string {
+    const type = v.params.varType ?? 'any';
+    return type === 'any' ? String(value) : this.expr(value, type, v.params.value);
+  }
+
+  /** A configuration input by name (a variable input: by its variable's name too, with or without "#"). */
+  input(name: string): ConfigInput {
+    const inputs = this.s.configuration ?? [];
+    const n = name.replace(/^#/, '').toLowerCase();
+    const input =
+      inputs.find((x) => x.name === name) ??
+      inputs.find((x) => x.name.toLowerCase() === n || inputName(this.s.features, x).slice(1).toLowerCase() === n);
+    if (!input) throw new AgentError(`No configuration "${name}". Configurations: ${inputs.map((x) => (x.kind === 'variable' ? inputName(this.s.features, x) : x.name)).join(', ') || '(none)'}`);
+    return input;
   }
 
   /** Query coordinate (document units) in mm. */
@@ -835,6 +852,25 @@ class Runner {
         return;
       }
       case 'configuration': {
+        if (op.variable) {
+          // a variable input: the variable (made at the top of the list, so every feature can use it)
+          const name = op.name.replace(/^#/, '');
+          if (!/^[A-Za-z_]\w*$/.test(name)) throw new AgentError(`"${op.name}" is not a variable name`);
+          let v = this.s.features.find((f): f is FeatureOf<'variable'> => f.type === 'variable' && f.params.name === name);
+          if (!v) {
+            v = { id: uid('f'), type: 'variable', name: nextFeatureName(this.s.features, 'variable'), params: { ...defaultParams('variable'), name, value: '10 mm', varType: 'length' } };
+            this.s.features.unshift(v);
+            if (this.s.rollback !== null) this.s.rollback++;
+          }
+          if (op.variable.type) v.params.varType = op.variable.type;
+          if (op.variable.value !== undefined) v.params.value = this.varValue(v, op.variable.value);
+          const key = configKey(v.id, 'value');
+          const old = this.s.configuration?.find((x) => x.kind === 'variable' && x.params[0] === key);
+          const input: ConfigInput = { id: old?.id ?? uid('ci'), name, kind: 'variable', options: [], params: [key], values: {} };
+          const inputs = this.s.configuration ?? [];
+          this.s.configuration = old ? inputs.map((x) => (x === old ? input : x)) : [...inputs, input];
+          return;
+        }
         // a checkbox input: two options, off and on
         const options = op.checkbox ? (op.options?.length ? op.options : ['Off', 'On']) : op.options;
         if (op.checkbox && options?.length !== 2) throw new AgentError('A checkbox configuration has two options: off and on');
@@ -883,15 +919,22 @@ class Runner {
       case 'configure': {
         const choice = { ...this.s.configChoice };
         for (const [name, option] of Object.entries(op.values ?? {})) {
-          const input = this.s.configuration?.find((x) => x.name === name || x.name.toLowerCase() === name.toLowerCase());
-          if (!input) throw new AgentError(`No configuration "${name}". Configurations: ${(this.s.configuration ?? []).map((x) => x.name).join(', ') || '(none)'}`);
+          const input = this.input(name);
+          if (input.kind === 'variable') {
+            // a variable input: any value of its type ("" — its own)
+            const v = inputVariable(this.s.features, input);
+            if (!v || typeof option === 'boolean') throw new AgentError(`"${name}" is a variable: give it a value`);
+            if (option === '') delete choice[input.id];
+            else choice[input.id] = this.varValue(v, option);
+            continue;
+          }
           // a checkbox input: true — on (its second option), false — off
           const o =
             typeof option === 'boolean'
               ? input.kind === 'checkbox'
                 ? input.options[option ? 1 : 0]
                 : undefined
-              : input.options.find((x) => x.name === option || x.name.toLowerCase() === option.toLowerCase());
+              : input.options.find((x) => x.name === String(option) || x.name.toLowerCase() === String(option).toLowerCase());
           if (!o) throw new AgentError(`No option "${option}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
           choice[input.id] = o.id;
         }
@@ -975,11 +1018,13 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
     units: { length: units.length, angle: units.angle },
     ...(studio.configuration?.length
       ? {
+          // a variable input: its variable's name and value now
           configuration: studio.configuration.map((i) => ({
-            name: i.name,
+            name: i.kind === 'variable' ? inputName(studio.features, i).replace(/^#/, '') : i.name,
             options: i.options.map((o) => o.name),
-            chosen: chosenOption(i, studio.configChoice)?.name ?? '',
+            chosen: chosenLabel(studio.features, i, studio.configChoice),
             params: i.params.map(paramName),
+            ...(i.kind === 'variable' ? { variable: true as const } : {}),
           })),
         }
       : {}),

@@ -65,8 +65,10 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 - **Конфигурации** (`configuration`, `configure`): модель строится в выбранном варианте; `set`, `setVariable`
   и `suppress` для параметра, который задаёт конфигурация, пишут в ячейку выбранного варианта. Отчёт
   содержит `configuration: [{name, options, chosen, params}]` (`params` — `"Extrude 1.depth"`, `"#w"`,
-  `"Sketch 1.dimension 2"`). Экземпляр сборки может взять свой вариант: `insert` / `place` с
-  `configuration: {"Size":"Large"}`.
+  `"Sketch 1.dimension 2"`; у входа-переменной `variable: true`, `chosen` — её значение). Экземпляр сборки
+  может взять свой вариант: `insert` / `place` с `configuration: {"Size":"Large","len":500}`. Вход-переменная:
+  `[{"op":"configuration","name":"len","variable":{"value":40}},{"op":"sketch","shapes":[{"type":"rect","w":"#len","h":20}]},…]`
+  и `{"op":"configure","values":{"len":65}}` (`""` — значение по умолчанию).
 - Оси мира как в Onshape: Top = XY (нормаль +Z), Front = XZ (x эскиза = +X, y эскиза = +Z),
   Right = YZ (x эскиза = +Y, y эскиза = +Z). Отчёт `state` показывает систему координат каждого
   эскиза (`origin`, `xDir`, `yDir`, `normal`) — в том числе эскизов на гранях.
@@ -99,8 +101,8 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `derived` | `studio` — имя другой Part Studio документа, `parts?` — имена её деталей (по умолчанию все), `name?`. Детали встают там же, где в источнике, и следуют за его изменениями (Onshape Derived); источник, который сам использует текущую студию, — ошибка «circular reference» |
 | `set` | `feature`, `params` — изменить параметры существующей фичи (например `{"depth":"20 mm"}`) |
 | `delete` / `rename` (`to`) / `suppress` (`value?`) | `feature` |
-| `configuration` | `name`, `options` (имена вариантов, первый — по умолчанию), `checkbox?` (вход-флажок: два варианта, «выключен» и «включён», по умолчанию `Off` / `On`), `params?` — столбцы: `{"feature":"Extrude 1","param":"depth"}` (поле диалога; без `param` — `suppressed`, отключена ли фича), `{"feature":"Sketch 1","dimension":2}` (размер эскиза по номеру, с 1 в порядке создания) или `{"variable":"w"}`; `values?` `{"Large":[80,"25 mm",true]}` — по значению на столбец (`null` — значение самой фичи). Заменяет вход с тем же именем |
-| `configure` | `values` `{"Size":"Large","Lid":true}` — выбрать варианты входов (флажок — `true` / `false` или имя варианта) |
+| `configuration` | `name`, `options` (имена вариантов, первый — по умолчанию), `checkbox?` (вход-флажок: два варианта, «выключен» и «включён», по умолчанию `Off` / `On`), `params?` — столбцы: `{"feature":"Extrude 1","param":"depth"}` (поле диалога; без `param` — `suppressed`, отключена ли фича), `{"feature":"Sketch 1","dimension":2}` (размер эскиза по номеру, с 1 в порядке создания) или `{"variable":"w"}`; `values?` `{"Large":[80,"25 mm",true]}` — по значению на столбец (`null` — значение самой фичи). Заменяет вход с тем же именем. Вместо вариантов — `variable?` `{"value":40,"type":"length"}`: вход-переменная `#name` с любым значением (переменная создаётся в начале списка фич, если её нет; `value` — значение по умолчанию; `type` — `length`/`angle`/`number`/`any`) |
+| `configure` | `values` `{"Size":"Large","Lid":true,"len":65}` — выбрать варианты входов (флажок — `true` / `false` или имя варианта; переменная — значение, `""` — по умолчанию) |
 
 `regions`: `"auto"` (по умолчанию — все замкнутые области, кроме «островов» внутри отверстий),
 `"all"` или список точек `[[x, y], …]` в координатах эскиза — берутся области, содержащие точки.
@@ -218,7 +220,7 @@ Part Studio. Всё по-прежнему применяется одним ша
 | --- | --- |
 | `assembly` | `name?` — открыть вкладку сборки с этим именем или создать её |
 | `studio` | `name?` — открыть Part Studio с этим именем или создать её |
-| `insert` | `part` (имя детали) и `studio?` (Part Studio, если деталь с таким именем есть в нескольких) — или `assembly` (вставить сборку как подсборку); `name?` (по умолчанию «Pin <1>»), `position?` `[x, y, z]`, `rotation?` `[rx, ry, rz]` (градусы вокруг X, затем Y, затем Z), `fixed?`, `flexible?` (подсборка гибкая: её детали движутся по её сопряжениям), `configuration?` `{"Size":"Large"}` — свой вариант конфигурации Part Studio (входы, которых нет, — как выбрано в Part Studio) |
+| `insert` | `part` (имя детали) и `studio?` (Part Studio, если деталь с таким именем есть в нескольких) — или `assembly` (вставить сборку как подсборку); `name?` (по умолчанию «Pin <1>»), `position?` `[x, y, z]`, `rotation?` `[rx, ry, rz]` (градусы вокруг X, затем Y, затем Z), `fixed?`, `flexible?` (подсборка гибкая: её детали движутся по её сопряжениям), `configuration?` `{"Size":"Large","len":500}` — свой вариант конфигурации Part Studio (у входа-переменной — значение; входы, которых нет, — как выбрано в Part Studio) |
 | `place` | `instance`, `position?`, `rotation?`, `fixed?`, `hidden?`, `name?`, `flexible?` (только подсборка; `false` — снова жёсткая, детали возвращаются на места), `configuration?` (дополняет вариант экземпляра; `{}` — снова как в Part Studio) |
 | `mate` | `type` (`fastened` / `revolute` / `slider` / `cylindrical` / `planar` / `ball` / `parallel` / `pinSlot` / `tangent` / `width`), `a`, `b` — концы (`MateEnd`), `a2?` / `b2?` (вторые грани пар у `width`; у `pinSlot` `a2` — ребро вдоль паза), `name?`, `flip?` (по умолчанию — ближайший к текущему положению), `angle?`, `offset?`, `limits?` `{zMin, zMax, aMin, aMax}` |
 | `group` | `instances` (имена), `name?` |

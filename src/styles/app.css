@@ -1939,6 +1939,47 @@ textarea {
   border-radius: 4px;
   background: #fff;
 }
+/* a variable input: its value, as wide as the lists */
+.cfg-choose .cfg-cell {
+  flex: 1;
+  min-width: 0;
+  border-color: var(--border);
+  background: #fff;
+}
+.cfg-var-name {
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.cfg-var {
+  display: grid;
+  grid-template-columns: auto 160px;
+  align-items: center;
+  justify-content: start;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+.cfg-var label {
+  color: var(--text-2);
+}
+.cfg-var select {
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+}
+.cfg-var .cfg-cell {
+  border-color: var(--border);
+  background: #fff;
+}
+/* the hint wraps within the fields' width instead of widening the columns */
+.cfg-var-hint,
+.cfg-var-gone {
+  grid-column: 1 / -1;
+  width: 0;
+  min-width: 100%;
+  color: var(--text-3);
+  font-size: 11px;
+}
 .cfg-mark {
   display: inline-flex;
   margin-left: 4px;

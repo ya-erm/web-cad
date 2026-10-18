@@ -188,9 +188,14 @@ export type AgentOp =
       checkbox?: boolean;
       params?: ConfigParamSpec[];
       values?: Record<string, (Num | boolean | null)[]>;
+      /**
+       * A variable input (Onshape Configuration variable) instead of options: the variable `#name` (made at the top
+       * of the feature list if there is none) gets any value typed for it — `value` is its own (default) one.
+       */
+      variable?: { value?: Num; type?: 'length' | 'angle' | 'number' | 'any' };
     }
-  /** Choose options of configuration inputs: input name → option name (a checkbox input: true / false too). */
-  | { op: 'configure'; values: Record<string, string | boolean> }
+  /** Choose options of configuration inputs: input name → option name (a checkbox input: true / false too; a variable input: its value). */
+  | { op: 'configure'; values: Record<string, string | number | boolean> }
   | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean };
 
 /**
@@ -220,11 +225,11 @@ export type AssemblyOp =
       rotation?: Pt3;
       fixed?: boolean;
       flexible?: boolean;
-      /** Its own configuration of the Part Studio: input name → option name (the others follow the Part Studio). */
-      configuration?: Record<string, string>;
+      /** Its own configuration of the Part Studio: input name → option name, a variable input's value (the others follow the Part Studio). */
+      configuration?: Record<string, string | number>;
     }
   /** Move / turn / fix / hide / rename an instance (positions in document units, rotation in degrees about X, Y, Z); make a sub-assembly flexible or rigid. */
-  | { op: 'place'; instance: string; position?: Pt3; rotation?: Pt3; fixed?: boolean; hidden?: boolean; name?: string; flexible?: boolean; configuration?: Record<string, string> }
+  | { op: 'place'; instance: string; position?: Pt3; rotation?: Pt3; fixed?: boolean; hidden?: boolean; name?: string; flexible?: boolean; configuration?: Record<string, string | number> }
   | {
       op: 'mate';
       type: MateType;
@@ -304,7 +309,7 @@ export type ConfigParamSpec =
 export interface ModelSummary {
   units: { length: string; angle: string };
   /** Configuration inputs: their options, the chosen one and the configured parameters ("Extrude 1.depth", "#w"). */
-  configuration?: { name: string; options: string[]; chosen: string; params: string[] }[];
+  configuration?: { name: string; options: string[]; chosen: string; params: string[]; variable?: true }[];
   features: FeatureSummary[];
   variables: Record<string, string>;
   parts: PartSummary[];

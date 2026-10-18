@@ -2,9 +2,10 @@
 // configured parameters of features in columns. The chosen option of each input is picked above the feature list.
 
 import { useEffect, useState } from 'react';
-import type { ConfigInput, Feature, PartStudioTab } from '../core/types';
-import { configKey, DIM, ownValue, splitConfigKey } from '../core/config';
-import { isDimension } from '../core/features';
+import type { Draft } from 'immer';
+import type { ConfigInput, Feature, PartStudioTab, VariableParams } from '../core/types';
+import { configKey, DIM, inputName, inputVariable, ownValue, splitConfigKey } from '../core/config';
+import { isDimension, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
 import { activeStudio, useDoc, withStudio } from '../store/docStore';
 import { FORMS } from './forms';
@@ -63,12 +64,15 @@ function edit(fn: (s: PartStudioTab, inputs: ConfigInput[]) => void) {
   );
 }
 
-/** Choose an option of an input (not an undo step: like switching a view). */
+/** Choose an option of an input, a variable input's value (not an undo step: like switching a view). */
 export function chooseOption(inputId: string, optionId: string) {
   useDoc.getState().update(
     (d) =>
       withStudio(d, (s) => {
-        s.configChoice = { ...s.configChoice, [inputId]: optionId };
+        const next = { ...s.configChoice, [inputId]: optionId };
+        // an empty value: the variable's own
+        if (!optionId) delete next[inputId];
+        s.configChoice = next;
       }),
     { undoable: false },
   );
@@ -281,8 +285,82 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
   );
 }
 
-/** Add an input: a list with two options, or a checkbox (off / on). */
-function addInput(studio: PartStudioTab, kind: 'list' | 'checkbox' = 'list') {
+/** One variable input (Onshape Configuration variable): its variable's type and own (default) value. */
+function VariableInput({ studio, input }: { studio: PartStudioTab; input: ConfigInput }) {
+  const v = inputVariable(studio.features, input);
+  /** Change the variable feature itself (one undo step). */
+  const setVar = (fn: (p: VariableParams) => void) =>
+    useDoc.getState().update((d) =>
+      withStudio(d, (s) => {
+        const f = s.features.find((x) => x.id === v?.id);
+        if (f?.type === 'variable') fn(f.params);
+      }),
+    );
+  return (
+    <div className="cfg-input">
+      <div className="cfg-input-head">
+        <Icon name="variable" size={14} />
+        <span className="cfg-input-name cfg-var-name" title={t('Rename it in its dialog in the feature list')}>
+          {inputName(studio.features, input)}
+        </span>
+        <span className="spacer" />
+        <button
+          className="icon-btn"
+          title={t('Delete input')}
+          onClick={() =>
+            // the variable stays: features may use it
+            edit((s, inputs) => {
+              inputs.splice(
+                inputs.findIndex((x) => x.id === input.id),
+                1,
+              );
+              if (s.configChoice) delete s.configChoice[input.id];
+            })
+          }
+        >
+          <Icon name="trash" size={14} />
+        </button>
+      </div>
+      {!v ? (
+        <div className="cfg-var-gone">{t('The feature is gone')}</div>
+      ) : (
+        <div className="cfg-var">
+          <label>{t('Type')}</label>
+          <select value={v.params.varType ?? 'any'} onChange={(e) => setVar((p) => void (p.varType = e.target.value as VariableParams['varType']))}>
+            {(['length', 'angle', 'number', 'any'] as const).map((k) => (
+              <option key={k} value={k}>
+                {t(k[0].toUpperCase() + k.slice(1))}
+              </option>
+            ))}
+          </select>
+          <label>{t('Default value')}</label>
+          <TextCell value={v.params.value} onCommit={(x) => x && setVar((p) => void (p.value = x))} />
+          <div className="cfg-var-hint">{t('Its value is typed above the feature list, for an assembly instance and for a drawing view.')}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Add a variable input: a new variable at the top of the feature list, so every feature can use it. */
+function addVariableInput() {
+  useDoc.getState().update((d) =>
+    withStudio(d, (s) => {
+      const names = new Set(s.features.flatMap((f) => (f.type === 'variable' ? [f.params.name] : [])));
+      let n = 1;
+      while (names.has(`var${n}`)) n++;
+      const name = `var${n}`;
+      const v = { id: uid('f'), type: 'variable', name: nextFeatureName(s.features as Feature[], 'variable'), params: { name, value: '10 mm', description: '', varType: 'length' } } as Feature;
+      s.features.unshift(v as Draft<Feature>);
+      if (s.rollback !== null) s.rollback += 1;
+      s.configuration = [...(s.configuration ?? []), { id: uid('ci'), name, kind: 'variable', options: [], params: [configKey(v.id, 'value')], values: {} }];
+    }),
+  );
+}
+
+/** Add an input: a list with two options, a checkbox (off / on) or a variable. */
+function addInput(studio: PartStudioTab, kind: 'list' | 'checkbox' | 'variable' = 'list') {
+  if (kind === 'variable') return addVariableInput();
   const n = (studio.configuration?.filter((i) => (i.kind ?? 'list') === kind).length ?? 0) + 1;
   const base = kind === 'checkbox' ? t('Checkbox') : t('Configuration');
   edit(
@@ -323,7 +401,7 @@ function AddInputButton({ studio, primary }: { studio: PartStudioTab; primary?: 
       )}
       {at && (
         <div className="dropdown" style={{ position: 'fixed', top: at.bottom + 4, left: Math.max(4, at.right - 200), right: 'auto', width: 200 }} onMouseLeave={() => setAt(null)}>
-          {(['list', 'checkbox'] as const).map((k) => (
+          {(['list', 'checkbox', 'variable'] as const).map((k) => (
             <div
               key={k}
               className="dropdown-item"
@@ -332,7 +410,7 @@ function AddInputButton({ studio, primary }: { studio: PartStudioTab; primary?: 
                 addInput(studio, k);
               }}
             >
-              <Icon name={k === 'list' ? 'layers' : 'check'} size={14} /> {t(k === 'list' ? 'List' : 'Checkbox')}
+              <Icon name={k === 'list' ? 'layers' : k === 'checkbox' ? 'check' : 'variable'} size={14} /> {t(k === 'list' ? 'List' : k === 'checkbox' ? 'Checkbox' : 'Variable')}
             </div>
           ))}
         </div>
@@ -366,7 +444,7 @@ export function ConfigPanel({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         ) : (
-          inputs.map((input) => <InputTable key={input.id} studio={studio} input={input} />)
+          inputs.map((input) => (input.kind === 'variable' ? <VariableInput key={input.id} studio={studio} input={input} /> : <InputTable key={input.id} studio={studio} input={input} />))
         )}
       </div>
     </div>
@@ -380,6 +458,18 @@ export function ConfigChooser({ studio }: { studio: PartStudioTab }) {
   return (
     <div className="cfg-chooser">
       {inputs.map((input) => {
+        // a variable input: any value (empty — its own)
+        if (input.kind === 'variable')
+          return (
+            <label key={input.id} className="cfg-choose">
+              <span>{inputName(studio.features, input)}</span>
+              <TextCell
+                value={studio.configChoice?.[input.id] ?? ''}
+                placeholder={inputVariable(studio.features, input)?.params.value}
+                onCommit={(v) => chooseOption(input.id, v)}
+              />
+            </label>
+          );
         const chosen = input.options.find((o) => o.id === studio.configChoice?.[input.id])?.id ?? input.options[0]?.id;
         // a checkbox input: on is its second option
         if (input.kind === 'checkbox' && input.options.length === 2)
