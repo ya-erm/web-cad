@@ -1035,6 +1035,15 @@ textarea {
   flex: 0 0 110px;
   color: var(--text-2);
 }
+/* a row whose label goes above its control (long option names get the whole width) */
+.fd-row.fd-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+.fd-row.fd-stacked > label {
+  flex: none;
+}
 .fd-row > .fd-control {
   flex: 1;
   min-width: 0;
@@ -1907,6 +1916,19 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* a checkbox input: the box, then its name */
+.cfg-choose.cfg-check {
+  justify-content: flex-start;
+  gap: 6px;
+  cursor: pointer;
+}
+.cfg-choose.cfg-check span {
+  max-width: none;
+}
+.cfg-fixed-name {
+  min-width: 110px;
+  padding: 2px 5px;
 }
 .cfg-choose select {
   flex: 1;

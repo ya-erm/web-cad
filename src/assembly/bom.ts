@@ -2,7 +2,7 @@
 // instances use it — structured (sub-assemblies with their parts by levels), flattened or top-level only.
 
 import type { AssemblyInstance, AssemblyTab, CadDocument } from '../core/types';
-import { sourceMesh, type AssemblySources } from './compose';
+import { sourceKey, sourceMesh, type AssemblySources } from './compose';
 import { expandAssembly } from './expand';
 
 export interface BomRow {
@@ -55,11 +55,20 @@ function rowOf(doc: CadDocument, sources: AssemblySources, inst: AssemblyInstanc
   }
   const studio = doc.tabs.find((x) => x.id === inst.studioId);
   const meta = studio?.type === 'partStudio' ? studio.parts[inst.partId] : undefined;
+  // a variant of its own configuration: named with its options, "Plate (Large)"
+  const options =
+    studio?.type === 'partStudio'
+      ? (studio.configuration ?? []).flatMap((i) => {
+          const o = inst.configuration?.[i.id] && i.options.find((x) => x.id === inst.configuration![i.id]);
+          return o ? [o.name] : [];
+        })
+      : [];
+  const name = sourceMesh(sources, inst)?.name ?? meta?.name ?? inst.name.replace(/ <\d+>$/, '');
   return {
     ...base,
     kind: 'part',
     partNumber: meta?.partNumber ?? '',
-    name: sourceMesh(sources, inst)?.name ?? meta?.name ?? inst.name.replace(/ <\d+>$/, ''),
+    name: options.length ? `${name} (${options.join(', ')})` : name,
     description: meta?.description ?? '',
     material: meta?.material ?? '',
     source: studio?.name ?? '?',
@@ -81,7 +90,8 @@ export function billOfMaterials(doc: CadDocument, asm: AssemblyTab, sources: Ass
 function level(doc: CadDocument, sources: AssemblySources, found: { inst: AssemblyInstance; id: string }[], parents: number, depth: number, prefix: string, deep: boolean): BomRow[] {
   const rows = new Map<string, BomRow & { first: AssemblyInstance }>();
   for (const { inst, id } of found) {
-    const key = inst.assemblyId ? `asm|${inst.assemblyId}` : `${inst.studioId}|${inst.partId}`;
+    // a part in another variant of its configuration is another row
+    const key = inst.assemblyId ? `asm|${inst.assemblyId}` : `${sourceKey(inst)}|${inst.partId}`;
     let row = rows.get(key);
     if (!row) rows.set(key, (row = { ...rowOf(doc, sources, inst), item: `${prefix}${rows.size + 1}`, level: depth, first: inst }));
     row.instances.push(id);

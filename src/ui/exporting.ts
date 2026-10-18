@@ -8,7 +8,7 @@ import { writeSVG } from '../export/svg';
 import type { Prim2D } from '../export/prim2d';
 import type { AssemblyTab, CadDocument, SkEntity } from '../core/types';
 import type { MeshResult } from '../kernel/protocol';
-import { placementOf, type AssemblySources } from '../assembly/compose';
+import { placementOf, sourceKey, type AssemblySources } from '../assembly/compose';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { arcAngles, entityMap, pointOf, splineSamples } from '../sketch/curves';
 
@@ -96,7 +96,7 @@ export async function exportAssembly(
       studioKey: '',
       format: kind,
       partIds: [],
-      instances: instances.map((i) => ({ studioKey: i.studioId, partId: i.partId, name: i.name, position: i.position, rotation: i.rotation })),
+      instances: instances.map((i) => ({ studioKey: sourceKey(i), partId: i.partId, name: i.name, position: i.position, rotation: i.rotation })),
       tolerance: opts.tolerance,
       angularTolerance: opts.angularTolerance,
       unit: opts.unit,
@@ -104,17 +104,17 @@ export async function exportAssembly(
     download(res.data as BlobPart, `${base}.stl`, res.mime);
     return;
   }
-  // meshes of the parts, once per part, from their Part Studios
+  // meshes of the parts, once per part, from their Part Studios (or the variants their instances choose)
   const parts = new Map<string, string[]>();
-  for (const i of instances) parts.set(i.studioId, [...new Set([...(parts.get(i.studioId) ?? []), i.partId])]);
+  for (const i of instances) parts.set(sourceKey(i), [...new Set([...(parts.get(sourceKey(i)) ?? []), i.partId])]);
   const meshes = new Map<string, MeshResult['meshes'][number]>();
-  for (const [studioId, partIds] of parts) {
-    const r = await k.mesh({ studioKey: studioId, partIds, tolerance: opts.tolerance, angularTolerance: opts.angularTolerance });
-    for (const m of r.meshes) meshes.set(`${studioId}|${m.id}`, m);
+  for (const [key, partIds] of parts) {
+    const r = await k.mesh({ studioKey: key, partIds, tolerance: opts.tolerance, angularTolerance: opts.angularTolerance });
+    for (const m of r.meshes) meshes.set(`${key}|${m.id}`, m);
   }
   const scale = opts.unit === 'in' ? 1 / 25.4 : 1;
   const placed = instances.flatMap((inst) => {
-    const m = meshes.get(`${inst.studioId}|${inst.partId}`);
+    const m = meshes.get(`${sourceKey(inst)}|${inst.partId}`);
     if (!m) return [];
     const { R, t } = placementOf(inst);
     const positions = new Float32Array(m.positions.length);

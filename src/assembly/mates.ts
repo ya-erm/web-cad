@@ -6,7 +6,7 @@
 import type { AssemblyGroup, AssemblyInstance, AssemblyMate, AssemblyMateType, AssemblyTab, MateConnectorRef, MateEnd, MateRelation, MateRelationType, Vec3 } from '../core/types';
 import type { PartMesh } from '../kernel/protocol';
 import { frameFromNormal, rotateVec } from '../core/math';
-import { placementOf, rotationAngles, sourceMesh, type AssemblySources, type Placement } from './compose';
+import { placementOf, rotationAngles, sourceKey, sourceMesh, type AssemblySources, type Placement } from './compose';
 import { expandAssembly, findInstance, foldPlacements, hasSubassemblies, topInstance, usedTabs, type Moved } from './expand';
 
 /** Degrees of freedom each mate type leaves (Onshape). */
@@ -210,7 +210,7 @@ const frameOf = (o: Vec3, z: Vec3, x?: Vec3): Frame => {
 export function connectorFrame(sources: AssemblySources, inst: AssemblyInstance, ref: MateConnectorRef): Frame | null {
   const mesh = sourceMesh(sources, inst);
   if (ref.kind === 'connector') {
-    const mc = sources.get(inst.studioId)?.mates.find((m) => m.featureId === ref.featureId);
+    const mc = sources.get(sourceKey(inst))?.mates.find((m) => m.featureId === ref.featureId);
     return mc ? { R: fromAxes(mc.frame.xDir, mc.frame.yDir, mc.frame.normal), o: mc.frame.origin } : null;
   }
   if (!mesh) return null;

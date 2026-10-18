@@ -1,6 +1,7 @@
 // Assembly tab UI (Onshape-like): Insert, the Instances list, and the placement of the selected instance.
 
 import { useEffect, useState } from 'react';
+import { chosenOption } from '../core/config';
 import { create } from 'zustand';
 import type { AssemblyInstance, AssemblyTab, CadDocument, PartStudioTab, SelRef, Vec3 } from '../core/types';
 import type { PartMesh } from '../kernel/protocol';
@@ -493,6 +494,40 @@ export function InstancePanel() {
         {(['X', 'Y', 'Z'] as const).map((a, n) => axis(a, Math.round((inst.position[n] / k) * 1e6) / 1e6, setPos(n), unit))}
         <div className="fd-section">{t('Rotation about axes')}</div>
         {(['X', 'Y', 'Z'] as const).map((a, n) => axis(a, inst.rotation[n], setRot(n), '°'))}
+        {!part && source?.type === 'partStudio' && !!source.configuration?.length && (
+          // its own configuration of the Part Studio (Onshape): an input left as in the Part Studio follows it
+          <>
+            <div className="fd-section">{t('Configuration')}</div>
+            {source.configuration.map((input) => (
+              <div className="fd-row fd-stacked" key={input.id}>
+                <label>{input.name}</label>
+                <div className="fd-control">
+                  <select
+                    value={inst.configuration?.[input.id] ?? ''}
+                    onChange={(e) =>
+                      set((i) => {
+                        const c = { ...i.configuration };
+                        if (e.target.value) c[input.id] = e.target.value;
+                        else delete c[input.id];
+                        if (Object.keys(c).length) i.configuration = c;
+                        else delete i.configuration;
+                      })
+                    }
+                  >
+                    <option value="">
+                      {t('As in the Part Studio')} ({chosenOption(input, source.configChoice)?.name})
+                    </option>
+                    {input.options.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
         {part ? (
           // a part of a flexible sub-assembly: fixed or not as the sub-assembly has it
           <div className="fd-hint">{inst.fixed ? t('Fixed in its flexible sub-assembly: it moves with it.') : t('A part of a flexible sub-assembly: it moves as the sub-assembly mates allow.')}</div>

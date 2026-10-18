@@ -36,7 +36,8 @@ async function handle(req: WorkerRequest) {
       post({ type: 'ping', reqId: req.reqId });
       return;
     case 'build': {
-      const res = await builderFor(req.studioKey).build(req);
+      // Derived features read the other Part Studios' builders (built before this request)
+      const res = await builderFor(req.studioKey).build(req, (key) => builders.get(key));
       const transfer: Transferable[] = [];
       for (const p of res.parts) transfer.push(...transferablesOf(p));
       if (res.preview) {

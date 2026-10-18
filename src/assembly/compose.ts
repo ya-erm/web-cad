@@ -2,7 +2,7 @@
 // assembly as an ordinary build result whose "parts" are the instances (meshes moved into place),
 // so selection, highlighting and the camera work as in a Part Studio.
 
-import type { AssemblyInstance, AssemblyTab, Vec3 } from '../core/types';
+import type { AssemblyInstance, AssemblyTab, PartStudioTab, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, MateResult, PartMesh } from '../kernel/protocol';
 import { expandAssembly } from './expand';
 
@@ -129,10 +129,25 @@ export interface StudioData {
   assembly?: AssemblyTab;
 }
 
-/** Source Part Studios by id. */
+/** Source Part Studios by key (`sourceKey`: the Part Studio, or a variant of it some instances choose). */
 export type AssemblySources = Map<string, StudioData>;
 
-export const sourceMesh = (sources: AssemblySources, inst: Pick<AssemblyInstance, 'studioId' | 'partId'>) => sources.get(inst.studioId)?.parts.get(inst.partId);
+/**
+ * The source of an instance: its Part Studio's id, or — when the instance chooses configuration options of its
+ * own — that variant of it: `studio#input=option,…`.
+ */
+export function sourceKey(inst: Pick<AssemblyInstance, 'studioId' | 'configuration'>): string {
+  const pairs = Object.entries(inst.configuration ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return pairs.length ? `${inst.studioId}#${pairs.map(([k, v]) => `${k}=${v}`).join(',')}` : inst.studioId;
+}
+
+/** A Part Studio as an instance's own configuration builds it (its id: the instance's source key). */
+export function variantStudio(studio: PartStudioTab, configuration?: Record<string, string>): PartStudioTab {
+  if (!configuration || !Object.keys(configuration).length) return studio;
+  return { ...studio, id: sourceKey({ studioId: studio.id, configuration }), configChoice: { ...studio.configChoice, ...configuration } };
+}
+
+export const sourceMesh = (sources: AssemblySources, inst: Pick<AssemblyInstance, 'studioId' | 'partId' | 'configuration'>) => sources.get(sourceKey(inst))?.parts.get(inst.partId);
 
 /** Pick id of an instance's mate connector triad ({ kind: 'plane', planeId }). */
 export const instanceConnectorId = (instance: string, featureId: string) => `${instance}|${featureId}`;
@@ -159,7 +174,7 @@ export function composeAssembly(tab: AssemblyTab, sources: AssemblySources): { b
     parts.push(m);
     if (inst.hidden) continue;
     // the part's own mate connectors travel with the instance
-    for (const mc of sources.get(inst.studioId)?.mates ?? []) {
+    for (const mc of sources.get(sourceKey(inst))?.mates ?? []) {
       if (mc.owner !== inst.partId) continue;
       const f = mc.frame;
       mates.push({

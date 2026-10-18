@@ -34,6 +34,8 @@ Select one instance — a panel with its placement appears on the left:
 
 Type a value and press `Enter` (or move to another field). Each change can be undone with `Ctrl+Z`.
 
+When the instance's Part Studio has a [configuration](configurations), the panel has a **Configuration** section: each input has a list — **As in the Part Studio (…)** (the option chosen in the Part Studio itself) or the instance's own option. The instance is rebuilt in the chosen variant, and mates are solved again on its new geometry.
+
 ## Dragging with the mouse {#drag}
 
 As in Onshape, an instance can be dragged right in the graphics area: press the left mouse button on it and move the mouse. Over an instance that can move, the cursor turns into an open hand.
@@ -228,6 +230,7 @@ Choose the type of the bill of materials in the list in its header (as in Onshap
 | **Top-level only** | The instances of this assembly: parts and sub-assemblies, without what is inside them. |
 
 - **Part number**, **Description** and **Material** are part properties: click the cell and type; `Enter` saves the value with the part in its Part Studio (one undo step), so every assembly that uses the part shows it. Sub-assembly rows have no such properties.
+- Instances of one part in different [configuration variants](#position) are different rows; the instance's options are added to the part name: "Plate (Large)".
 - The **Columns** button (the funnel) shows or hides columns.
 - A click on a row selects the instances of that part (or sub-assembly).
 - The download button saves the shown columns as a CSV file, which opens in spreadsheets; the CSV has every row, collapsed ones too, and the item number shows the level.

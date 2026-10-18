@@ -63,10 +63,21 @@ export interface FeatureOutput {
   warning?: string;
 }
 
+/** Another Part Studio's last build, for Derived: its state, and its parts' names and colours. */
+export interface SourceBuild {
+  state: BuildState;
+  name(id: string): string;
+  color(id: string): string | undefined;
+}
+
+/** The last build of a Part Studio by its builder key (the caller builds the sources first). */
+export type SourceLookup = (key: string) => SourceBuild | undefined;
+
 interface Ctx {
   st: BuildState;
   ec: EvalContext;
   fid: string;
+  sources?: SourceLookup;
 }
 
 const DEG = 180 / Math.PI;
@@ -1112,10 +1123,40 @@ async function buildImport(ctx: Ctx, f: FeatureOf<'import'>): Promise<FeatureOut
   return {};
 }
 
+/**
+ * Derived (Onshape): parts of another Part Studio of the document as its last build has them (the caller builds
+ * it just before), standing where they stand there. Their ids `${fid}.${source part id}` stay while the source keeps
+ * its own, so references to their faces and edges hold across rebuilds.
+ */
+function buildDerived(ctx: Ctx, f: FeatureOf<'derived'>): FeatureOutput {
+  const p = f.params;
+  if (!p.studioId) fail('Select a Part Studio');
+  if (p.sourceError === 'missing') fail('The source Part Studio no longer exists');
+  if (p.sourceError === 'cycle') fail('Circular reference: the source Part Studio uses this one');
+  const src = p.sourceKey ? ctx.sources?.(p.sourceKey) : undefined;
+  if (!src) fail('The source Part Studio is not built');
+  const wanted = p.parts.length ? p.parts : [...src.state.parts.keys()];
+  if (!wanted.length) fail('The source Part Studio has no parts');
+  let missing = 0;
+  for (const id of wanted) {
+    const part = src.state.parts.get(id);
+    if (!part) {
+      missing++;
+      continue;
+    }
+    // a copy: the source's shapes stay its own
+    const pid = `${ctx.fid}.${id}`;
+    setPart(ctx.st, pid, part.shape.clone() as Shape3D);
+    ctx.st.derived.set(pid, { name: src.name(id), color: src.color(id) });
+  }
+  if (missing === wanted.length) fail('The selected parts no longer exist in the source Part Studio');
+  return missing ? { warning: 'Some of the selected parts no longer exist in the source Part Studio' } : {};
+}
+
 // ---------------------------------------------------------------------------
 
-export async function applyFeature(st: BuildState, feature: Feature, ec: EvalContext): Promise<FeatureOutput> {
-  const ctx: Ctx = { st, ec: { ...ec, vars: st.vars }, fid: feature.id };
+export async function applyFeature(st: BuildState, feature: Feature, ec: EvalContext, sources?: SourceLookup): Promise<FeatureOutput> {
+  const ctx: Ctx = { st, ec: { ...ec, vars: st.vars }, fid: feature.id, sources };
   switch (feature.type) {
     case 'sketch':
       return buildSketch(ctx, feature);
@@ -1163,5 +1204,7 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildDeletePart(ctx, feature);
     case 'import':
       return buildImport(ctx, feature);
+    case 'derived':
+      return buildDerived(ctx, feature);
   }
 }

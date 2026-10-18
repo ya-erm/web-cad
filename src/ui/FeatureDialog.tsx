@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { ConfigInput, Feature, FeatureType, SelRef } from '../core/types';
+import type { ConfigInput, Feature, FeatureType, PartStudioTab, SelRef } from '../core/types';
 import { FIELD_SPECS } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
 import { chosenOption, configuredOf, configuredParams } from '../core/config';
+import { derivableStudios } from '../core/derived';
+import { sourcePartList } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
@@ -35,6 +37,7 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   plane: 'plane',
   variable: 'variable',
   import: 'import',
+  derived: 'partStudio',
   helix: 'helix',
   mateConnector: 'mateConnector',
 };
@@ -190,6 +193,109 @@ function FeaturePicker({ value, onChange, upTo }: { value: string[]; onChange: (
         </label>
       ))}
     </div>
+  );
+}
+
+/**
+ * Derived: the source — another Part Studio of the document (not one that uses this one: a cycle) — and which of
+ * its parts to bring in (all by default). The parts are listed from the source's build.
+ */
+function DerivedSourceField() {
+  const update = useEditor((s) => s.updateDraft);
+  const draft = useEditor((s) => s.editing?.draft);
+  const doc = useDoc((s) => s.doc);
+  const studio = activeStudio(doc);
+  const studioId = draft?.type === 'derived' ? draft.params.studioId : '';
+  const [parts, setParts] = useState<{ id: string; name: string }[] | null>(null);
+  const options = doc && studio ? derivableStudios(doc, studio.id) : [];
+  // the first possible source to start with
+  useEffect(() => {
+    if (draft?.type === 'derived' && !draft.params.studioId && options[0])
+      update((f) => {
+        if (f.type === 'derived') f.params.studioId = options[0].id;
+      });
+  }, [draft?.type, studioId, options[0]?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the source's parts, from its build
+  useEffect(() => {
+    let live = true;
+    setParts(null);
+    const src = doc?.tabs.find((t): t is PartStudioTab => t.id === studioId && t.type === 'partStudio');
+    if (!doc || !src) return;
+    void sourcePartList(doc, src).then((list) => live && setParts(list), () => live && setParts([]));
+    return () => {
+      live = false;
+    };
+  }, [doc, studioId]);
+  if (!draft || draft.type !== 'derived' || !studio) return null;
+  const chosen = draft.params.parts;
+  const gone = !!studioId && !doc?.tabs.some((t) => t.id === studioId);
+  const setChosen = (ids: string[]) =>
+    update((f) => {
+      if (f.type === 'derived') f.params.parts = ids;
+    });
+  return (
+    <>
+      <div className="fd-row">
+        <label>{t('Part Studio')}</label>
+        <div className="fd-control">
+          {options.length || gone ? (
+            <select
+              value={studioId}
+              onChange={(e) =>
+                update((f) => {
+                  if (f.type !== 'derived') return;
+                  f.params.studioId = e.target.value;
+                  f.params.parts = [];
+                })
+              }
+            >
+              {gone && <option value={studioId}>{t('(deleted)')}</option>}
+              {options.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="sel-empty">{t('No other Part Studio to derive from')}</span>
+          )}
+        </div>
+      </div>
+      {studioId && !gone && (
+        <div className="fd-section">
+          <div className="sel-label">{t('Parts')}</div>
+          <div className="feature-list-picker">
+            <label>
+              <input type="checkbox" checked={!chosen.length} onChange={(e) => setChosen(e.target.checked ? [] : (parts ?? []).slice(0, 1).map((p) => p.id))} />
+              {t('All parts')}
+            </label>
+            {parts === null && <div className="sel-empty">{t('Building the source…')}</div>}
+            {parts?.map((p) => (
+              <label key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={!chosen.length || chosen.includes(p.id)}
+                  onChange={(e) => {
+                    const now = chosen.length ? chosen : parts.map((x) => x.id);
+                    setChosen(e.target.checked ? [...now, p.id] : now.filter((x) => x !== p.id));
+                  }}
+                />
+                <Icon name="partItem" size={16} />
+                {p.name}
+              </label>
+            ))}
+            {/* chosen parts the source no longer has */}
+            {parts && chosen.filter((id) => !parts.some((p) => p.id === id)).map((id) => (
+              <label key={id} className="gone">
+                <input type="checkbox" checked onChange={() => setChosen(chosen.filter((x) => x !== id))} />
+                <Icon name="warning" size={16} />
+                {t('A part that is gone')}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -370,6 +476,8 @@ export function FeatureDialog() {
         );
       case 'file':
         return <FileField key={i} />;
+      case 'derivedSource':
+        return <DerivedSourceField key={i} />;
       case 'section':
         return (
           <div key={i} className="sel-label">

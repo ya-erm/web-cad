@@ -56,6 +56,8 @@ export interface BuildState {
   vars: VariableTable;
   /** Every part id ever created, in creation order (default "Part N" names). */
   partOrder: string[];
+  /** Parts brought from another Part Studio (Derived): their names and colours there. */
+  derived: Map<string, { name: string; color?: string }>;
 }
 
 export function emptyState(): BuildState {
@@ -68,6 +70,7 @@ export function emptyState(): BuildState {
     tools: new Map(),
     vars: {},
     partOrder: [],
+    derived: new Map(),
   };
 }
 
@@ -81,6 +84,7 @@ export function cloneState(s: BuildState): BuildState {
     tools: new Map(s.tools),
     vars: { ...s.vars },
     partOrder: s.partOrder,
+    derived: new Map(s.derived),
   };
 }
 

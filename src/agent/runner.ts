@@ -4,13 +4,16 @@
 
 import type { CadDocument, ConfigInput, Feature, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, PartMesh } from '../kernel/protocol';
-import { collectVariables, defaultParams, FEATURE_LABELS, makeEvalContext, nextFeatureName } from '../core/features';
+import { collectVariables, defaultParams, FEATURE_LABELS, isDimension, makeEvalContext, nextFeatureName } from '../core/features';
 import { formatQuantity, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { uid } from '../core/ids';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { computeRegions, regionAt, type SketchRegion } from '../sketch/regions';
 import { pointInPolygon } from '../sketch/curves';
-import { chosenOption, configKey, configuredFeatures, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
+import { chosenOption, configKey, configuredFeatures, DIM, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
+import { derivesFrom } from '../core/derived';
+import type { Draft } from 'immer';
+import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot } from '../sketch/sketchOps';
 import type {
   AgentOp,
@@ -37,10 +40,25 @@ import type {
 
 export class AgentError extends Error {}
 
+/** Derived: the Part Studio named `name` in the document, as a source for Part Studio `forStudio` (no cycles). */
+export function findDerivedSource(doc: { tabs: CadDocument['tabs']; units: CadDocument['units'] }, name: string, forStudio: string): PartStudioTab {
+  const studios = doc.tabs.filter((t): t is PartStudioTab => t.type === 'partStudio');
+  const s = studios.find((t) => t.name === name || t.id === name) ?? studios.find((t) => t.name.toLowerCase() === name.toLowerCase());
+  if (!s) throw new AgentError(`No Part Studio "${name}". Part Studios: ${studios.map((t) => t.name).join(', ')}`);
+  if (s.id === forStudio) throw new AgentError('A Part Studio cannot derive from itself');
+  if (derivesFrom(doc, s.id, forStudio)) throw new AgentError(`"${s.name}" uses this Part Studio: deriving from it would be a circular reference`);
+  return s;
+}
+
 /** The geometry kernel as seen by the runner (worker client in the browser, StudioBuilder in Node). */
 export interface AgentKernel {
   build(features: Feature[]): Promise<BuildResult>;
   measure(refs: SelRef[]): Promise<{ label: string; value: number }[]>;
+  /**
+   * Derived: another Part Studio of the document by name (not one that uses Part Studio `forStudio` — a cycle),
+   * built, with its parts.
+   */
+  derivedSource?(name: string, forStudio: string): Promise<{ studioId: string; name: string; parts: { id: string; name: string }[] }>;
 }
 
 type Units = CadDocument['units'];
@@ -564,8 +582,23 @@ class Runner {
       case 'sketch': {
         const data = this.buildShapes(op.shapes ?? []);
         data.plane = await this.sketchPlane(op.plane);
+        // edges to project (Use): found in the model before the sketch
+        const used = op.use ? await this.edges(op.use) : [];
+        const parts = used.length ? (await this.model()).parts : [];
         const f = this.add('sketch', op.name, data);
         this.lastSketch = f.id;
+        if (used.length) {
+          // the sketch's plane as built, then each edge projected onto it as fixed, linked geometry
+          const frame = (await this.model()).sketches.find((s) => s.featureId === f.id)?.frame;
+          if (!frame) throw new AgentError('The sketch plane cannot be built: nothing to project onto');
+          for (const r of used) {
+            const part = r.kind === 'edge' ? parts.find((p) => p.id === r.partId) : undefined;
+            const g = part && r.kind === 'edge' ? edgeGeometry(part, r.index) : null;
+            const lg = g && projectGeometry(g, frame);
+            if (!lg) throw new AgentError('An edge to use projects to nothing on the sketch plane (it is perpendicular to it)');
+            addUsedGeometry(data as Draft<SketchData>, lg, r);
+          }
+        }
         return;
       }
       case 'extrude': {
@@ -788,8 +821,22 @@ class Runner {
         if (!setConfigured(this.s, f.id, 'suppressed', String(op.value !== false))) f.suppressed = op.value !== false;
         return;
       }
+      case 'derived': {
+        if (!this.kernel.derivedSource) throw new AgentError('Derived needs the document: run it on a document');
+        const src = await this.kernel.derivedSource(op.studio, this.s.id);
+        const parts = (op.parts ?? []).map((n) => {
+          const p = src.parts.find((x) => x.name === n || x.id === n) ?? src.parts.find((x) => x.name.toLowerCase() === n.toLowerCase());
+          if (!p) throw new AgentError(`No part "${n}" in ${src.name}. Parts: ${src.parts.map((x) => x.name).join(', ') || '(none)'}`);
+          return p.id;
+        });
+        this.add('derived', op.name, { studioId: src.studioId, parts });
+        return;
+      }
       case 'configuration': {
-        if (!op.name || !op.options?.length) throw new AgentError('configuration needs "name" and "options"');
+        // a checkbox input: two options, off and on
+        const options = op.checkbox ? (op.options?.length ? op.options : ['Off', 'On']) : op.options;
+        if (op.checkbox && options?.length !== 2) throw new AgentError('A checkbox configuration has two options: off and on');
+        if (!op.name || !options?.length) throw new AgentError('configuration needs "name" and "options"');
         const keys = (op.params ?? []).map((p) => {
           if ('variable' in p) {
             const v = this.s.features.find((f) => f.type === 'variable' && f.params.name === p.variable.replace(/^#/, ''));
@@ -797,6 +844,13 @@ class Runner {
             return configKey(v.id, 'value');
           }
           const f = this.feature(p.feature);
+          if ('dimension' in p) {
+            // a sketch dimension by its number
+            const dims = f.type === 'sketch' ? f.params.constraints.filter(isDimension) : [];
+            const c = dims[p.dimension - 1];
+            if (!c) throw new AgentError(`"${f.name}" has no dimension ${p.dimension}: it has ${dims.length}`);
+            return configKey(f.id, `${DIM}${c.id}`);
+          }
           const param = p.param ?? 'suppressed';
           if (param !== 'suppressed' && ownValue(f, param) === undefined)
             throw new AgentError(`"${f.name}" has no parameter "${param}". Parameters: ${Object.keys(f.params).filter((k) => ownValue(f, k) !== undefined).join(', ')}`);
@@ -806,13 +860,14 @@ class Runner {
         const input: ConfigInput = {
           id: old?.id ?? uid('ci'),
           name: op.name,
-          options: op.options.map((name) => ({ id: old?.options.find((o) => o.name === name)?.id ?? uid('co'), name })),
+          ...(op.checkbox ? { kind: 'checkbox' as const } : {}),
+          options: options.map((name) => ({ id: old?.options.find((o) => o.name === name)?.id ?? uid('co'), name })),
           params: keys,
           values: {},
         };
         for (const [name, row] of Object.entries(op.values ?? {})) {
           const o = input.options.find((x) => x.name === name);
-          if (!o) throw new AgentError(`No option "${name}" in configuration "${op.name}". Options: ${op.options.join(', ')}`);
+          if (!o) throw new AgentError(`No option "${name}" in configuration "${op.name}". Options: ${options.join(', ')}`);
           if (row.length !== keys.length) throw new AgentError(`"${name}": ${row.length} values for ${keys.length} parameters`);
           const cells: Record<string, string> = {};
           // a bare number takes the document's units, as in any field
@@ -828,7 +883,13 @@ class Runner {
         for (const [name, option] of Object.entries(op.values ?? {})) {
           const input = this.s.configuration?.find((x) => x.name === name || x.name.toLowerCase() === name.toLowerCase());
           if (!input) throw new AgentError(`No configuration "${name}". Configurations: ${(this.s.configuration ?? []).map((x) => x.name).join(', ') || '(none)'}`);
-          const o = input.options.find((x) => x.name === option || x.name.toLowerCase() === String(option).toLowerCase());
+          // a checkbox input: true — on (its second option), false — off
+          const o =
+            typeof option === 'boolean'
+              ? input.kind === 'checkbox'
+                ? input.options[option ? 1 : 0]
+                : undefined
+              : input.options.find((x) => x.name === option || x.name.toLowerCase() === option.toLowerCase());
           if (!o) throw new AgentError(`No option "${option}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
           choice[input.id] = o.id;
         }
@@ -905,6 +966,7 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
   const paramName = (key: string) => {
     const { featureId, param } = splitConfigKey(key);
     const f = studio.features.find((x) => x.id === featureId);
+    if (f?.type === 'sketch' && param.startsWith(DIM)) return `${f.name}.dimension ${f.params.constraints.filter(isDimension).findIndex((c) => c.id === param.slice(DIM.length)) + 1}`;
     return !f ? '?' : f.type === 'variable' && param === 'value' ? `#${f.params.name}` : `${f.name}.${param}`;
   };
   return {

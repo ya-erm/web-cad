@@ -3,6 +3,7 @@
 
 import type { Draft } from 'immer';
 import type { PlaneFrame, SelRef, SkEntity, SketchData, Vec2, Vec3 } from '../core/types';
+import type { PartMesh } from '../kernel/protocol';
 import { toLocal, v3 } from '../core/math';
 import { addArc, addCircle, addConstraint, addLine, addPoint, addSpline, circumcircle, onCcwArc } from './sketchOps';
 import { frozenValues } from './solver';
@@ -15,6 +16,22 @@ export type WorldGeom =
   | { kind: 'poly'; pts: Vec3[] };
 
 const parallel = (axis: Vec3, n: Vec3) => Math.abs(v3.dot(v3.norm(axis), n)) > 1 - 1e-6;
+
+/** An edge of a built part in the world: a line, a circle or an arc, else its polyline. */
+export function edgeGeometry(part: PartMesh, index: number): WorldGeom | null {
+  const info = part.edges[index];
+  if (!info) return null;
+  if (info.type === 'LINE') return { kind: 'line', a: info.start, b: info.end };
+  if (info.type === 'CIRCLE' && info.circleCenter && info.axis && info.radius) {
+    if (info.closed) return { kind: 'circle', c: info.circleCenter, r: info.radius, axis: info.axis };
+    return { kind: 'arc', c: info.circleCenter, r: info.radius, axis: info.axis, start: info.start, mid: info.center, end: info.end };
+  }
+  const st = part.edgeRanges[index * 2];
+  const n = part.edgeRanges[index * 2 + 1];
+  const pts: Vec3[] = [];
+  for (let k = st; k < st + n; k++) pts.push(Array.from(part.edgePositions.subarray(k * 3, k * 3 + 3)) as Vec3);
+  return { kind: 'poly', pts };
+}
 
 /** Plane-local 2D description of the projected geometry. */
 export type LocalGeom =

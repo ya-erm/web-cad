@@ -43,6 +43,7 @@ export const FEATURE_TOOLS: (ToolDef | '|')[] = [
   '|',
   { id: 'variable', icon: 'variable', label: 'Variable' },
   { id: 'import', icon: 'import', label: 'Import' },
+  { id: 'derived', icon: 'partStudio', label: 'Derived' },
 ];
 
 export interface SketchToolDef {

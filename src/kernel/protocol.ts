@@ -55,6 +55,8 @@ export interface PartMesh {
   name: string;
   color: string;
   hidden: boolean;
+  /** Brought from another Part Studio (Derived): its colour is the source's, not a palette colour. */
+  derived?: boolean;
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
@@ -131,12 +133,16 @@ export interface BuildRequest {
   preview?: Feature;
   /** Mesh quality multiplier (1 = default). */
   quality?: number;
+  /** No meshes (a source built for another Part Studio's Derived feature): `parts` is empty, `partList` names them. */
+  meshless?: boolean;
 }
 
 export interface BuildResult {
   type: 'build';
   reqId: number;
   parts: PartMesh[];
+  /** Every part of the build by id and name (also when meshless). */
+  partList?: { id: string; name: string }[];
   sketches: SketchResult[];
   planes: PlaneResult[];
   mates: MateResult[];

@@ -444,6 +444,24 @@ export interface ImportParams {
   data: string;
 }
 
+/**
+ * Derived (Onshape): parts of another Part Studio of the document, linked one way — they follow the source as it
+ * changes, where they stand in it (the common origin).
+ */
+export interface DerivedParams {
+  /** The source Part Studio (a tab of this document). */
+  studioId: string;
+  /** Its parts to bring in (ids in its build); empty — all of them. */
+  parts: string[];
+  /**
+   * Filled in for the build only, never stored: the source's builder key, its version (a change of the source makes
+   * the feature rebuild) and why it cannot be used.
+   */
+  sourceKey?: string;
+  sourceVersion?: string;
+  sourceError?: 'missing' | 'cycle';
+}
+
 export interface HelixParams {
   axis: SelRef[];
   pitch: string;
@@ -474,6 +492,7 @@ export interface FeatureParamsMap {
   plane: PlaneParams;
   variable: VariableParams;
   import: ImportParams;
+  derived: DerivedParams;
   helix: HelixParams;
   mateConnector: MateConnectorParams;
 }
@@ -617,6 +636,8 @@ export interface PartStudioTab {
 export interface ConfigInput {
   id: string;
   name: string;
+  /** A list (options in rows), or a checkbox (Onshape Checkbox input): two options — off and on. */
+  kind?: 'list' | 'checkbox';
   options: { id: string; name: string }[];
   params: string[];
   /** Cells: option id → parameter → value (an expression; 'true' / 'false'). A missing cell keeps the feature's own value. */
@@ -645,6 +666,11 @@ export interface AssemblyInstance {
    */
   flexible?: boolean;
   flex?: Record<string, { position: Vec3; rotation: Vec3 }>;
+  /**
+   * Its own configuration of the Part Studio (Onshape): input id → option id; the inputs it does not set follow
+   * the option chosen in the Part Studio.
+   */
+  configuration?: Record<string, string>;
   /** Placement of the part's studio coordinates: translation (document length units in mm) and rotation. */
   position: Vec3;
   /** Rotation about X, then Y, then Z (degrees, world axes). */

@@ -6,7 +6,8 @@ import { activeAssembly, activeStudio, effectiveRollback, studioById, useDoc } f
 import { useEditor } from './editorStore';
 import type { AssemblyTab, CadDocument, Feature, PartStudioTab } from '../core/types';
 import { configuredFeatures } from '../core/config';
-import type { AssemblySources } from '../assembly/compose';
+import { buildDerivedSources, derivedInputs } from '../core/derived';
+import { sourceKey, variantStudio, type AssemblySources } from '../assembly/compose';
 import { buildStudio, useAssembly } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { composeDisplayed } from '../assembly/explode';
@@ -31,13 +32,15 @@ function inputsOf(): unknown[] | null {
       asm.instances,
       doc.units,
       ...used.subs.flatMap((s) => [s.instances, s.mates, s.groups, s.relations]),
-      ...studios.flatMap((s) => (s ? [s.features, s.rollback, s.parts, s.configuration, s.configChoice] : [null])),
+      // with the Part Studios they derive from
+      ...studios.flatMap((s) => (s ? [s.features, s.rollback, s.parts, s.configuration, s.configChoice, ...derivedInputs(doc, s)] : [null])),
     ];
   }
   const studio = activeStudio(doc);
   if (!doc || !studio) return null;
   const ed = useEditor.getState().editing;
-  return [studio.id, studio.features, studio.rollback, studio.parts, studio.configuration, studio.configChoice, doc.units, ed?.index, ed?.draft, ed?.isNew];
+  // a change of a Part Studio it derives from rebuilds it too
+  return [studio.id, studio.features, studio.rollback, studio.parts, studio.configuration, studio.configChoice, doc.units, ed?.index, ed?.draft, ed?.isNew, ...derivedInputs(doc, studio)];
 }
 
 function sameInputs(a: unknown[], b: unknown[]) {
@@ -49,6 +52,44 @@ export function partColorFor(studio: PartStudioTab, partId: string, order: strin
   if (c) return c;
   const i = Math.max(0, order.indexOf(partId));
   return PART_PALETTE[i % PART_PALETTE.length];
+}
+
+/** The geometry worker's builder of a Part Studio used as a Derived source (apart from its own tab's builder). */
+export const derivedKey = (studioId: string) => `src:${studioId}`;
+/** Part order of each source's last build: its parts' palette colours go with them into other Part Studios. */
+const sourceOrder = new Map<string, string[]>();
+
+/** The parts of a Part Studio (ids and names) as a Derived source has them: built — its own sources first. */
+export async function sourcePartList(doc: CadDocument, source: PartStudioTab): Promise<{ id: string; name: string }[]> {
+  await kernel().ready();
+  const upTo = effectiveRollback(source);
+  const features = await withDerivedSources(doc, source.id, configuredFeatures(source).slice(0, upTo));
+  const meta = Object.fromEntries(Object.entries(source.parts).map(([id, m]) => [id, { name: m.name }]));
+  const res = await kernel().build(derivedKey(source.id), { units: doc.units, features, partMeta: meta, upTo, meshless: true });
+  return res.partList ?? [];
+}
+
+/**
+ * Build the Derived sources of a Part Studio (whose features are `features`) in the geometry worker, the deepest
+ * first; returns the features, prepared for the build (each Derived feature knows its source's builder and version).
+ */
+export async function withDerivedSources(doc: CadDocument, studioId: string, features: Feature[]): Promise<Feature[]> {
+  return buildDerivedSources(doc, studioId, features, derivedKey, async (s, feats) => {
+    const req = (order: string[]) => ({
+      units: doc.units,
+      features: feats,
+      // names and colours (as the source shows them) go with its parts
+      partMeta: Object.fromEntries(order.map((id) => [id, { name: s.parts[id]?.name, color: partColorFor(s, id, order) }])),
+      upTo: feats.length,
+      meshless: true,
+    });
+    const res = await kernel().build(derivedKey(s.id), req(sourceOrder.get(s.id) ?? Object.keys(s.parts)));
+    // new parts: once more with their colours (everything else comes from the cache)
+    if (JSON.stringify(res.partOrder) !== JSON.stringify(sourceOrder.get(s.id))) {
+      sourceOrder.set(s.id, res.partOrder);
+      await kernel().build(derivedKey(s.id), req(res.partOrder));
+    }
+  });
 }
 
 /** An assembly: build its source Part Studios, then place the instances. */
@@ -63,6 +104,11 @@ async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
       const studio = studioById(doc, id);
       if (!studio) continue;
       sources.set(id, await buildStudio(doc, studio));
+    }
+    // the variants instances choose by their own configuration: each its own build
+    for (const v of used.variants) {
+      const studio = studioById(doc, v.studioId);
+      if (studio) sources.set(sourceKey(v), await buildStudio(doc, variantStudio(studio, v.configuration)));
     }
     if (mySeq !== seq) return;
     // sub-assemblies as solved (the deepest first: each uses the ones inside it)
@@ -110,25 +156,30 @@ async function run() {
   useEditor.setState({ building: true });
   // Colours by creation order need the previous result's order; good enough for display.
   const prevOrder = useEditor.getState().build?.partOrder ?? [];
+  // parts brought from another Part Studio keep its colours unless they are given one here
+  const derived = new Set(useEditor.getState().build?.parts.filter((p) => p.derived).map((p) => p.id));
   const partMeta: Record<string, { name?: string; color?: string; hidden?: boolean }> = {};
   const ids = new Set([...Object.keys(studio.parts), ...prevOrder]);
   for (const id of ids) {
     const m = studio.parts[id];
-    partMeta[id] = { name: m?.name, color: partColorFor(studio, id, prevOrder), hidden: m?.hidden };
+    partMeta[id] = { name: m?.name, color: m?.color ?? (derived.has(id) ? undefined : partColorFor(studio, id, prevOrder)), hidden: m?.hidden };
   }
   try {
+    // as the chosen configuration has them; the Part Studios they derive from are built first
+    const base = configuredFeatures(studio).slice(0, upTo);
+    const all = await withDerivedSources(doc, studio.id, preview ? [...base, preview] : base);
+    if (mySeq !== seq) return;
     const res = await kernel().build(studio.id, {
       units: doc.units,
-      // as the chosen configuration has them
-      features: configuredFeatures(studio).slice(0, upTo),
+      features: all.slice(0, base.length),
       partMeta,
       upTo,
-      preview,
+      preview: preview && all[base.length],
     });
     if (mySeq !== seq) return;
     // Assign palette colours for parts that were new in this build.
-    for (const p of res.parts) if (!studio.parts[p.id]?.color) p.color = partColorFor(studio, p.id, res.partOrder);
-    if (res.preview) for (const p of res.preview.parts) if (!studio.parts[p.id]?.color) p.color = partColorFor(studio, p.id, res.partOrder);
+    for (const p of res.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
+    if (res.preview) for (const p of res.preview.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     useEditor.setState({ build: res, building: false });
   } catch (e) {
     if (e instanceof SupersededError) return;

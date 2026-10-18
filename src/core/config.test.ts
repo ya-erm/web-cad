@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { produce } from 'immer';
 import type { ConfigInput, Feature, PartStudioTab } from './types';
-import { commitConfigured, configKey, configuredFeatures, pruneConfiguration, setConfigured } from './config';
+import { commitConfigured, configKey, configuredFeatures, DIM, pruneConfiguration, setConfigured } from './config';
 
 const extrude = { id: 'e', type: 'extrude', name: 'Extrude 1', params: { depth: '10 mm', thin: false } } as unknown as Feature;
 const fillet = { id: 'f', type: 'fillet', name: 'Fillet 1', params: { radius: '3 mm' } } as unknown as Feature;
@@ -66,5 +66,26 @@ describe('configurations', () => {
     });
     expect(pruned.configuration![0].params).toEqual(['e/depth', 'e/thin']);
     expect(pruned.configuration![0].values.l).toEqual({ 'e/depth': '25 mm', 'e/thin': 'true' });
+  });
+
+  it('a sketch dimension in the table: the chosen value, and an edit of the sketch goes to its cell', () => {
+    const sketch = {
+      id: 'sk',
+      type: 'sketch',
+      name: 'Sketch 1',
+      params: { plane: { kind: 'std', name: 'top' }, entities: [], constraints: [{ id: 'c1', type: 'distance', refs: [], value: '40 mm' }] },
+    } as unknown as Feature;
+    const width: ConfigInput = { id: 'w', name: 'Width', options: [{ id: 'n', name: 'Narrow' }, { id: 'v', name: 'Wide' }], params: [configKey('sk', `${DIM}c1`)], values: { v: { [`sk/${DIM}c1`]: '80 mm' } } };
+    const s = { id: 'ps', type: 'partStudio', name: 'PS', features: [sketch], rollback: null, parts: {}, configuration: [width], configChoice: { w: 'v' } } as unknown as PartStudioTab;
+    const dim = (f: Feature) => (f.type === 'sketch' ? f.params.constraints[0].value : undefined);
+    expect(dim(configuredFeatures(s)[0])).toBe('80 mm');
+    expect(dim(configuredFeatures(s, { w: 'n' })[0])).toBe('40 mm');
+    const next = produce(s, (d) => {
+      const shown = configuredFeatures(d)[0];
+      const typed = produce(shown, (f) => void (f.type === 'sketch' && (f.params.constraints[0].value = '90 mm')));
+      d.features[0] = commitConfigured(d, d.features[0] as Feature, typed);
+    });
+    expect(dim(next.features[0])).toBe('40 mm');
+    expect(next.configuration![0].values.v[`sk/${DIM}c1`]).toBe('90 mm');
   });
 });

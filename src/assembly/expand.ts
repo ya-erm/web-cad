@@ -3,7 +3,7 @@
 
 import type { AssemblyGroup, AssemblyInstance, AssemblyTab, Vec3 } from '../core/types';
 import type { StepAssembly, StepComponent } from '../kernel/protocol';
-import { placementOf, rotationAngles, type AssemblySources, type Placement } from './compose';
+import { placementOf, rotationAngles, sourceKey, type AssemblySources, type Placement } from './compose';
 
 /** The top-level instance a (leaf) instance id belongs to. */
 export const topInstance = (id: string) => {
@@ -182,13 +182,20 @@ export function foldPlacements(tab: AssemblyTab, sources: AssemblySources, moved
  * What an assembly is made of, through its sub-assemblies: the Part Studios of its parts and the sub-assembly
  * tabs — the deepest first, so each one can be solved before the assemblies that use it.
  */
-export function usedTabs(tabs: { id: string; type: string }[], asm: AssemblyTab): { studios: string[]; subs: AssemblyTab[] } {
+export function usedTabs(
+  tabs: { id: string; type: string }[],
+  asm: AssemblyTab,
+): { studios: string[]; subs: AssemblyTab[]; variants: { studioId: string; configuration: Record<string, string> }[] } {
   const studios = new Set<string>();
   const subs: AssemblyTab[] = [];
+  /** Part Studios as instances with configuration options of their own build them (one per source key). */
+  const variants: { studioId: string; configuration: Record<string, string> }[] = [];
   const walk = (a: AssemblyTab, path: string[]) => {
     for (const i of a.instances) {
       if (!i.assemblyId) {
         studios.add(i.studioId);
+        if (i.configuration && Object.keys(i.configuration).length && !variants.some((v) => sourceKey(v) === sourceKey(i)))
+          variants.push({ studioId: i.studioId, configuration: i.configuration });
         continue;
       }
       const sub = tabs.find((x) => x.id === i.assemblyId && x.type === 'assembly') as AssemblyTab | undefined;
@@ -198,7 +205,7 @@ export function usedTabs(tabs: { id: string; type: string }[], asm: AssemblyTab)
     }
   };
   walk(asm, [asm.id]);
-  return { studios: [...studios], subs };
+  return { studios: [...studios], subs, variants };
 }
 
 /**
@@ -213,7 +220,7 @@ export function stepAssemblies(name: string, chosen: AssemblyInstance[], sources
     out.push({ name: title, components: [] });
     out[n].components = list.flatMap((i): StepComponent[] => {
       const at = { name: i.name, position: i.position, rotation: i.rotation };
-      if (!i.assemblyId) return [{ ...at, studioKey: i.studioId, partId: i.partId }];
+      if (!i.assemblyId) return [{ ...at, studioKey: sourceKey(i), partId: i.partId }];
       const sub = sources.get(i.assemblyId)?.assembly;
       if (!sub) return [];
       let j = index.get(sub.id);

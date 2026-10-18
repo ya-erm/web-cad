@@ -77,6 +77,49 @@ describe('agent API', () => {
     expect(bad.error).toMatch(/No option "Huge" in "Size"/);
   }, 60000);
 
+  it('configures sketch dimensions and a checkbox, and gives assembly instances variants of their own', async () => {
+    const s = await session();
+    const r1 = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: '40 mm', h: '30 mm' }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'fillet', edges: { dir: 'z' }, radius: 3 },
+      { op: 'part', part: 'Part 1', name: 'Plate' },
+      // a list: the sketch's width (its first dimension); a checkbox: rounded corners
+      { op: 'configuration', name: 'Size', options: ['Small', 'Large'], params: [{ feature: 'Sketch 1', dimension: 1 }], values: { Large: ['80 mm'] } },
+      { op: 'configuration', name: 'Sharp', checkbox: true, params: [{ feature: 'Fillet 1' }], values: { Off: [false], On: [true] } },
+    ]);
+    expect(r1.error).toBeUndefined();
+    expect(r1.model!.configuration!.map((c) => [c.name, c.options, c.params])).toEqual([
+      ['Size', ['Small', 'Large'], ['Sketch 1.dimension 1']],
+      ['Sharp', ['Off', 'On'], ['Fillet 1.suppressed']],
+    ]);
+    const r2 = await s.run([{ op: 'configure', values: { Size: 'Large', Sharp: true } }]);
+    expect(r2.model!.parts[0].size).toEqual([80, 30, 10]);
+    expect(r2.model!.parts[0].volume).toBeCloseTo(80 * 30 * 10, 3);
+    await s.run([{ op: 'configure', values: { Size: 'Small', Sharp: false } }]);
+    // two instances: the Part Studio's own choice, and the large one
+    const r3 = await s.run([
+      { op: 'assembly', name: 'Rig' },
+      { op: 'insert', part: 'Plate', name: 'A', position: [0, 0, 0], fixed: true },
+      { op: 'insert', part: 'Plate', name: 'B', position: [0, 100, 0], configuration: { Size: 'Large' } },
+    ]);
+    expect(r3.error).toBeUndefined();
+    const [a, b] = r3.assembly!.instances;
+    expect([a.bboxMin, a.bboxMax]).toEqual([
+      [-20, -15, 0],
+      [20, 15, 10],
+    ]);
+    expect(b.configuration).toEqual({ Size: 'Large' });
+    expect([b.bboxMin, b.bboxMax]).toEqual([
+      [-40, 85, 0],
+      [40, 115, 10],
+    ]);
+    // back to the Part Studio's choice
+    const r4 = await s.run([{ op: 'place', instance: 'B', configuration: {} }]);
+    expect(r4.assembly!.instances[1].configuration).toBeUndefined();
+    expect(r4.assembly!.instances[1].bboxMax).toEqual([20, 115, 10]);
+  }, 90000);
+
   it('reports bad queries without changing the document', async () => {
     const s = await session();
     await s.run([{ op: 'sketch', shapes: [{ type: 'rect', w: 20, h: 20 }] }, { op: 'extrude', depth: 5 }]);

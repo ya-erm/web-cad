@@ -5,6 +5,8 @@ import type { Draft } from 'immer';
 import type { CadDocument, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
 import { uid } from '../core/ids';
 import { configuredFeatures } from '../core/config';
+import { derivedBuildOrder, derivedInputs, studioVersion } from '../core/derived';
+import { withDerivedSources } from '../store/rebuild';
 import { LENGTH_FACTOR } from '../core/expr';
 import { kernel } from '../kernel/client';
 import { useDoc } from '../store/docStore';
@@ -46,28 +48,30 @@ import { TitleBlockSettings } from './TitleBlockSettings';
 const projCache = new Map<string, ProjectionData>();
 const builtStudios = new Map<string, unknown>();
 
-function studioKeyOf(s: PartStudioTab) {
-  return `${s.id}:${s.features.length}:${JSON.stringify(s.features).length}:${s.rollback}:${JSON.stringify(s.parts).length}:${JSON.stringify([s.configuration, s.configChoice])}`;
+function studioKeyOf(s: PartStudioTab, doc?: CadDocument) {
+  // a Part Studio that derives from others changes with them
+  const sources = doc ? derivedBuildOrder(doc, s.id, configuredFeatures(s)).map((id) => studioVersion(doc, id)) : [];
+  return `${s.id}:${s.features.length}:${JSON.stringify(s.features).length}:${s.rollback}:${JSON.stringify(s.parts).length}:${JSON.stringify([s.configuration, s.configChoice, sources])}`;
 }
 
 async function ensureBuilt(doc: CadDocument, studio: PartStudioTab) {
-  // built as its chosen configuration has it
-  const inputs = [studio.features, studio.configuration, studio.configChoice];
+  // built as its chosen configuration has it, after the Part Studios it derives from
+  const inputs = [studio.features, studio.configuration, studio.configChoice, ...derivedInputs(doc, studio)];
   const built = builtStudios.get(studio.id) as unknown[] | undefined;
-  if (built?.every((x, i) => x === inputs[i]) && !useEditor.getState().editing) return;
-  const features = configuredFeatures(studio);
+  if (built?.length === inputs.length && built.every((x, i) => x === inputs[i]) && !useEditor.getState().editing) return;
   const upTo = studio.rollback ?? studio.features.length;
+  const features = await withDerivedSources(doc, studio.id, configuredFeatures(studio).slice(0, upTo));
   await kernel().build(studio.id, {
     units: doc.units,
-    features: features.slice(0, upTo),
+    features,
     partMeta: Object.fromEntries(Object.entries(studio.parts).map(([k, v]) => [k, { name: v.name, color: v.color, hidden: v.hidden }])),
     upTo,
   });
   builtStudios.set(studio.id, inputs);
 }
 
-function viewKey(v: DrawingView, studio: PartStudioTab) {
-  return `${studioKeyOf(studio)}|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`;
+function viewKey(v: DrawingView, studio: PartStudioTab, doc?: CadDocument) {
+  return `${studioKeyOf(studio, doc)}|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`;
 }
 
 function useProjections(doc: CadDocument, drawing: DrawingData) {
@@ -79,7 +83,7 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
       for (const v of drawing.views) {
         const studio = doc.tabs.find((x) => x.id === v.studioId) as PartStudioTab | undefined;
         if (!studio || studio.type !== 'partStudio') continue;
-        const key = viewKey(v, studio);
+        const key = viewKey(v, studio, doc);
         if (projCache.has(key) || pending.current.has(key)) continue;
         pending.current.add(key);
         try {
@@ -99,7 +103,7 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
   return (v: DrawingView): ProjectionData | undefined => {
     const studio = doc.tabs.find((x) => x.id === v.studioId) as PartStudioTab | undefined;
     if (!studio || studio.type !== 'partStudio') return undefined;
-    const exact = projCache.get(viewKey(v, studio));
+    const exact = projCache.get(viewKey(v, studio, doc));
     if (exact) return exact;
     // stale projection of the same view while the new one is computed
     for (const p of projCache.values()) if (p.key.startsWith(`${studio.id}:`) && p.key.endsWith(`|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`)) return p;

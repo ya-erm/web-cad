@@ -6,9 +6,9 @@ import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, MateConn
 import { uid } from '../core/ids';
 import { LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { makeEvalContext } from '../core/features';
-import { composeAssembly, insertPosition, instanceName, type AssemblySources, type StudioData } from '../assembly/compose';
+import { composeAssembly, insertPosition, instanceName, sourceKey, variantStudio, type AssemblySources, type StudioData } from '../assembly/compose';
 import { addSubassemblies, applySolve, groupName, makeGroup, makeRelation, mateName, nearestFlip, relationName } from '../assembly/mates';
-import { containsAssembly, expandAssembly, findInstance, topInstance } from '../assembly/expand';
+import { containsAssembly, expandAssembly, findInstance, topInstance, usedTabs } from '../assembly/expand';
 import { AgentError, matchOnPart } from './runner';
 import type { AssemblyOp, AssemblySummary, MateEndSpec, Num, Pt3, RunReport } from './types';
 
@@ -29,6 +29,25 @@ const norm = (s: string) => s.replace(/\s*\/\s*/g, '/').trim().toLowerCase();
 export async function studioSources(doc: CadDocument, host: AssemblyHost): Promise<AssemblySources> {
   const out: AssemblySources = new Map();
   for (const t of doc.tabs) if (t.type === 'partStudio') out.set(t.id, await host.studio(doc, t));
+  // the variants instances of the assemblies choose by their own configuration
+  for (const a of doc.tabs)
+    if (a.type === 'assembly')
+      for (const v of usedTabs(doc.tabs, a).variants) {
+        const s = doc.tabs.find((t): t is PartStudioTab => t.id === v.studioId && t.type === 'partStudio');
+        if (s && !out.has(sourceKey(v))) out.set(sourceKey(v), await host.studio(doc, variantStudio(s, v.configuration)));
+      }
+  return out;
+}
+
+/** An instance's own configuration by names: input → option. */
+function configurationNames(doc: CadDocument, inst: AssemblyInstance): Record<string, string> {
+  const s = doc.tabs.find((t): t is PartStudioTab => t.id === inst.studioId && t.type === 'partStudio');
+  const out: Record<string, string> = {};
+  for (const [inputId, optionId] of Object.entries(inst.configuration ?? {})) {
+    const input = s?.configuration?.find((x) => x.id === inputId);
+    const o = input?.options.find((x) => x.id === optionId);
+    if (input && o) out[input.name] = o.name;
+  }
   return out;
 }
 
@@ -52,6 +71,7 @@ export function summarizeAssembly(doc: CadDocument, asm: AssemblyTab, sources: A
         ...(i.fixed ? { fixed: true } : {}),
         ...(i.hidden ? { hidden: true } : {}),
         ...(i.flexible ? { flexible: true } : {}),
+        ...(i.configuration ? { configuration: configurationNames(doc, i) } : {}),
         ...box,
       };
     }),
@@ -73,7 +93,14 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
   const added: string[] = [];
   const changed = new Set<string>();
   const removed: string[] = [];
-  const sources = () => addSubassemblies(d.tabs, need(), new Map(base));
+  /** The sources of the assembly as it is now: the variants its instances choose built when first needed. */
+  const sources = async () => {
+    for (const v of usedTabs(d.tabs, need()).variants) {
+      const s = d.tabs.find((t): t is PartStudioTab => t.id === v.studioId && t.type === 'partStudio');
+      if (s && !base.has(sourceKey(v))) base.set(sourceKey(v), await host.studio(d, variantStudio(s, v.configuration)));
+    }
+    return addSubassemblies(d.tabs, need(), new Map(base));
+  };
   function need(): AssemblyTab {
     if (!asm) throw new AgentError('No assembly: open or create one first with {"op":"assembly","name":"…"}');
     return asm;
@@ -90,6 +117,21 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
     const i = a.instances.find((x) => x.name === n || x.id === n) ?? a.instances.find((x) => norm(x.name) === norm(n));
     if (!i) throw new AgentError(`No instance "${n}". Instances: ${a.instances.map((x) => x.name).join(', ') || '(none)'}`);
     return i;
+  };
+  /** An instance's own configuration of its Part Studio from names: input → option. */
+  const configurationOf = (inst: AssemblyInstance, names: Record<string, string>): Record<string, string> => {
+    if (inst.assemblyId) throw new AgentError('"configuration" is for an instance of a part');
+    const s = d.tabs.find((t): t is PartStudioTab => t.id === inst.studioId && t.type === 'partStudio');
+    const inputs = s?.configuration ?? [];
+    const out: Record<string, string> = {};
+    for (const [inputName, optionName] of Object.entries(names)) {
+      const input = inputs.find((x) => x.name === inputName) ?? inputs.find((x) => x.name.toLowerCase() === inputName.toLowerCase());
+      if (!input) throw new AgentError(`No configuration "${inputName}" in ${s?.name ?? 'the Part Studio'}. Configurations: ${inputs.map((x) => x.name).join(', ') || '(none)'}`);
+      const o = input.options.find((x) => x.name === optionName) ?? input.options.find((x) => x.name.toLowerCase() === String(optionName).toLowerCase());
+      if (!o) throw new AgentError(`No option "${optionName}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
+      out[input.id] = o.id;
+    }
+    return out;
   };
   const mateByName = (n: string): AssemblyMate => {
     const m = (need().mates ?? []).find((x) => x.name === n || x.id === n) ?? (need().mates ?? []).find((x) => x.name.toLowerCase() === n.toLowerCase());
@@ -108,7 +150,7 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
     if (spec.connector) {
       const studio = d.tabs.find((x) => x.id === leaf.studioId && x.type === 'partStudio') as PartStudioTab | undefined;
       const f = studio?.features.find((x) => x.type === 'mateConnector' && (x.name === spec.connector || x.name.toLowerCase() === spec.connector!.toLowerCase()));
-      const mc = f && src.get(leaf.studioId)?.mates.find((m) => m.featureId === f.id);
+      const mc = f && src.get(sourceKey(leaf))?.mates.find((m) => m.featureId === f.id);
       if (!f || !mc) throw new AgentError(`No mate connector "${spec.connector}" in ${studio?.name ?? 'the Part Studio'}`);
       if (mc.owner !== leaf.partId) throw new AgentError(`Mate connector "${spec.connector}" does not belong to the part of "${leaf.name}"`);
       ref = { kind: 'connector', featureId: f.id };
@@ -148,7 +190,7 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
       }
       case 'insert': {
         const a = need();
-        const src = sources();
+        const src = await sources();
         let inst: AssemblyInstance;
         if (op.assembly) {
           const sub = d.tabs.find((t) => t.type === 'assembly' && (t.name === op.assembly || t.name.toLowerCase() === op.assembly!.toLowerCase())) as AssemblyTab | undefined;
@@ -187,6 +229,7 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
           if (!inst.assemblyId) throw new AgentError('"flexible" is for a sub-assembly ("assembly")');
           inst.flexible = true;
         }
+        if (op.configuration && Object.keys(op.configuration).length) inst.configuration = configurationOf(inst, op.configuration);
         a.instances.push(inst);
         added.push(inst.name);
         return;
@@ -206,13 +249,18 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
             delete i.flex;
           }
         }
+        if (op.configuration !== undefined) {
+          // {} — back to the Part Studio's own options
+          if (Object.keys(op.configuration).length) i.configuration = { ...i.configuration, ...configurationOf(i, op.configuration) };
+          else delete i.configuration;
+        }
         if (op.name) i.name = op.name;
         changed.add(i.name);
         return;
       }
       case 'mate': {
         const a = need();
-        const src = sources();
+        const src = await sources();
         const ea = await end(op.a, src);
         const eb = await end(op.b, src);
         const ends2 = op.type === 'width' ? { a2: await end(op.a2 ?? op.a, src), b2: await end(op.b2 ?? op.b, src) } : {};
@@ -260,7 +308,7 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
         const mb = op.type === 'screw' ? ma : mateByName(op.b ?? '');
         const value = op.type === 'gear' ? (typeof op.value === 'number' ? op.value : Number(op.value)) : len(op.value, 'value');
         if (!(value > 0)) throw new AgentError(`Invalid relation value "${op.value}"`);
-        const r = makeRelation(a, sources(), {
+        const r = makeRelation(a, await sources(), {
           id: uid('rl'),
           name: op.name ?? relationName(a, op.type),
           type: op.type,
@@ -309,7 +357,7 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
     return { doc, report: { ok: false, error: `op #${i} (${ops[i]?.op ?? '?'}): ${msg}`, added: [], changed: [], removed: [], failed: [], applied: false } };
   }
   const a = need();
-  const src = sources();
+  const src = await sources();
   const failedIds = applySolve(a, src);
   // the mates of flexible sub-assemblies act here too: "Sub <1> / Revolute 1"
   const flat = expandAssembly(a, src);

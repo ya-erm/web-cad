@@ -15,6 +15,8 @@ export type Row = { when?: (p: P) => boolean } & (
   | { kind: 'features'; key: string; label: string }
   | { kind: 'merge' }
   | { kind: 'file' }
+  /** Derived: the source Part Studio and its parts. */
+  | { kind: 'derivedSource' }
   | { kind: 'section'; label: string }
 );
 
@@ -328,6 +330,7 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'text', key: 'description', label: 'Description' },
   ],
   import: [{ kind: 'file' }],
+  derived: [{ kind: 'derivedSource' }],
   helix: [
     { kind: 'sel', key: 'axis' },
     { kind: 'expr', key: 'radius', label: 'Radius', unit: 'length' },

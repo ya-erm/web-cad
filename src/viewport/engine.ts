@@ -9,7 +9,7 @@ import { STD_PLANES, frameFromNormal, toWorld, v3 } from '../core/math';
 import { adaptRef, FIELD_SPECS, type SelToken } from '../core/fieldSpecs';
 import { computeRegions, type SketchRegion } from '../sketch/regions';
 import { arcAngles, entityMap, pointOf } from '../sketch/curves';
-import type { WorldGeom } from '../sketch/useGeometry';
+import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
 import type { BuildResult, PartMesh, SketchResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { useEditor, refKey, sameRef } from '../store/editorStore';
@@ -1406,18 +1406,7 @@ export class Engine {
     }
     if (ref.kind === 'edge') {
       const po = this.parts.get(ref.partId);
-      const info = po?.data.edges[ref.index];
-      if (!po || !info) return null;
-      if (info.type === 'LINE') return { kind: 'line', a: info.start, b: info.end };
-      if (info.type === 'CIRCLE' && info.circleCenter && info.axis && info.radius) {
-        if (info.closed) return { kind: 'circle', c: info.circleCenter, r: info.radius, axis: info.axis };
-        return { kind: 'arc', c: info.circleCenter, r: info.radius, axis: info.axis, start: info.start, mid: info.center, end: info.end };
-      }
-      const st = po.data.edgeRanges[ref.index * 2];
-      const n = po.data.edgeRanges[ref.index * 2 + 1];
-      const pts: Vec3[] = [];
-      for (let k = st; k < st + n; k++) pts.push(Array.from(po.data.edgePositions.subarray(k * 3, k * 3 + 3)) as Vec3);
-      return { kind: 'poly', pts };
+      return po ? edgeGeometry(po.data, ref.index) : null;
     }
     if (ref.kind === 'sketchEntity') {
       const curve = this.curveSegs.get(ref.sketchId);

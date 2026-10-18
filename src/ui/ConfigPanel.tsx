@@ -3,7 +3,8 @@
 
 import { useEffect, useState } from 'react';
 import type { ConfigInput, Feature, PartStudioTab } from '../core/types';
-import { configKey, ownValue, splitConfigKey } from '../core/config';
+import { configKey, DIM, ownValue, splitConfigKey } from '../core/config';
+import { isDimension } from '../core/features';
 import { uid } from '../core/ids';
 import { activeStudio, useDoc, withStudio } from '../store/docStore';
 import { FORMS } from './forms';
@@ -17,14 +18,26 @@ export interface ConfigurableParam {
   param: string;
   label: string;
   kind: 'expr' | 'check';
+  /** A sketch dimension's value now: the add-parameter menu shows it to tell the dimensions apart. */
+  value?: string;
 }
 
-/** What of a feature a configuration can set (its dialog's expressions and checkboxes, and its suppression). */
+/** Names of sketch dimensions in the configuration table: "Diameter 2: 10 mm". */
+const DIM_LABELS: Partial<Record<string, string>> = { distance: 'Distance', hdistance: 'Horizontal distance', vdistance: 'Vertical distance', radius: 'Radius', diameter: 'Diameter', angle: 'Angle' };
+
+/**
+ * What of a feature a configuration can set: its dialog's expressions and checkboxes, a sketch's dimensions (numbered
+ * in the sketch's order, with their values now), and whether it is disabled.
+ */
 export function configurableParams(f: Feature): ConfigurableParam[] {
   const out: ConfigurableParam[] = [];
   for (const row of FORMS[f.type] ?? [])
     if ((row.kind === 'expr' || row.kind === 'check') && !out.some((p) => p.param === row.key))
       out.push({ param: row.key, label: row.label, kind: row.kind });
+  if (f.type === 'sketch')
+    f.params.constraints.filter(isDimension).forEach((c, n) =>
+      out.push({ param: `${DIM}${c.id}`, label: `${t(DIM_LABELS[c.type] ?? 'Dimension')} ${n + 1}`, kind: 'expr', value: c.value }),
+    );
   out.push({ param: 'suppressed', label: 'Disabled', kind: 'check' });
   return out;
 }
@@ -87,7 +100,6 @@ function TextCell({ value, placeholder, onCommit, className }: { value: string; 
  */
 function AddParamMenu({ studio, input, at, onClose }: { studio: PartStudioTab; input: ConfigInput; at: DOMRect; onClose: () => void }) {
   const groups = studio.features
-    .filter((f) => f.type !== 'sketch')
     .map((f) => ({ f, params: configurableParams(f).filter((p) => !input.params.includes(configKey(f.id, p.param))) }))
     .filter((g) => g.params.length);
   const width = 260;
@@ -117,6 +129,7 @@ function AddParamMenu({ studio, input, at, onClose }: { studio: PartStudioTab; i
             >
               <span className="menu-icon" />
               {t(p.label)}
+              {p.value ? `: ${p.value}` : ''}
             </div>
           ))}
         </div>
@@ -130,6 +143,8 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
   /** Where the "+ Parameter" menu opens (its button), while it is open. */
   const [adding, setAdding] = useState<DOMRect | null>(null);
   const chosen = input.options.find((o) => o.id === studio.configChoice?.[input.id])?.id ?? input.options[0]?.id;
+  /** A checkbox input: its two options (off, on) stay as they are. */
+  const checkbox = input.kind === 'checkbox';
   const cols = input.params.map((key) => ({ key, ...paramTitle(studio.features, key) }));
   const own = (key: string) => {
     const { featureId, param } = splitConfigKey(key);
@@ -153,7 +168,7 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
   return (
     <div className="cfg-input">
       <div className="cfg-input-head">
-        <Icon name="layers" size={14} />
+        <Icon name={checkbox ? 'check' : 'layers'} size={14} />
         <TextCell value={input.name} className="cfg-input-name" onCommit={(v) => v && change((i) => void (i.name = v))} />
         <span className="spacer" />
         <button className={'btn small' + (adding ? ' active' : '')} onClick={(e) => setAdding(adding ? null : e.currentTarget.getBoundingClientRect())}>
@@ -213,7 +228,8 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
                 <td>
                   <div className="cfg-name">
                     <input type="radio" name={`cfg-${input.id}`} checked={o.id === chosen} title={t('Show this option')} onChange={() => chooseOption(input.id, o.id)} />
-                    <TextCell value={o.name} onCommit={(v) => v && change((i) => void (i.options[row].name = v))} />
+                    {/* a checkbox input: off and on, as they are */}
+                    {checkbox ? <span className="cfg-fixed-name">{o.name}</span> : <TextCell value={o.name} onCommit={(v) => v && change((i) => void (i.options[row].name = v))} />}
                     {row === 0 && (
                       <span className="cfg-default" title={t('The default option')}>
                         {t('default')}
@@ -236,7 +252,7 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
                 {!cols.length && <td />}
                 <td className="cfg-row-actions">
                   {/* shown on hovering the row; the last option stays */}
-                  {input.options.length > 1 && (
+                  {input.options.length > 1 && !checkbox && (
                     <button
                       className="icon-btn"
                       title={t('Delete option')}
@@ -256,28 +272,72 @@ function InputTable({ studio, input }: { studio: PartStudioTab; input: ConfigInp
           </tbody>
         </table>
       </div>
-      <button className="btn small cfg-add-row" onClick={() => change((i) => void i.options.push({ id: uid('co'), name: `${t('Option')} ${i.options.length + 1}` }))}>
-        <Icon name="plus" size={12} /> {t('Option')}
-      </button>
+      {!checkbox && (
+        <button className="btn small cfg-add-row" onClick={() => change((i) => void i.options.push({ id: uid('co'), name: `${t('Option')} ${i.options.length + 1}` }))}>
+          <Icon name="plus" size={12} /> {t('Option')}
+        </button>
+      )}
     </div>
   );
 }
 
-/** Add a list input with two options. */
-function addInput(studio: PartStudioTab) {
-  const n = (studio.configuration?.length ?? 0) + 1;
+/** Add an input: a list with two options, or a checkbox (off / on). */
+function addInput(studio: PartStudioTab, kind: 'list' | 'checkbox' = 'list') {
+  const n = (studio.configuration?.filter((i) => (i.kind ?? 'list') === kind).length ?? 0) + 1;
+  const base = kind === 'checkbox' ? t('Checkbox') : t('Configuration');
   edit(
     (_, inputs) =>
       void inputs.push({
         id: uid('ci'),
-        name: n === 1 ? t('Configuration') : `${t('Configuration')} ${n}`,
-        options: [
-          { id: uid('co'), name: t('Default') },
-          { id: uid('co'), name: `${t('Option')} 2` },
-        ],
+        name: n === 1 ? base : `${base} ${n}`,
+        ...(kind === 'checkbox' ? { kind } : {}),
+        options:
+          kind === 'checkbox'
+            ? [
+                { id: uid('co'), name: t('Off') },
+                { id: uid('co'), name: t('On') },
+              ]
+            : [
+                { id: uid('co'), name: t('Default') },
+                { id: uid('co'), name: `${t('Option')} 2` },
+              ],
         params: [],
         values: {},
       }),
+  );
+}
+
+/** "+": a list input or a checkbox input (the menu stands in the window: the panel would clip it). */
+function AddInputButton({ studio, primary }: { studio: PartStudioTab; primary?: boolean }) {
+  const [at, setAt] = useState<DOMRect | null>(null);
+  return (
+    <>
+      {primary ? (
+        <button className="btn small primary" onClick={(e) => setAt(at ? null : e.currentTarget.getBoundingClientRect())}>
+          <Icon name="plus" size={12} /> {t('Add input')}
+        </button>
+      ) : (
+        <button className="icon-btn" style={{ width: 22, height: 22 }} title={t('Add input')} onClick={(e) => setAt(at ? null : e.currentTarget.getBoundingClientRect())}>
+          <Icon name="plus" size={14} />
+        </button>
+      )}
+      {at && (
+        <div className="dropdown" style={{ position: 'fixed', top: at.bottom + 4, left: Math.max(4, at.right - 200), right: 'auto', width: 200 }} onMouseLeave={() => setAt(null)}>
+          {(['list', 'checkbox'] as const).map((k) => (
+            <div
+              key={k}
+              className="dropdown-item"
+              onClick={() => {
+                setAt(null);
+                addInput(studio, k);
+              }}
+            >
+              <Icon name={k === 'list' ? 'layers' : 'check'} size={14} /> {t(k === 'list' ? 'List' : 'Checkbox')}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -292,9 +352,7 @@ export function ConfigPanel({ onClose }: { onClose: () => void }) {
       <div className="panel-header drag-handle" title={t('Drag to move; double-click to put it back next to its button')} onPointerDown={drag.onPointerDown} onDoubleClick={drag.reset}>
         <Icon name="layers" size={16} /> {t('Configurations')}
         <span className="spacer" />
-        <button className="icon-btn" style={{ width: 22, height: 22 }} title={t('Add input')} onClick={() => addInput(studio)}>
-          <Icon name="plus" size={14} />
-        </button>
+        <AddInputButton studio={studio} />
         <button className="icon-btn" style={{ width: 22, height: 22 }} title={t('Close')} onClick={onClose}>
           <Icon name="close" size={14} />
         </button>
@@ -304,9 +362,7 @@ export function ConfigPanel({ onClose }: { onClose: () => void }) {
           <div className="sel-empty cfg-empty">
             {t('A configuration makes variants of the model: its options are the rows of a table, and the parameters of features — dimensions, checkboxes, whether a feature is disabled, variables — are its columns.')}
             <div style={{ marginTop: 10 }}>
-              <button className="btn small primary" onClick={() => addInput(studio)}>
-                <Icon name="plus" size={12} /> {t('Add input')}
-              </button>
+              <AddInputButton studio={studio} primary />
             </div>
           </div>
         ) : (
@@ -325,6 +381,14 @@ export function ConfigChooser({ studio }: { studio: PartStudioTab }) {
     <div className="cfg-chooser">
       {inputs.map((input) => {
         const chosen = input.options.find((o) => o.id === studio.configChoice?.[input.id])?.id ?? input.options[0]?.id;
+        // a checkbox input: on is its second option
+        if (input.kind === 'checkbox' && input.options.length === 2)
+          return (
+            <label key={input.id} className="cfg-choose cfg-check">
+              <input type="checkbox" checked={chosen === input.options[1].id} onChange={(e) => chooseOption(input.id, input.options[e.target.checked ? 1 : 0].id)} />
+              <span>{input.name}</span>
+            </label>
+          );
         return (
           <label key={input.id} className="cfg-choose">
             <span>{input.name}</span>

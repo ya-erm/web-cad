@@ -25,6 +25,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   plane: 'Plane',
   variable: 'Variable',
   import: 'Import',
+  derived: 'Derived',
   helix: 'Helix',
   mateConnector: 'Mate connector',
 };
@@ -144,6 +145,7 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
     plane: () => ({ planeType: 'offset', refs: [], offset: '10 mm', angle: '30 deg', flip: false, size: '' }),
     variable: () => ({ name: 'width', value: '10 mm', description: '', varType: 'length' }),
     import: () => ({ fileName: '', format: 'step', data: '' }),
+    derived: () => ({ studioId: '', parts: [] }),
     helix: () => ({ axis: [], pitch: '5 mm', turns: '5', radius: '10 mm', leftHanded: false }),
     mateConnector: () => ({
       location: [],

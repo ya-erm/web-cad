@@ -28,6 +28,7 @@ export const FEATURE_HELP: Record<FeatureType, string> = {
   plane: 'plane',
   variable: 'variable',
   import: 'import',
+  derived: 'derived',
   helix: 'helix',
   mateConnector: 'mate-connector',
 };

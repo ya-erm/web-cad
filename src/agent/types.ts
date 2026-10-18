@@ -98,7 +98,8 @@ type Named = { name?: string };
 
 export type AgentOp =
   | (Named & { op: 'variable'; name: string; value: Num; type?: 'length' | 'angle' | 'number' | 'any'; description?: string })
-  | (Named & { op: 'sketch'; plane?: PlaneSpec; shapes: Shape[] })
+  /** `use` (Onshape Use): edges of the model projected onto the sketch, fixed and linked — they follow their source. */
+  | (Named & { op: 'sketch'; plane?: PlaneSpec; shapes: Shape[]; use?: Edges })
   | (Named & {
       op: 'extrude';
       sketch?: string;
@@ -162,6 +163,11 @@ export type AgentOp =
   | (Named & { op: 'deletePart'; parts: Parts })
   /** Any feature type with raw params; values like {"$edges": …} are resolved (see docs). */
   | (Named & { op: 'feature'; type: FeatureType; params: Record<string, unknown> })
+  /**
+   * Derived (Onshape): parts of another Part Studio of the document (`studio`, by name), linked one way — they stand
+   * where they are there and follow its changes. `parts` — their names (all of them by default).
+   */
+  | (Named & { op: 'derived'; studio: string; parts?: string[] })
   /** Merge params into an existing feature (same $-queries as 'feature'). */
   | { op: 'set'; feature: string; params: Record<string, unknown> }
   | { op: 'setVariable'; name: string; value: Num }
@@ -173,9 +179,17 @@ export type AgentOp =
    * (a dialog field: `depth`, `thin`…; `suppressed` by default) or `{variable}`; `values[option]` — one value per
    * parameter (an expression or number, true / false, null — the feature's own). Replaces an input of that name.
    */
-  | { op: 'configuration'; name: string; options: string[]; params?: ConfigParamSpec[]; values?: Record<string, (Num | boolean | null)[]> }
-  /** Choose options of configuration inputs: input name → option name. */
-  | { op: 'configure'; values: Record<string, string> }
+  | {
+      op: 'configuration';
+      name: string;
+      /** The options (rows); a `checkbox` input has two — off and on (by default named "Off", "On"). */
+      options?: string[];
+      checkbox?: boolean;
+      params?: ConfigParamSpec[];
+      values?: Record<string, (Num | boolean | null)[]>;
+    }
+  /** Choose options of configuration inputs: input name → option name (a checkbox input: true / false too). */
+  | { op: 'configure'; values: Record<string, string | boolean> }
   | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean };
 
 /**
@@ -195,9 +209,21 @@ export type AssemblyOp =
    * Insert a part of a Part Studio (`part`, `studio?`) or a whole assembly as a sub-assembly (`assembly`;
    * `flexible` — its parts move here as its own mates allow).
    */
-  | { op: 'insert'; part?: string; studio?: string; assembly?: string; name?: string; position?: Pt3; rotation?: Pt3; fixed?: boolean; flexible?: boolean }
+  | {
+      op: 'insert';
+      part?: string;
+      studio?: string;
+      assembly?: string;
+      name?: string;
+      position?: Pt3;
+      rotation?: Pt3;
+      fixed?: boolean;
+      flexible?: boolean;
+      /** Its own configuration of the Part Studio: input name → option name (the others follow the Part Studio). */
+      configuration?: Record<string, string>;
+    }
   /** Move / turn / fix / hide / rename an instance (positions in document units, rotation in degrees about X, Y, Z); make a sub-assembly flexible or rigid. */
-  | { op: 'place'; instance: string; position?: Pt3; rotation?: Pt3; fixed?: boolean; hidden?: boolean; name?: string; flexible?: boolean }
+  | { op: 'place'; instance: string; position?: Pt3; rotation?: Pt3; fixed?: boolean; hidden?: boolean; name?: string; flexible?: boolean; configuration?: Record<string, string> }
   | {
       op: 'mate';
       type: MateType;
@@ -220,7 +246,19 @@ export type AssemblyOp =
 /** An assembly in a report: instances (placement and box in document units), mates and whether they hold. */
 export interface AssemblySummary {
   name: string;
-  instances: { name: string; source: string; position: Pt3; rotation: Pt3; fixed?: boolean; hidden?: boolean; flexible?: boolean; bboxMin?: Pt3; bboxMax?: Pt3 }[];
+  instances: {
+    name: string;
+    source: string;
+    position: Pt3;
+    rotation: Pt3;
+    fixed?: boolean;
+    hidden?: boolean;
+    flexible?: boolean;
+    /** Its own configuration options: input name → option name. */
+    configuration?: Record<string, string>;
+    bboxMin?: Pt3;
+    bboxMax?: Pt3;
+  }[];
   mates: { name: string; type: string; a: string; b: string; ok: boolean }[];
   groups: { name: string; instances: string[] }[];
   relations: { name: string; type: string; ok: boolean }[];
@@ -256,7 +294,11 @@ export interface SketchSummary {
 
 /** Model state in document units (volume in unit³). */
 /** A configured parameter: a feature's dialog field (`suppressed` — whether it is disabled) or a variable's value. */
-export type ConfigParamSpec = { feature: string; param?: string } | { variable: string };
+export type ConfigParamSpec =
+  | { feature: string; param?: string }
+  /** A dimension of a sketch: its number among the sketch's dimensions (from 1, in the order they were made). */
+  | { feature: string; dimension: number }
+  | { variable: string };
 
 export interface ModelSummary {
   units: { length: string; angle: string };

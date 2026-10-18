@@ -7,7 +7,7 @@ import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
 import { v3 } from '../core/math';
 import { FeatureError, compoundOf, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
-import { applyFeature } from './features';
+import { applyFeature, type SourceBuild, type SourceLookup } from './features';
 import { exportMesh, meshPart } from './meshing';
 import type {
   BuildRequest,
@@ -61,24 +61,47 @@ export class StudioBuilder {
   /** State shown to the user after the last build (for export/measure/projections). */
   current: BuildState = emptyState();
   private meta: Meta = {};
+  /** Other Part Studios' builders by key (Derived), for the build under way. */
+  private sources?: SourceLookup;
 
+  /** A part's name: given in the Part Studio, its name in the source (Derived), else "Part N". */
   partName(st: BuildState, id: string): string {
     const m = this.meta[id];
     if (m?.name) return m.name;
+    const d = st.derived.get(id);
+    if (d) return d.name;
     return `Part ${st.partOrder.indexOf(id) + 1}`;
   }
 
+  /** A part's own colour, if it has one (given here, or its colour in the source). */
+  ownColor(st: BuildState, id: string): string | undefined {
+    return this.meta[id]?.color || st.derived.get(id)?.color;
+  }
+
   partColor(id: string): string {
-    return this.meta[id]?.color || DEFAULT_PART_COLOR;
+    return this.ownColor(this.current, id) || DEFAULT_PART_COLOR;
+  }
+
+  /** This builder's last build, as a source for Derived features of other Part Studios. */
+  asSource(): SourceBuild {
+    const st = this.current;
+    return { state: st, name: (id) => this.partName(st, id), color: (id) => this.ownColor(st, id) };
   }
 
   private meshOf(st: BuildState, id: string, shape: Shape3D, quality: number): PartMesh {
-    return meshPart(id, shape, { name: this.partName(st, id), color: this.partColor(id), hidden: !!this.meta[id]?.hidden }, quality);
+    const m = meshPart(id, shape, { name: this.partName(st, id), color: this.ownColor(st, id) || DEFAULT_PART_COLOR, hidden: !!this.meta[id]?.hidden }, quality);
+    if (st.derived.has(id)) m.derived = true;
+    return m;
   }
 
-  async build(req: BuildRequest): Promise<BuildResult> {
+  /**
+   * Build the features (incrementally). `sources` — the builders of other Part Studios by key, for Derived
+   * features (built before this one).
+   */
+  async build(req: BuildRequest, sources?: (key: string) => StudioBuilder | undefined): Promise<BuildResult> {
     const t0 = performance.now();
     this.meta = req.partMeta;
+    this.sources = sources ? (key) => sources(key)?.asSource() : undefined;
     const ec: EvalContext = { vars: {}, lengthUnit: req.units.length, angleUnit: req.units.angle };
     const n = Math.max(0, Math.min(req.upTo, req.features.length));
     const keys: string[] = [hash(`root|${req.units.length}|${req.units.angle}`)];
@@ -100,7 +123,7 @@ export class StudioBuilder {
       if (!f.suppressed) {
         const next = cloneState(prev);
         try {
-          const out = await applyFeature(next, f, ec);
+          const out = await applyFeature(next, f, ec, this.sources);
           st = next;
           if (out.warning) status = { ok: true, warning: out.warning };
         } catch (e) {
@@ -121,7 +144,9 @@ export class StudioBuilder {
     const result: BuildResult = {
       type: 'build',
       reqId: req.reqId,
-      parts: [...final.parts.values()].map((p) => this.meshOf(final, p.id, p.shape, quality)),
+      // a source built for another Part Studio's Derived feature: no meshes, only its parts' names
+      parts: req.meshless ? [] : [...final.parts.values()].map((p) => this.meshOf(final, p.id, p.shape, quality)),
+      partList: [...final.parts.keys()].map((id) => ({ id, name: this.partName(final, id) })),
       sketches: this.sketchResults(final),
       planes: this.planeResults(final),
       mates: [...final.mates.values()].map((m) => ({ featureId: m.featureId, name: m.name, frame: m.frame, owner: m.owner })),
@@ -139,7 +164,7 @@ export class StudioBuilder {
   private async preview(base: BuildState, feature: Feature, ec: EvalContext, quality: number) {
     const next = cloneState(base);
     try {
-      const out = await applyFeature(next, feature, ec);
+      const out = await applyFeature(next, feature, ec, this.sources);
       const changed: string[] = [];
       const parts: PartMesh[] = [];
       for (const [id, p] of next.parts) {

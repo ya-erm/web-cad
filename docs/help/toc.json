@@ -105,7 +105,8 @@
         { "id": "helix", "icon": "helix", "title": { "ru": "Спираль", "en": "Helix" } },
         { "id": "mate-connector", "icon": "mateConnector", "title": { "ru": "Соединитель (mate connector)", "en": "Mate connector" } },
         { "id": "variable", "icon": "variable", "title": { "ru": "Переменная", "en": "Variable" } },
-        { "id": "import", "icon": "import", "title": { "ru": "Импорт", "en": "Import" } }
+        { "id": "import", "icon": "import", "title": { "ru": "Импорт", "en": "Import" } },
+        { "id": "derived", "icon": "partStudio", "title": { "ru": "Производная геометрия", "en": "Derived" } }
       ]
     },
     {

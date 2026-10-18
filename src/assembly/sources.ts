@@ -7,17 +7,18 @@ import type { BuildResult, PartMesh } from '../kernel/protocol';
 import type { CadDocument, PartStudioTab } from '../core/types';
 import { configuredFeatures } from '../core/config';
 import { effectiveRollback } from '../store/docStore';
-import { partColorFor } from '../store/rebuild';
+import { partColorFor, withDerivedSources } from '../store/rebuild';
 import type { AssemblySources, StudioData } from './compose';
 
 async function buildStudioResult(doc: CadDocument, studio: PartStudioTab): Promise<BuildResult> {
   const upTo = effectiveRollback(studio);
   const partMeta: Record<string, { name?: string; color?: string; hidden?: boolean }> = {};
   for (const [id, m] of Object.entries(studio.parts)) partMeta[id] = { name: m.name, color: m.color };
-  // the Part Studio as its chosen configuration has it
-  const res = await kernel().build(studio.id, { units: doc.units, features: configuredFeatures(studio).slice(0, upTo), partMeta, upTo });
+  // the Part Studio as its chosen configuration has it (the Part Studios it derives from built first)
+  const features = await withDerivedSources(doc, studio.id, configuredFeatures(studio).slice(0, upTo));
+  const res = await kernel().build(studio.id, { units: doc.units, features, partMeta, upTo });
   for (const p of res.parts) {
-    if (!studio.parts[p.id]?.color) p.color = partColorFor(studio, p.id, res.partOrder);
+    if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     p.hidden = false;
   }
   return res;

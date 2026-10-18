@@ -2,7 +2,8 @@
 // (vite.config.ts) that lets command-line agents call it: `npm run agent -- run ops.json`.
 
 import type { Draft } from 'immer';
-import type { ConfigInput, DocTab, Feature, PartStudioTab } from '../core/types';
+import type { CadDocument, ConfigInput, DocTab, Feature, PartStudioTab } from '../core/types';
+import { buildDerivedSources } from '../core/derived';
 import { kernel } from '../kernel/client';
 import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
@@ -12,7 +13,8 @@ import { getEngine } from '../viewport/engineRef';
 import { buildStudio } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
-import { AgentError, queryModel, runOps, summarize, type AgentKernel } from './runner';
+import { sourceKey } from '../assembly/compose';
+import { AgentError, findDerivedSource, queryModel, runOps, summarize, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -28,14 +30,30 @@ async function waitFor(cond: () => boolean, what: string, ms = 15000) {
   }
 }
 
-function agentKernel(studio: PartStudioTab, units: { length: 'mm' | 'cm' | 'm' | 'in' | 'ft'; angle: 'deg' | 'rad' }): AgentKernel {
+function agentKernel(studio: PartStudioTab, doc: CadDocument): AgentKernel {
   // a separate builder key so agent builds never supersede the UI's own rebuilds
-  const studioKey = `agent:${studio.id}`;
-  const partMeta = Object.fromEntries(Object.entries(studio.parts).map(([id, m]) => [id, { name: m.name, color: m.color, hidden: m.hidden }]));
+  const keyOf = (id: string) => `agent:${id}`;
+  const studioKey = keyOf(studio.id);
+  const units = doc.units;
+  const metaOf = (s: PartStudioTab) => Object.fromEntries(Object.entries(s.parts).map(([id, m]) => [id, { name: m.name, color: m.color, hidden: m.hidden }]));
   return {
     async build(features: Feature[]) {
       await kernel().ready();
-      return kernel().build(studioKey, { units, features, partMeta, upTo: features.length });
+      // the Part Studios it derives from first (their own agent builders)
+      const fs = await buildDerivedSources(doc, studio.id, features, keyOf, (s, feats) =>
+        kernel().build(keyOf(s.id), { units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }),
+      );
+      return kernel().build(studioKey, { units, features: fs, partMeta: metaOf(studio), upTo: fs.length });
+    },
+    async derivedSource(name, forStudio) {
+      await kernel().ready();
+      const s = findDerivedSource(doc, name, forStudio);
+      const upTo = s.rollback ?? s.features.length;
+      const fs = await buildDerivedSources(doc, s.id, configuredFeatures(s).slice(0, upTo), keyOf, (x, feats) =>
+        kernel().build(keyOf(x.id), { units, features: feats, partMeta: metaOf(x), upTo: feats.length, meshless: true }),
+      );
+      const res = await kernel().build(keyOf(s.id), { units, features: fs, partMeta: metaOf(s), upTo, meshless: true });
+      return { studioId: s.id, name: s.name, parts: res.partList ?? [] };
     },
     async measure(refs) {
       return (await kernel().measure({ studioKey, refs })).items;
@@ -45,7 +63,7 @@ function agentKernel(studio: PartStudioTab, units: { length: 'mm' | 'cm' | 'm' |
 
 /** Part Studios for assemblies are built by the app's own kernel builders (shared with the tabs); the agent's own ops by its key. */
 const browserHost: DocumentHost = {
-  kernel: (doc, studio) => agentKernel(studio, doc.units),
+  kernel: (doc, studio) => agentKernel(studio, doc),
   studio: (doc, studio) => buildStudio(doc, studio),
 };
 
@@ -122,7 +140,7 @@ export const webcadApi = {
       return { document: { id: doc.id, name: doc.name }, tab: asm.name, assembly: summarizeAssembly(doc, asm, src, applySolve(structuredClone(asm), src)) };
     }
     const { doc: d, studio } = current();
-    return { document: { id: d.id, name: d.name }, tab: studio.name, ...(await summarize(studio, d.units, agentKernel(studio, d.units))) };
+    return { document: { id: d.id, name: d.name }, tab: studio.name, ...(await summarize(studio, d.units, agentKernel(studio, d))) };
   },
 
   async run(ops: DocumentOp[], opts: { atomic?: boolean } = {}): Promise<RunReport> {
@@ -142,7 +160,7 @@ export const webcadApi = {
       return report;
     }
     const { doc, studio } = current(true);
-    const { studio: next, report } = await runOps(studio, doc.units, ops as AgentOp[], agentKernel(studio, doc.units));
+    const { studio: next, report } = await runOps(studio, doc.units, ops as AgentOp[], agentKernel(studio, doc));
     if (!report.error && (report.ok || opts.atomic === false)) {
       useDoc.getState().update((d) =>
         withStudio(d, (s) => {
@@ -161,7 +179,7 @@ export const webcadApi = {
 
   async query(q: { faces?: Faces; edges?: Edges; parts?: Parts }) {
     const { doc, studio } = current();
-    return queryModel(studio, doc.units, agentKernel(studio, doc.units), q);
+    return queryModel(studio, doc.units, agentKernel(studio, doc), q);
   },
 
   feature(name: string): Feature {
@@ -240,7 +258,7 @@ export const webcadApi = {
               studioKey: '',
               format,
               partIds: [],
-              instances: expandAssembly({ ...asm, instances: shown }, src).instances.map((i) => ({ studioKey: i.studioId, partId: i.partId, name: i.name, position: i.position, rotation: i.rotation })),
+              instances: expandAssembly({ ...asm, instances: shown }, src).instances.map((i) => ({ studioKey: sourceKey(i), partId: i.partId, name: i.name, position: i.position, rotation: i.rotation })),
               tolerance: 0.01,
               angularTolerance: 0.2,
             },
@@ -248,7 +266,7 @@ export const webcadApi = {
       return { fileName: `${safe} — ${asm.name}.${format}`, mime: res.mime, base64: toBase64(res.data) };
     }
     const { doc, studio } = current();
-    const k = agentKernel(studio, doc.units);
+    const k = agentKernel(studio, doc);
     await k.build(configuredFeatures(studio).slice(0, studio.rollback ?? studio.features.length));
     const res = await kernel().exportFile({ studioKey: `agent:${studio.id}`, format, partIds: [], tolerance: 0.01, angularTolerance: 0.2 });
     return { fileName: `${safe}.${format}`, mime: res.mime, base64: toBase64(res.data) };

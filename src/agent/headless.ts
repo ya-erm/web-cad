@@ -4,12 +4,14 @@
 
 import { setOC } from 'replicad';
 import opencascade from 'replicad-opencascadejs';
-import type { AssemblyTab, CadDocument, PartStudioTab, SelRef } from '../core/types';
+import type { AssemblyTab, CadDocument, Feature, PartStudioTab, SelRef } from '../core/types';
+import { buildDerivedSources } from '../core/derived';
 import { docId, uid } from '../core/ids';
 import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/build';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
-import { runOps, summarize, queryModel, type AgentKernel } from './runner';
+import { sourceKey } from '../assembly/compose';
+import { findDerivedSource, runOps, summarize, queryModel, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -27,13 +29,28 @@ export function initOpenCascade(wasmPath: string): Promise<void> {
   return ocReady;
 }
 
-export function nodeKernel(units: CadDocument['units']): AgentKernel & { builder: StudioBuilder } {
+/**
+ * A builder for one Part Studio. With Derived features: `prepare` builds their sources first and readies the
+ * features, `sources` finds the sources' builders.
+ */
+export function nodeKernel(
+  units: CadDocument['units'],
+  derived?: {
+    prepare(features: Feature[]): Promise<Feature[]>;
+    sources(key: string): StudioBuilder | undefined;
+    source: NonNullable<AgentKernel['derivedSource']>;
+  },
+): AgentKernel & { builder: StudioBuilder } {
   const builder = new StudioBuilder();
   let reqId = 0;
   return {
     builder,
-    build: (features) => builder.build({ type: 'build', reqId: ++reqId, units, features, partMeta: {}, upTo: features.length }),
+    build: async (features) => {
+      const fs = derived ? await derived.prepare(features) : features;
+      return builder.build({ type: 'build', reqId: ++reqId, units, features: fs, partMeta: {}, upTo: fs.length }, derived?.sources);
+    },
     measure: async (refs: SelRef[]) => builder.measure(refs).items,
+    derivedSource: derived?.source,
   };
 }
 
@@ -65,20 +82,40 @@ export interface HeadlessSession {
 /** A document session; `run` applies ops in place when they succeed (like the browser API). */
 export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<HeadlessSession> {
   await initOpenCascade(wasmPath);
-  // one builder per Part Studio: its parts for the studio's own ops and for the assemblies that use them
+  // one builder per Part Studio: its parts for the studio's own ops, for the assemblies that use them and for the
+  // Part Studios that derive from it
   const kernels = new Map<string, ReturnType<typeof nodeKernel>>();
-  const kernelOf = (d: CadDocument, studio: PartStudioTab) => {
+  /** The document the builds belong to now (a run works on its own copy). */
+  let docNow = doc;
+  const builderOf = (key: string) => kernels.get(key)?.builder;
+  const metaOf = (s: PartStudioTab) => Object.fromEntries(Object.entries(s.parts).map(([id, m]) => [id, { name: m.name, color: m.color }]));
+  let reqId = 0;
+  /** Build the Part Studios a studio derives from (theirs first), then ready its features. */
+  const prepare = (studioId: string, features: Feature[]) =>
+    buildDerivedSources(docNow, studioId, features, (id) => id, (s, feats) =>
+      kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units: docNow.units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }, builderOf),
+    );
+  /** A Part Studio by name, built (its sources first), as a source for another one. */
+  const source = async (name: string, forStudio: string) => {
+    const s = findDerivedSource(docNow, name, forStudio);
+    const upTo = s.rollback ?? s.features.length;
+    const features = await prepare(s.id, configuredFeatures(s).slice(0, upTo));
+    const res = await kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units: docNow.units, features, partMeta: metaOf(s), upTo, meshless: true }, builderOf);
+    return { studioId: s.id, name: s.name, parts: res.partList ?? [] };
+  };
+  const kernelOf = (d: CadDocument, studio: PartStudioTab): ReturnType<typeof nodeKernel> => {
+    docNow = d;
     let k = kernels.get(studio.id);
-    if (!k) kernels.set(studio.id, (k = nodeKernel(d.units)));
+    if (!k) kernels.set(studio.id, (k = nodeKernel(d.units, { prepare: (features) => prepare(studio.id, features), sources: builderOf, source })));
     return k;
   };
-  let reqId = 0;
   const host: DocumentHost = {
     kernel: kernelOf,
     async studio(d, studio) {
       const upTo = studio.rollback ?? studio.features.length;
-      const partMeta = Object.fromEntries(Object.entries(studio.parts).map(([id, m]) => [id, { name: m.name, color: m.color }]));
-      const res = await kernelOf(d, studio).builder.build({ type: 'build', reqId: ++reqId, units: d.units, features: configuredFeatures(studio).slice(0, upTo), partMeta, upTo });
+      const k = kernelOf(d, studio);
+      const features = await prepare(studio.id, configuredFeatures(studio).slice(0, upTo));
+      const res = await k.builder.build({ type: 'build', reqId: ++reqId, units: d.units, features, partMeta: metaOf(studio), upTo }, builderOf);
       return { parts: new Map(res.parts.map((p) => [p.id, p])), mates: res.mates ?? [] };
     },
   };
@@ -119,7 +156,7 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
         const items = expandAssembly(a, src)
           .instances.filter((i) => !i.hidden)
           .flatMap((i) => {
-            const it = shape(i.studioId, i.partId);
+            const it = shape(sourceKey(i), i.partId);
             return it ? [{ ...it, name: i.name, shape: placedShape(it.shape, i) }] : [];
           });
         return stlOf(items, 0.01, 0.2, binary);

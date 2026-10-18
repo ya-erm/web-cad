@@ -19,9 +19,13 @@ export function chosenOption(input: ConfigInput, choice?: Record<string, string>
   return input.options.find((o) => o.id === choice?.[input.id]) ?? input.options[0];
 }
 
+/** A sketch dimension as a configured parameter: `dim:<constraint id>`. */
+export const DIM = 'dim:';
+
 /** A feature's own value of a parameter, as a table cell has it. */
 export function ownValue(f: Feature, param: string): string | undefined {
   if (param === 'suppressed') return String(!!f.suppressed);
+  if (param.startsWith(DIM)) return f.type === 'sketch' ? f.params.constraints.find((c) => c.id === param.slice(DIM.length))?.value : undefined;
   const v = (f.params as unknown as Record<string, unknown>)[param];
   return typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' ? String(v) : undefined;
 }
@@ -50,6 +54,13 @@ export function withValues(f: Feature, values: Record<string, string> | undefine
   for (const [param, v] of Object.entries(values)) {
     if (param === 'suppressed') {
       if (!!out.suppressed !== (v === 'true')) out = { ...out, suppressed: v === 'true' } as Feature;
+      continue;
+    }
+    if (param.startsWith(DIM)) {
+      // a dimension of a sketch: its value
+      const id = param.slice(DIM.length);
+      if (out.type === 'sketch' && out.params.constraints.some((c) => c.id === id && c.value !== v))
+        out = { ...out, params: { ...out.params, constraints: out.params.constraints.map((c) => (c.id === id ? { ...c, value: v } : c)) } };
       continue;
     }
     const cur = (out.params as unknown as Record<string, unknown>)[param];
