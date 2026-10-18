@@ -82,8 +82,8 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `sketch` | `plane?` (по умолчанию `top`), `shapes` (см. ниже), `name?`, `use?` — рёбра модели (EdgeQuery / список / `"all"`), спроецированные на эскиз фиксированной связанной геометрией (Use): они следуют за источником |
 | `extrude` | `sketch?` (по умолчанию последний), `regions?`, `depth?` (10 мм), `end?` (`blind` / `symmetric` / `throughAll` / `{"upToFace": FaceQuery}`), `flip?`, `boolean?` (`new`/`add`/`remove`/`intersect`), `draft?`, `thin?` |
 | `revolve` | `sketch?`, `regions?`, `axis`, `angle?` (без него — полный оборот), `boolean?` |
-| `fillet` | `edges`, `radius` |
-| `chamfer` | `edges`, `distance` |
+| `fillet` | `edges`, `radius`, `tangentPropagation?` (`false` — только выбранные рёбра, без касательных к ним; по умолчанию цепочка целиком) |
+| `chamfer` | `edges`, `distance`, `tangentPropagation?` (как у `fillet`) |
 | `shell` | `faces` (удаляемые грани), `thickness`, `outward?` |
 | `hole` | `sketch` (точки эскиза или центры окружностей), `diameter`, `depth?`, `through?`, `style?` (`simple`/`counterbore`/`countersink`), `cboreDiameter?`, `cboreDepth?`, `csinkDiameter?` |
 | `linearPattern` | `features` (имена) или `parts`, `direction`, `distance`, `count`, `direction2?`, `distance2?`, `count2?`, `boolean?` |

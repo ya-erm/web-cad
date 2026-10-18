@@ -29,11 +29,13 @@ Rounds part edges with an arc of a given radius.
 
 ## Tangent propagation {#tangent}
 
-Edges that smoothly continue the selected one (for example, the top edges of a box meeting at a rounded corner) form one chain. Fillets and [chamfers](chamfer) run along the whole chain — just like Onshape with **Tangent propagation** checked.
+Edges that smoothly continue the selected one (for example, the top edges of a box meeting at a rounded corner, or the edges of a slot) form one chain. With **Tangent propagation** checked (the default), fillets and [chamfers](chamfer) run along the whole chain.
 
-In Onshape you can clear the checkbox so the fillet stops at the selected edge. The WebCAD geometry kernel (OpenCascade) cannot do that: it always runs along the whole chain. So with the checkbox cleared the result is the same, and if the chain did continue onto unselected edges, the feature shows a yellow warning "Edges tangent to the selected ones are included too: tangent propagation cannot be turned off".
+Clear the checkbox and the fillet stays on the selected edges only, as in Onshape: at the end of a selected edge, where an unselected tangent one begins, it stops with a flat end square to the edge, and the neighbouring edge stays sharp. So you can round, say, one straight side of a slot without its arcs, or just an arc. This works for concave edges (the fillet adds material) and for chamfers too.
 
-> **Limitation.** Variable radius and face-to-face fillets are not supported yet; filleting only the selected edge without its tangent chain is not possible (see above).
+If the fillet cannot be cut back to the selected edges, the feature is built along the whole chain and shows a yellow warning "Edges tangent to the selected ones are included too: the blend could not be stopped at the selected edges".
+
+> **Limitation.** Variable radius and face-to-face fillets are not supported yet.
 
 ## See also {#see-also}
 

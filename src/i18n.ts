@@ -801,8 +801,8 @@ const RU: Record<string, string> = {
   'Up to face must not be parallel to the extrude direction': 'Грань «До грани» не должна быть параллельна направлению выдавливания',
   'Some dimensions have invalid expressions': 'В некоторых размерах ошибочные выражения',
   'Sketch constraints could not be fully solved': 'Ограничения эскиза не удалось полностью решить',
-  'Edges tangent to the selected ones are included too: tangent propagation cannot be turned off':
-    'Касательные к выбранным рёбра тоже включены: распространение по касательной отключить нельзя',
+  'Edges tangent to the selected ones are included too: the blend could not be stopped at the selected edges':
+    'Касательные к выбранным рёбра тоже включены: остановить скругление на выбранных рёбрах не удалось',
   // help
   Help: 'Справка',
 };

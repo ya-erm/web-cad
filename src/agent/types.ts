@@ -112,8 +112,9 @@ export type AgentOp =
       thin?: Num;
     })
   | (Named & { op: 'revolve'; sketch?: string; regions?: Regions; axis: AxisSpec; angle?: Num; boolean?: BoolOp })
-  | (Named & { op: 'fillet'; edges: Edges; radius: Num })
-  | (Named & { op: 'chamfer'; edges: Edges; distance: Num })
+  /** `tangentPropagation: false` — only the selected edges, not the edges tangent to them (by default it runs on). */
+  | (Named & { op: 'fillet'; edges: Edges; radius: Num; tangentPropagation?: boolean })
+  | (Named & { op: 'chamfer'; edges: Edges; distance: Num; tangentPropagation?: boolean })
   | (Named & { op: 'shell'; faces: Faces; thickness: Num; outward?: boolean })
   | (Named & {
       op: 'hole';

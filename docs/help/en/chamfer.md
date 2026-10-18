@@ -32,7 +32,7 @@ width: 480
 
 The message "Chamfer failed: distance may be too large" means the chamfer does not fit on the adjacent faces.
 
-Like a fillet, a chamfer always continues onto edges that smoothly continue the selected ones — see [Fillet: tangent propagation](fillet#tangent).
+Like a fillet, a chamfer with **Tangent propagation** checked continues onto edges that smoothly continue the selected ones, and with it cleared stays on the selected edges only — see [Fillet: tangent propagation](fillet#tangent).
 
 ## See also {#see-also}
 

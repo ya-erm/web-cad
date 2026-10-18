@@ -626,31 +626,108 @@ function buildFillet(ctx: Ctx, f: FeatureOf<'fillet'>): FeatureOutput {
   for (const { part, edges } of groups.values()) {
     const mk = new oc.BRepFilletAPI_MakeFillet(part.shape.wrapped, oc.ChFi3d_FilletShape.ChFi3d_Rational);
     for (const e of edges) mk.Add(r, e.wrapped);
-    if (!p.tangentPropagation) propagated ||= contoursBeyond(mk, edges);
+    const extra = p.tangentPropagation ? [] : contoursBeyond(mk, edges);
     try {
       mk.Build(new oc.Message_ProgressRange());
     } catch {
       fail('Fillet failed: radius may be too large');
     }
     if (!mk.IsDone()) fail('Fillet failed: radius may be too large');
-    const res = R.cast(mk.Shape()) as Shape3D;
+    let res = R.cast(mk.Shape()) as Shape3D;
     mk.delete();
+    if (extra.length) {
+      const own = onlySelected(part.shape, res, edges, extra);
+      if (own) res = own;
+      else propagated = true;
+    }
     replacePart(ctx.st, part.id, res, ctx.fid);
   }
   return propagated ? { warning: TANGENT_ALWAYS } : {};
 }
 
-/** OpenCascade always continues fillets / chamfers along tangent edges (it cannot be turned off). */
-const TANGENT_ALWAYS = 'Edges tangent to the selected ones are included too: tangent propagation cannot be turned off';
+/** When the blend cannot be stopped at the selected edges, the whole tangent chain stays. */
+const TANGENT_ALWAYS = 'Edges tangent to the selected ones are included too: the blend could not be stopped at the selected edges';
 
-/** Whether the contours built from the selected edges run on to other (tangent) edges. */
-function contoursBeyond(mk: { NbContours(): number; NbEdges(i: number): number; Edge(i: number, j: number): R.Edge['wrapped'] }, edges: R.Edge[]): boolean {
+/** The edges the contours built from the selected ones run on to (tangent to them, not selected). */
+function contoursBeyond(mk: { NbContours(): number; NbEdges(i: number): number; Edge(i: number, j: number): R.Edge['wrapped'] }, edges: R.Edge[]): R.Edge[] {
+  const out: R.Edge[] = [];
   for (let i = 1; i <= mk.NbContours(); i++)
     for (let j = 1; j <= mk.NbEdges(i); j++) {
       const e = mk.Edge(i, j);
-      if (!edges.some((s) => s.wrapped.IsSame(e))) return true;
+      if (!edges.some((s) => s.wrapped.IsSame(e))) out.push(R.cast(e) as R.Edge);
     }
-  return false;
+  return out;
+}
+
+/**
+ * A fillet / chamfer of the selected edges only (Onshape with "Tangent propagation" off). OpenCascade always runs
+ * the blend on along tangent edges, so it is built for the whole chain, and then only the material it takes away
+ * (or adds, on concave edges) next to the selected edges is kept: cut off by the planes square to each selected
+ * edge at its ends — where a blend of that edge alone stops. `null` when that fails.
+ */
+function onlySelected(shape: Shape3D, blended: Shape3D, selected: R.Edge[], extra: R.Edge[]): Shape3D | null {
+  const [lo, hi] = bboxOf(shape);
+  const size = Math.max(v3.dist(lo, hi), 1) * 4;
+  const at = (e: R.Edge, s: number): Vec3 => e.pointAt(s).toTuple() as Vec3;
+  const along = (e: R.Edge, s: number): Vec3 => v3.norm(e.tangentAt(s).toTuple() as Vec3);
+  try {
+    const keep = (diff: Shape3D): Shape3D[] => {
+      const out: Shape3D[] = [];
+      for (const c of solidsOf(diff)) {
+        const mine = selected.filter((e) => touches(c, at(e, 0.5)));
+        if (!mine.length) continue;
+        // a chain with every edge selected stays whole
+        if (!extra.some((e) => touches(c, at(e, 0.5)))) {
+          out.push(c);
+          continue;
+        }
+        for (const e of mine)
+          for (const [s0, s1] of spansOf(along.bind(null, e))) {
+            const piece = c.intersect(halfSpace(at(e, s0), along(e, s0), size)).intersect(halfSpace(at(e, s1), v3.neg(along(e, s1)), size));
+            for (const q of solidsOf(piece)) if (touches(q, at(e, (s0 + s1) / 2))) out.push(q);
+          }
+      }
+      return out;
+    };
+    const removed = keep(shape.cut(blended));
+    const added = keep(blended.cut(shape));
+    if (!removed.length && !added.length) return null;
+    let res: Shape3D = shape;
+    if (removed.length) res = res.cut(fuseAll(removed));
+    if (added.length) res = res.fuse(fuseAll(added));
+    res = simplified(res);
+    return solidsOf(res).length ? res : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parts of an edge (0…1) along which its direction turns by less than 120°: each is cut off by two planes. */
+function spansOf(along: (s: number) => Vec3, s0 = 0, s1 = 1, depth = 0): [number, number][] {
+  const t0 = along(s0);
+  const bends = [1, 2, 3, 4, 5, 6, 7, 8].some((k) => v3.dot(t0, along(s0 + ((s1 - s0) * k) / 8)) < -0.5);
+  if (!bends || depth > 4) return [[s0, s1]];
+  const m = (s0 + s1) / 2;
+  return [...spansOf(along, s0, m, depth + 1), ...spansOf(along, m, s1, depth + 1)];
+}
+
+/** The half-space on the side `n` points to from the plane through `p` (a box of `size`). */
+function halfSpace(p: Vec3, n: Vec3, size: number): Shape3D {
+  const u = v3.norm(v3.cross(n, Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]));
+  const w = v3.cross(n, u);
+  const c = (a: number, b: number) => v3.add(p, v3.add(v3.scale(u, a * size), v3.scale(w, b * size)));
+  return prism(R.makePolygon([c(-1, -1), c(1, -1), c(1, 1), c(-1, 1)]), n, 0, size);
+}
+
+/** Whether a point lies on (or in) a solid. */
+function touches(s: Shape3D, p: Vec3): boolean {
+  const oc = R.getOC();
+  const v = R.makeVertex(p);
+  const d = new oc.BRepExtrema_DistShapeShape(s.wrapped, v.wrapped);
+  const near = d.IsDone() && d.Value() < 1e-4 * Math.max(1, v3.len(p)) + 1e-4;
+  d.delete();
+  v.delete();
+  return near;
 }
 
 function buildChamfer(ctx: Ctx, f: FeatureOf<'chamfer'>): FeatureOutput {
@@ -673,15 +750,20 @@ function buildChamfer(ctx: Ctx, f: FeatureOf<'chamfer'>): FeatureOutput {
       if (p.chamferType === 'twoDistances') mk.Add(d1, len(ctx, p.distance2, 'Distance 2'), e.wrapped, face.wrapped);
       else mk.AddDA(d1, ang(ctx, p.angle, 'Angle'), e.wrapped, face.wrapped);
     }
-    if (!p.tangentPropagation) propagated ||= contoursBeyond(mk, edges);
+    const extra = p.tangentPropagation ? [] : contoursBeyond(mk, edges);
     try {
       mk.Build(new oc.Message_ProgressRange());
     } catch {
       fail('Chamfer failed: distance may be too large');
     }
     if (!mk.IsDone()) fail('Chamfer failed: distance may be too large');
-    const res = R.cast(mk.Shape()) as Shape3D;
+    let res = R.cast(mk.Shape()) as Shape3D;
     mk.delete();
+    if (extra.length) {
+      const own = onlySelected(part.shape, res, edges, extra);
+      if (own) res = own;
+      else propagated = true;
+    }
     replacePart(ctx.st, part.id, res, ctx.fid);
   }
   return propagated ? { warning: TANGENT_ALWAYS } : {};

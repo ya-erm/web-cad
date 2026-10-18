@@ -187,7 +187,7 @@ describe('kernel', () => {
 });
 
 describe('tangent propagation (fillet / chamfer)', () => {
-  it('follows tangent edges; with the option off a warning says so', async () => {
+  it('follows tangent edges; with the option off only the selected edge is blended', async () => {
     const s = sketch('s1', (d) => {
       addRectangle(d, [-10, -10], [10, 10]);
     });
@@ -205,16 +205,23 @@ describe('tangent propagation (fillet / chamfer)', () => {
     const r1 = await build([s, ex, f1]);
     const p1 = r1.res.parts[0];
     const topFront = edgeRef(p1, (e) => e.type === 'LINE' && !!e.dir && Math.abs(e.dir[0]) > 0.99 && Math.abs(e.center[1] + 10) < 1e-6 && Math.abs(e.center[2] - 10) < 1e-6);
+    const volume = (r: Awaited<ReturnType<typeof build>>) => r.b.measure([{ kind: 'part', partId: r.res.parts[0].id }]).items.find((i) => i.label === 'Volume')!.value;
+    const v0 = volume(r1);
     for (const type of ['fillet', 'chamfer'] as const) {
       const on: Feature = { id: 'x', type, name: 'X', params: { ...defaultParams(type), edges: [topFront] } } as Feature;
       const off: Feature = { ...on, params: { ...(on.params as object), tangentPropagation: false } } as Feature;
       const a = await build([s, ex, f1, on]);
       expect(a.res.statuses.x).toEqual({ ok: true });
       const b = await build([s, ex, f1, off]);
-      expect(b.res.statuses.x.ok).toBe(true);
-      expect(b.res.statuses.x.warning).toMatch(/tangent propagation cannot be turned off/);
-      // the same geometry either way
-      expect(b.res.parts[0].faces.length).toBe(a.res.parts[0].faces.length);
+      expect(b.res.statuses.x).toEqual({ ok: true });
+      expect(b.res.parts.length).toBe(1);
+      // only along the straight edge: from x = -10 to where the corner's arc starts (x = 6), 2 mm across
+      const section = type === 'fillet' ? 4 * (1 - Math.PI / 4) : 2;
+      expect(volume(b)).toBeCloseTo(v0 - 16 * section, 2);
+      expect(volume(a)).toBeLessThan(volume(b) - 1);
+      // the arc of the rounded corner stays sharp: the top face keeps its rounded corner up to the edge
+      const top = b.res.parts[0].faces.filter((f) => f.type === 'PLANE' && f.normal && f.normal[2] > 0.99);
+      expect(top.length).toBe(1);
     }
     // an isolated edge (no tangent neighbours) gives no warning
     const bottom = edgeRef(p1, (e) => e.type === 'LINE' && !!e.dir && Math.abs(e.dir[0]) > 0.99 && Math.abs(e.center[1] - 10) < 1e-6 && Math.abs(e.center[2]) < 1e-6);

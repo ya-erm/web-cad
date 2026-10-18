@@ -643,6 +643,7 @@ class Runner {
         const p = defaultParams('fillet');
         p.edges = await this.edges(op.edges);
         p.radius = this.expr(op.radius, 'length', '2 mm');
+        if (op.tangentPropagation === false) p.tangentPropagation = false;
         this.add('fillet', op.name, p);
         return;
       }
@@ -650,6 +651,7 @@ class Runner {
         const p = defaultParams('chamfer');
         p.edges = await this.edges(op.edges);
         p.distance = this.expr(op.distance, 'length', '2 mm');
+        if (op.tangentPropagation === false) p.tangentPropagation = false;
         this.add('chamfer', op.name, p);
         return;
       }
