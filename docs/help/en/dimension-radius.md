@@ -26,7 +26,7 @@ width: 600
 
 The center stays in place; the radius changes. For an arc, its endpoints move along rays from the center.
 
-**How a diameter is drawn.** With the text inside the circle, the dimension line goes across the whole diameter and the arrows point from the center to the circle. With the text outside, there is one arrow at the circle next to the text, and the line goes through the center and breaks off past it (as in the ESKD standard). Drag the text inside or outside to switch; [drawings](drawings) show diameters the same way.
+**How a diameter is drawn.** With the text inside the circle, the dimension line goes across the whole diameter and the arrows point from the center to the circle. With the text outside, there is only a leader from the text to the circle with one arrow. Drag the text inside or outside to switch; [drawings](drawings) show diameters the same way.
 
 **Change the value** — double-click the text (see [Editing dimensions](sketch-dimensions#edit)).
 

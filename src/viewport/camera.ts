@@ -182,8 +182,10 @@ export class CameraController {
       // azimuth about world Z, elevation about the (horizontal) camera right axis
       const qh = new THREE.Quaternion().setFromAxisAngle(Z_UP, -dxPx * speed);
       let qv = new THREE.Quaternion().setFromAxisAngle(this.right, -dyPx * speed);
+      // no tilting over the pole; but away from it always (from the Top / Bottom view to the sides)
       const back = new THREE.Vector3(0, 0, 1).applyQuaternion(this.quat);
-      if (Math.abs(back.clone().applyQuaternion(qv).z) > 0.995) qv = new THREE.Quaternion();
+      const tilt = Math.abs(back.clone().applyQuaternion(qv).z);
+      if (tilt > 0.995 && tilt > Math.abs(back.z)) qv = new THREE.Quaternion();
       q = qh.multiply(qv);
     } else {
       const qh = new THREE.Quaternion().setFromAxisAngle(this.up, -dxPx * speed);

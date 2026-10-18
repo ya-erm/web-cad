@@ -165,6 +165,22 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  // the page itself: from the network while online (a new version shows on a plain reload), the cache offline
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+        .then((res) => {
+          if (res.ok && res.type === 'basic') {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match('./index.html', { ignoreVary: true })),
+    );
+    return;
+  }
+  // the rest (file names with content hashes): from the cache, the network when missing
   e.respondWith(
     caches.match(req, { ignoreSearch: true, ignoreVary: true }).then((hit) => {
       if (hit) return hit;

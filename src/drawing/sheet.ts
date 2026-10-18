@@ -213,10 +213,9 @@ export function dimPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionDa
     const u = norm([T[0] - A[0], T[1] - A[1]]);
     const P: Vec2 = [A[0] + u[0] * r, A[1] + u[1] * r];
     const outside = Math.hypot(T[0] - A[0], T[1] - A[1]) > r;
-    // a diameter: inside — across it, the arrows from the centre to the circle; outside — one arrow by the text,
-    // the line past the centre breaking off (ЕСКД)
-    const back = d.kind === 'radius' ? 0 : outside ? Math.min(r, Math.max(r * 0.35, ARROW * 1.5)) : r;
-    const start: Vec2 = [A[0] - u[0] * back, A[1] - u[1] * back];
+    // a diameter: inside — across it, the arrows from the centre to the circle; outside — only the outer part, from
+    // the text to the circle with one arrow
+    const start: Vec2 = d.kind === 'radius' ? A : outside ? P : [A[0] - u[0] * r, A[1] - u[1] * r];
     out.push({ t: 'line', a: start, b: outside ? T : P, style: 'dimension' });
     out.push({ t: 'arrow', tip: P, dir: outside ? [-u[0], -u[1]] : u, size: ARROW, style: 'dimension' });
     if (d.kind === 'diameter' && !outside) out.push({ t: 'arrow', tip: start, dir: [-u[0], -u[1]], size: ARROW, style: 'dimension' });

@@ -1,5 +1,5 @@
 // Graphics of a diameter dimension: inside the circle — across it, the arrows from the centre to the circle;
-// outside — one arrow by the label, the line breaking off past the centre.
+// outside — only the outer part, from the label to the circle with one arrow.
 
 import { describe, expect, it } from 'vitest';
 import type { SkConstraint } from '../core/types';
@@ -22,12 +22,9 @@ describe('diameter dimension', () => {
     ]);
   });
 
-  it('outside: one arrow at the circle by the label, the line from the label past the centre', () => {
+  it('outside: only the outer part — from the label to the circle, one arrow at the circle', () => {
     const g = dimensionGeometry(dia([30, 0]), map, 0.1)!;
     expect(g.arrows).toEqual([{ tip: [10, 0], dir: [-1, -0] }]);
-    const [x0, y0, x1, y1] = g.segs;
-    // breaks off past the centre (a third of the radius or so), not at the far side
-    expect(x0).toBeCloseTo(-3.5, 9);
-    expect([y0, x1, y1]).toEqual([0, 30, 0]);
+    expect(g.segs).toEqual([10, 0, 30, 0]);
   });
 });

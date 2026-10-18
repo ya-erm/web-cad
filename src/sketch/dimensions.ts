@@ -150,10 +150,8 @@ export function dimensionGeometry(c: SkConstraint, map: EntityMap, px: number): 
           return { segs, arrows: [{ tip: onCircle, dir: dot(sub(L, rc.c), u) > rc.r ? mul(u, -1) : u }], label: L };
         }
         if (dot(sub(L, rc.c), u) > rc.r) {
-          // the label outside: one arrow, at the circle by the label; the line goes on past the centre and breaks off
-          // (ЕСКД, a diameter with one arrow)
-          const brk = add(rc.c, mul(u, -Math.min(rc.r, Math.max(rc.r * 0.35, 8 * px))));
-          segs.push(brk[0], brk[1], L[0], L[1]);
+          // the label outside: only the outer part — from the label to the circle, one arrow at the circle
+          segs.push(onCircle[0], onCircle[1], L[0], L[1]);
           return { segs, arrows: [{ tip: onCircle, dir: mul(u, -1) }], label: L };
         }
         // inside: across the diameter, the arrows from the centre to the circle

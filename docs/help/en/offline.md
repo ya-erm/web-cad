@@ -6,7 +6,7 @@ WebCAD works without a server and without an account: the geometry kernel (OpenC
 
 - The first time you open the built app (for example, after `npm run build` and `npm run serve`, or from a web server), a Service Worker saves the whole app to the browser cache, together with the geometry kernel (WASM, about 23 MB) and this help.
 - After that, WebCAD opens and works without a network. You can install the app from the browser address bar (the "Install" icon), and it opens in its own window.
-- App updates are downloaded when the network is available again.
+- App updates are downloaded when the network is available again: while online the page comes from the server, so a new version opens on a plain page reload (no cache clearing needed).
 
 > **Note.** In development mode (`npm run dev`), the Service Worker is not used — only the built version works offline.
 
