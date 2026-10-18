@@ -26,12 +26,16 @@ width: 600
 
 The center stays in place; the radius changes. For an arc, its endpoints move along rays from the center.
 
+**How a diameter is drawn.** With the text inside the circle, the dimension line goes across the whole diameter and the arrows point from the center to the circle. With the text outside, there is one arrow at the circle next to the text, and the line goes through the center and breaks off past it (as in the ESKD standard). Drag the text inside or outside to switch; [drawings](drawings) show diameters the same way.
+
+**Change the value** — double-click the text (see [Editing dimensions](sketch-dimensions#edit)).
+
 ## Notes {#notes}
 
 - Right after you draw a circle or arc, you can enter its size in the [quick dimension](sketch#quick-dimensions) field.
 - Several identical circles: set the diameter of one and make the others [Equal](constraint-equal).
 - The dimension of a [sketch fillet](sketch-fillet) is the radius of the fillet arc.
-- You cannot set the radius or diameter of an ellipse yet.
+- For an ellipse, the dimension sets the diameter of one of its axes: the text beside an axis dimensions that axis.
 
 ## See also {#see-also}
 

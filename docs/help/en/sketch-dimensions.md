@@ -38,7 +38,7 @@ If the entities cannot be dimensioned together, the message "These entities cann
 ## Editing dimensions {#edit}
 
 - **Double-click** a dimension to open a field for a new value.
-- Drag the text to move the dimension. The dimension line breaks around the number.
+- Drag the text to move the dimension: it follows the mouse until you release the button, however fast you move. The dimension line breaks around the number.
 - Click to select a dimension; `Del` deletes it.
 - Hover over a dimension to highlight the entities it relates.
 

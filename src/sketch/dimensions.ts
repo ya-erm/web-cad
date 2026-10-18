@@ -149,13 +149,20 @@ export function dimensionGeometry(c: SkConstraint, map: EntityMap, px: number): 
           segs.push(rc.c[0], rc.c[1], L[0], L[1]);
           return { segs, arrows: [{ tip: onCircle, dir: dot(sub(L, rc.c), u) > rc.r ? mul(u, -1) : u }], label: L };
         }
+        if (dot(sub(L, rc.c), u) > rc.r) {
+          // the label outside: one arrow, at the circle by the label; the line goes on past the centre and breaks off
+          // (ЕСКД, a diameter with one arrow)
+          const brk = add(rc.c, mul(u, -Math.min(rc.r, Math.max(rc.r * 0.35, 8 * px))));
+          segs.push(brk[0], brk[1], L[0], L[1]);
+          return { segs, arrows: [{ tip: onCircle, dir: mul(u, -1) }], label: L };
+        }
+        // inside: across the diameter, the arrows from the centre to the circle
         const opp = add(rc.c, mul(u, -rc.r));
-        const far = dot(sub(L, rc.c), u) > rc.r ? L : onCircle;
-        segs.push(opp[0], opp[1], far[0], far[1]);
+        segs.push(opp[0], opp[1], onCircle[0], onCircle[1]);
         return {
           segs,
           arrows: [
-            { tip: onCircle, dir: dot(sub(L, rc.c), u) > rc.r ? mul(u, -1) : u },
+            { tip: onCircle, dir: u },
             { tip: opp, dir: mul(u, -1) },
           ],
           label: L,

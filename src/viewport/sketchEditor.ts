@@ -714,12 +714,30 @@ export class SketchEditor {
     }
   }
 
-  onPointerDown(x: number, y: number, _e: PointerEvent) {
-    void _e;
+  onPointerDown(x: number, y: number, e: PointerEvent) {
+    // the second press of a double-click on a label that was made anew meanwhile lands here: it still counts
+    const last = this.lastPress;
+    if (last && this.isDoublePress(last.id, e)) {
+      e.preventDefault();
+      this.pressAgain(last.id);
+      this.swallowClick = true;
+      return;
+    }
+    this.lastPress = null;
     // drawing on (or clicking away) dismisses the offered dimensions, keeping typed values
     if (this.quick) this.closeQuick(true);
     const hit = this.toolName === 'select' ? this.hitEntity(x, y) : null;
     this.pressed = { x, y, hit: hit?.id ?? null };
+  }
+
+  /** A double-click on a label / glyph: type a dimension's value, edit a pattern (after the press is handled: focus). */
+  private pressAgain(id: string) {
+    setTimeout(() => {
+      if (id.startsWith('glyph:') || id.startsWith('count:')) {
+        const pid = id.slice(id.indexOf(':') + 1);
+        if ((this.data()?.patterns ?? []).some((p) => p.id === pid)) this.editPattern(pid);
+      } else this.openDimInput(id, false);
+    }, 0);
   }
 
   /** Turn a ghost tangent handle into a real one (an owned point of the spline); its point id. */
@@ -770,6 +788,11 @@ export class SketchEditor {
   onPointerUp(x: number, y: number, e: PointerEvent, moved: boolean) {
     const pressed = this.pressed;
     this.pressed = null;
+    // the second press of a double-click on a label: not a click on the sketch
+    if (this.swallowClick) {
+      this.swallowClick = false;
+      return;
+    }
     if (this.box) {
       this.finishBox(e.shiftKey || e.ctrlKey || e.metaKey);
       return;
@@ -2348,6 +2371,19 @@ export class SketchEditor {
     return [off(-w / 2, -h / 2), off(w / 2, -h / 2), off(w / 2, h / 2), off(-w / 2, h / 2)];
   }
 
+  /** The last press on a label / glyph (they are made anew on every change, so a browser dblclick does not come). */
+  private lastPress: { id: string; t: number; x: number; y: number } | null = null;
+  /** The press just handled was the second of a double-click: its release is no click. */
+  private swallowClick = false;
+
+  /** Whether this press on `id` is the second of a double-click. */
+  private isDoublePress(id: string, ev: PointerEvent): boolean {
+    const p = this.lastPress;
+    const double = !!p && p.id === id && ev.timeStamp - p.t < 450 && Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 6;
+    this.lastPress = double ? null : { id, t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
+    return double;
+  }
+
   private renderDimensions(d: SketchData, map: EntityMap, px: number) {
     const s = useEditor.getState().sketch!;
     const units = useDoc.getState().doc!.units;
@@ -2407,25 +2443,29 @@ export class SketchEditor {
       el.addEventListener('pointerdown', (ev) => {
         if (ev.button !== 0) return;
         ev.stopPropagation();
+        // a double-click types a new value
+        if (this.isDoublePress(c.id, ev)) {
+          ev.preventDefault();
+          this.pressAgain(c.id);
+          return;
+        }
         const ed = useEditor.getState();
         const cur = ed.sketch?.selection ?? [];
         if (!cur.includes(c.id)) ed.setSketchSelection(ev.shiftKey ? [...cur, c.id] : [c.id]);
         this.startLabelDrag(c.id);
+        // the label follows the mouse however fast it moves (the cursor may leave it), until the button is released
+        const move = (e: PointerEvent) => {
+          if (this.drag?.kind !== 'label' || !(e.buttons & 1)) return;
+          const r = this.engine.container.getBoundingClientRect();
+          this.updateDrag(this.toSketch(e.clientX - r.left, e.clientY - r.top));
+        };
         const up = () => {
+          window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
           if (this.drag?.kind === 'label') this.endDrag();
         };
+        window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
-      });
-      el.addEventListener('pointermove', (ev) => {
-        if (this.drag?.kind === 'label' && ev.buttons & 1) {
-          const r = this.engine.container.getBoundingClientRect();
-          this.updateDrag(this.toSketch(ev.clientX - r.left, ev.clientY - r.top));
-        }
-      });
-      el.addEventListener('dblclick', (ev) => {
-        ev.stopPropagation();
-        this.openDimInput(c.id, false);
       });
       el.addEventListener('pointerenter', () => useEditor.getState().setSketchHover(c.id));
       el.addEventListener('pointerleave', () => useEditor.getState().setSketchHover(null));
@@ -2459,13 +2499,14 @@ export class SketchEditor {
       el.addEventListener('pointerdown', (ev) => {
         if (ev.button !== 0) return;
         ev.stopPropagation();
+        // a double-click on a pattern's glyph edits the pattern
+        if (this.isDoublePress(`glyph:${id}`, ev) && key === 'pattern') {
+          this.pressAgain(`glyph:${id}`);
+          return;
+        }
         const ed = useEditor.getState();
         const cur = ed.sketch?.selection ?? [];
         ed.setSketchSelection(cur.includes(id) ? cur.filter((x) => x !== id) : ev.shiftKey || ev.metaKey || ev.ctrlKey ? [...cur, id] : [id]);
-      });
-      el.addEventListener('dblclick', (ev) => {
-        ev.stopPropagation();
-        if (key === 'pattern') this.editPattern(id);
       });
       el.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
@@ -2630,11 +2671,8 @@ export class SketchEditor {
         el.addEventListener('pointerdown', (ev) => {
           if (ev.button !== 0) return;
           ev.stopPropagation();
-          useEditor.getState().setSketchSelection([p.id]);
-        });
-        el.addEventListener('dblclick', (ev) => {
-          ev.stopPropagation();
-          this.editPattern(p.id);
+          if (this.isDoublePress(`count:${p.id}`, ev)) this.pressAgain(`count:${p.id}`);
+          else useEditor.getState().setSketchSelection([p.id]);
         });
         el.addEventListener('contextmenu', (ev) => {
           ev.preventDefault();
