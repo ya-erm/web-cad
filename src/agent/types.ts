@@ -168,6 +168,14 @@ export type AgentOp =
   | { op: 'delete'; feature: string }
   | { op: 'rename'; feature: string; to: string }
   | { op: 'suppress'; feature: string; value?: boolean }
+  /**
+   * A configuration input (Onshape List): its options and the table of configured parameters — `{feature, param}`
+   * (a dialog field: `depth`, `thin`…; `suppressed` by default) or `{variable}`; `values[option]` — one value per
+   * parameter (an expression or number, true / false, null — the feature's own). Replaces an input of that name.
+   */
+  | { op: 'configuration'; name: string; options: string[]; params?: ConfigParamSpec[]; values?: Record<string, (Num | boolean | null)[]> }
+  /** Choose options of configuration inputs: input name → option name. */
+  | { op: 'configure'; values: Record<string, string> }
   | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean };
 
 /**
@@ -247,8 +255,13 @@ export interface SketchSummary {
 }
 
 /** Model state in document units (volume in unit³). */
+/** A configured parameter: a feature's dialog field (`suppressed` — whether it is disabled) or a variable's value. */
+export type ConfigParamSpec = { feature: string; param?: string } | { variable: string };
+
 export interface ModelSummary {
   units: { length: string; angle: string };
+  /** Configuration inputs: their options, the chosen one and the configured parameters ("Extrude 1.depth", "#w"). */
+  configuration?: { name: string; options: string[]; chosen: string; params: string[] }[];
   features: FeatureSummary[];
   variables: Record<string, string>;
   parts: PartSummary[];

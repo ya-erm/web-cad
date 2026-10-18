@@ -38,9 +38,26 @@ export function frameRect(d: DrawingData): { x0: number; y0: number; x1: number;
 export const TITLE_W = 185;
 export const TITLE_H = 55;
 
+export function titleBlockLimits(d: DrawingData) {
+  const f = frameRect(d);
+  return { minWidth: 100, maxWidth: Number((f.x1 - f.x0).toFixed(4)), minHeight: 35, maxHeight: Number((f.y1 - f.y0).toFixed(4)) };
+}
+
+export function titleBlockSize(d: DrawingData): [number, number] {
+  if (d.titleBlock?.template === 'gost') return [TITLE_W, TITLE_H];
+  const limits = titleBlockLimits(d);
+  const bounded = (n: number | undefined, fallback: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, typeof n === 'number' && Number.isFinite(n) ? n : fallback));
+  return [
+    bounded(d.titleBlock?.width, TITLE_W, limits.minWidth, limits.maxWidth),
+    bounded(d.titleBlock?.height, TITLE_H, limits.minHeight, limits.maxHeight),
+  ];
+}
+
 export function titleBlockRect(d: DrawingData) {
   const f = frameRect(d);
-  return { x0: f.x1 - TITLE_W, y0: f.y0, x1: f.x1, y1: f.y0 + TITLE_H };
+  const [w, h] = titleBlockSize(d);
+  return { x0: f.x1 - w, y0: f.y0, x1: f.x1, y1: f.y0 + h };
 }
 
 // Use a conservative estimate for Unicode glyphs absent from Helvetica's metrics.
@@ -73,20 +90,21 @@ function wrapText(text: string, width: number, height: number): string[] {
 }
 
 /** Bounded text shared by the screen and every drawing export. */
-function cellText(text: string, x: number, y: number, width: number, height: number, fontSize: number, maxLines = 1): Prim2D[] {
+function cellText(text: string, x: number, y: number, width: number, height: number, fontSize: number, maxLines = 1, labelSpace = 6, minFont = 2.5, padding = 3): Prim2D[] {
   let h = fontSize;
-  let lines = wrapText(text || '—', width - 6, h);
-  while (lines.length > maxLines && h > 2.5) {
-    h = Math.max(2.5, h - 0.25);
-    lines = wrapText(text || '—', width - 6, h);
+  const available = width - padding * 2;
+  let lines = wrapText(text || '—', available, h);
+  while (lines.length > maxLines && h > minFont) {
+    h = Math.max(minFont, h - 0.25);
+    lines = wrapText(text || '—', available, h);
   }
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
     let last = lines[maxLines - 1];
-    while (last && labelWidth(last + '…', h) > width - 6) last = last.slice(0, -1);
+    while (last && labelWidth(last + '…', h) > available) last = last.slice(0, -1);
     lines[maxLines - 1] = last + '…';
   }
-  const centerY = y + (height - 6) / 2;
+  const centerY = y + (height - labelSpace) / 2;
   return lines.map((line, i) => ({
     t: 'text', p: [x + width / 2, centerY + ((lines.length - 1) / 2 - i) * h * 1.35],
     text: line, h, align: 'center', vAlign: 'middle', style: 'visible',
@@ -237,14 +255,11 @@ export function dimPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionDa
   return out;
 }
 
-export function titleBlockPrims(d: DrawingData, extra: { scale: string; units: string; date: string }, translate: (key: string) => string = t): Prim2D[] {
-  const [w, h] = sheetSize(d);
-  const f = frameRect(d);
+type TitleExtra = { scale: string; units: string; date: string };
+
+function customTitlePrims(d: DrawingData, extra: TitleExtra, translate: (key: string) => string): Prim2D[] {
   const out: Prim2D[] = [];
-  out.push({ t: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]], closed: true, style: 'thin' });
-  out.push({ t: 'poly', pts: [[f.x0, f.y0], [f.x1, f.y0], [f.x1, f.y1], [f.x0, f.y1]], closed: true, style: 'border' });
-  // title block in the bottom-right corner
-  const { x0, y0, x1, y1 } = titleBlockRect(d);
+  const x0 = 0, y0 = 0, x1 = TITLE_W, y1 = TITLE_H;
   out.push({ t: 'poly', pts: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], closed: true, style: 'border' });
   out.push({ t: 'line', a: [x0 + 130, y0], b: [x0 + 130, y1], style: 'border' });
   for (const dy of [18, 30]) out.push({ t: 'line', a: [x0, y0 + dy], b: [x1, y0 + dy], style: 'thin' });
@@ -263,6 +278,83 @@ export function titleBlockPrims(d: DrawingData, extra: { scale: string; units: s
   cell(130, 18, 55, 12, 'Units', extra.units);
   cell(130, 0, 55, 18, 'Projection', (d.projection ?? 'first') === 'first' ? 'ISO E · 1' : 'ISO A · 3', 3.5);
   return out;
+}
+
+/** ГОСТ Р 2.104-2023, appendix Б, form 1: the main 185 × 55 mm table. */
+function gostTitlePrims(d: DrawingData, extra: TitleExtra, translate: (key: string) => string): Prim2D[] {
+  const out: Prim2D[] = [{ t: 'poly', pts: [[0, 0], [185, 0], [185, 55], [0, 55]], closed: true, style: 'border' }];
+  const fields = d.titleBlock;
+  const line = (x0: number, y0: number, x1: number, y1: number, thin = false) =>
+    out.push({ t: 'line', a: [x0, y0], b: [x1, y1], style: thin ? 'thin' : 'border' });
+  const text = (value: string | undefined, x: number, y: number, w: number, h: number, font = 2.5, lines = 1) => {
+    if (value?.trim()) out.push(...cellText(value, x, y, w, h, font, lines, 0, 1.2, 0.6));
+  };
+  line(65, 0, 65, 55);
+  for (const x of [17, 40, 55]) line(x, 0, x, 55, true);
+  line(7, 30, 7, 55, true);
+  for (let y = 5; y < 55; y += 5) line(0, y, 65, y, true);
+  line(65, 40, 185, 40);
+  line(175, 40, 175, 55);
+  line(175, 50, 185, 50, true);
+  line(65, 15, 185, 15);
+  line(135, 0, 135, 40);
+  line(135, 20, 185, 20);
+  line(135, 35, 185, 35, true);
+  for (const x of [150, 167]) line(x, 20, x, 40);
+  for (const x of [140, 145]) line(x, 20, x, 35, true);
+  line(155, 15, 155, 20, true);
+  // Change register: four empty rows above the heading, and signature rows below.
+  const changes: [number, number, string][] = [[0, 7, 'Change'], [7, 10, 'Sheet'], [17, 23, 'Document no.'], [40, 15, 'Signature'], [55, 10, 'Date']];
+  for (const [x, w, label] of changes) text(translate(label), x, 30, w, 5, 2);
+  const people: [number, string, string | undefined][] = [
+    [25, 'Developed', d.author], [20, 'Checked', fields?.checkedBy], [15, 'Tech. control', fields?.technicalControl],
+    [5, 'Standards check', fields?.standardsControl], [0, 'Approved', fields?.approvedBy],
+  ];
+  for (const [y, label, person] of people) {
+    text(translate(label), 0, y, 17, 5, 2);
+    text(person, 17, y, 23, 5, 2.5);
+  }
+  text(extra.date, 55, 25, 10, 5, 1.5);
+  text(d.designation, 65, 40, 110, 15, 5);
+  text(translate('Version'), 175, 50, 10, 5, 2);
+  text(fields?.revision, 175, 40, 10, 10, 3.5);
+  text(d.title || translate('Untitled drawing'), 65, 15, 70, 25, 4.5, 3);
+  text(fields?.material, 65, 0, 70, 15, 3.5, 2);
+  text(translate('Letter'), 135, 35, 15, 5, 2.5);
+  text(translate('Mass'), 150, 35, 17, 5, 2.5);
+  text(translate('Scale'), 167, 35, 18, 5, 2.5);
+  for (let i = 0; i < 3; i++) text(fields?.letter?.[i], 135 + 5 * i, 20, 5, 15, 3.5);
+  text(fields?.mass, 150, 20, 17, 15, 3.5);
+  text(extra.scale, 167, 20, 18, 15, 3.5);
+  text(`${translate('Sheet')} 1`, 135, 15, 20, 5, 2);
+  text(`${translate('Sheets')} 1`, 155, 15, 30, 5, 2);
+  text(fields?.organization, 135, 0, 50, 15, 3.5, 2);
+  return out;
+}
+
+/** Table only, positioned on the sheet. Used by both the live preview and exports. */
+export function titleBlockContent(d: DrawingData, extra: TitleExtra, translate: (key: string) => string = t): Prim2D[] {
+  const rect = titleBlockRect(d);
+  const [w, h] = titleBlockSize(d);
+  const sx = w / TITLE_W, sy = h / TITLE_H;
+  const pt = (p: Vec2): Vec2 => [rect.x0 + p[0] * sx, rect.y0 + p[1] * sy];
+  const local = d.titleBlock?.template === 'gost' ? gostTitlePrims(d, extra, translate) : customTitlePrims(d, extra, translate);
+  return local.map((p) => {
+    if (p.t === 'line') return { ...p, a: pt(p.a), b: pt(p.b) };
+    if (p.t === 'poly') return { ...p, pts: p.pts.map(pt) };
+    if (p.t === 'text') return { ...p, p: pt(p.p), h: p.h * Math.min(sx, sy) };
+    return p;
+  });
+}
+
+export function titleBlockPrims(d: DrawingData, extra: TitleExtra, translate: (key: string) => string = t): Prim2D[] {
+  const [w, h] = sheetSize(d);
+  const f = frameRect(d);
+  return [
+    { t: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]], closed: true, style: 'thin' },
+    { t: 'poly', pts: [[f.x0, f.y0], [f.x1, f.y0], [f.x1, f.y1], [f.x0, f.y1]], closed: true, style: 'border' },
+    ...titleBlockContent(d, extra, translate),
+  ];
 }
 
 export function notePrims(d: DrawingData): Prim2D[] {

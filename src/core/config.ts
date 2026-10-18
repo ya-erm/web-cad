@@ -67,6 +67,9 @@ export function configuredFeatures(studio: Configured, choice = studio.configCho
   return studio.features.map((f) => withValues(f, o.get(f.id)));
 }
 
+/** The features of a Part Studio (if any) as its chosen configuration has them — for evaluating its variables. */
+export const configuredOf = (studio: Configured | null | undefined): Feature[] => (studio ? configuredFeatures(studio) : []);
+
 /** The input whose table sets parameter `key` now (the last one that configures it), if any. */
 function owner(studio: Configured, key: string): ConfigInput | undefined {
   return [...(studio.configuration ?? [])].reverse().find((i) => i.params.includes(key));

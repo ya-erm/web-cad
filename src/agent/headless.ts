@@ -5,12 +5,13 @@
 import { setOC } from 'replicad';
 import opencascade from 'replicad-opencascadejs';
 import type { AssemblyTab, CadDocument, PartStudioTab, SelRef } from '../core/types';
-import { uid } from '../core/ids';
+import { docId, uid } from '../core/ids';
 import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/build';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { runOps, summarize, queryModel, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
+import { configuredFeatures } from '../core/config';
 import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
 import type { AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
 
@@ -39,7 +40,7 @@ export function nodeKernel(units: CadDocument['units']): AgentKernel & { builder
 export function emptyDocument(name: string): CadDocument {
   const ps: PartStudioTab = { id: uid('ps'), type: 'partStudio', name: 'Part Studio 1', features: [], rollback: null, parts: {} };
   const now = Date.now();
-  return { id: uid('doc'), name, created: now, modified: now, units: { length: 'mm', angle: 'deg' }, tabs: [ps], activeTab: ps.id, version: 1 };
+  return { id: docId(), name, created: now, modified: now, units: { length: 'mm', angle: 'deg' }, tabs: [ps], activeTab: ps.id, version: 1 };
 }
 
 function studioOf(doc: CadDocument): PartStudioTab {
@@ -77,7 +78,7 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
     async studio(d, studio) {
       const upTo = studio.rollback ?? studio.features.length;
       const partMeta = Object.fromEntries(Object.entries(studio.parts).map(([id, m]) => [id, { name: m.name, color: m.color }]));
-      const res = await kernelOf(d, studio).builder.build({ type: 'build', reqId: ++reqId, units: d.units, features: studio.features.slice(0, upTo), partMeta, upTo });
+      const res = await kernelOf(d, studio).builder.build({ type: 'build', reqId: ++reqId, units: d.units, features: configuredFeatures(studio).slice(0, upTo), partMeta, upTo });
       return { parts: new Map(res.parts.map((p) => [p.id, p])), mates: res.mates ?? [] };
     },
   };

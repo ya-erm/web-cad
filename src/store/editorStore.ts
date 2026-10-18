@@ -6,6 +6,7 @@ import type { Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec3 } from '.
 import type { BuildResult, MeasureResult } from '../kernel/protocol';
 import { defaultParams, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
+import { commitConfigured, configuredFeatures } from '../core/config';
 import { activeStudio, effectiveRollback, featureIndex, useDoc, withStudio } from './docStore';
 
 export type SketchTool =
@@ -54,6 +55,8 @@ export interface SketchSession {
   solve: SolveInfo | null;
   /** Message shown in the status bar while a tool is active. */
   hint?: string;
+  /** A new sketch still waiting for its plane (Onshape): only plane picking works until one is chosen. */
+  planePending?: boolean;
 }
 
 /** A sketch pattern being created / edited (the pattern itself lives in the sketch data). */
@@ -141,7 +144,10 @@ export interface EditorState {
   cancelEditing(): void;
   setActiveField(key: string | null): void;
 
-  startSketch(plane: PlaneRef): void;
+  /** Opens a new sketch; without a plane the dialog first asks for one. */
+  startSketch(plane: PlaneRef | null): void;
+  /** The pending plane of a new sketch was picked: drawing starts. */
+  sketchPlanePicked(): void;
   setSketchTool(tool: SketchTool): void;
   updateSketch(fn: (s: Draft<SketchData>) => void, undoable?: boolean): void;
   sketchUndo(): void;
@@ -306,7 +312,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!studio || get().editing) return;
     if (type === 'sketch') {
       const sel = get().selection[0];
-      let plane: PlaneRef = { kind: 'std', name: 'top' };
+      // nothing selected: the sketch dialog asks for the plane
+      let plane: PlaneRef | null = null;
       if (sel?.kind === 'plane') {
         plane =
           sel.planeId === 'top' || sel.planeId === 'front' || sel.planeId === 'right'
@@ -343,7 +350,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!studio || get().editing) return;
     const idx = featureIndex(studio, id);
     if (idx < 0) return;
-    const f = studio.features[idx];
+    // the dialog shows the values of the chosen configuration
+    const f = configuredFeatures(studio)[idx];
     set({
       hover: null,
       editing: { featureId: id, isNew: false, index: idx, draft: f },
@@ -366,6 +374,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
   commitEditing(keepOpen = false) {
     const e = get().editing;
     if (!e) return;
+    if (get().sketch?.planePending) {
+      get().showToast('Select a plane or a planar face for the sketch.', 'error');
+      return;
+    }
     const { update } = useDoc.getState();
     update((d) => {
       withStudio(d, (s) => {
@@ -375,7 +387,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
           if (s.rollback === s.features.length) s.rollback = null;
         } else {
           const i = s.features.findIndex((f) => f.id === e.featureId);
-          if (i >= 0) s.features[i] = e.draft as Draft<Feature>;
+          // a configured parameter typed in the dialog goes to the chosen configuration's cell
+          if (i >= 0) s.features[i] = commitConfigured(s, s.features[i] as Feature, e.draft) as Draft<Feature>;
         }
       });
     });
@@ -398,21 +411,35 @@ export const useEditor = create<EditorState>()((set, get) => ({
       id: uid('f'),
       type: 'sketch',
       name: nextFeatureName(studio.features, 'sketch'),
-      params: { plane, entities: [], constraints: [] },
+      // Top is only a placeholder until the plane is picked
+      params: { plane: plane ?? { kind: 'std', name: 'top' }, entities: [], constraints: [] },
     };
     set({
       editing: { featureId: draft.id, isNew: true, index: effectiveRollback(studio), draft },
       activeField: null,
       selection: [],
       measure: null,
-      sketch: { tool: 'line', selection: [], hover: null, construction: false, past: [], future: [], solve: null },
+      sketch: plane
+        ? { tool: 'line', selection: [], hover: null, construction: false, past: [], future: [], solve: null }
+        : { tool: 'plane', selection: [], hover: null, construction: false, past: [], future: [], solve: null, planePending: true },
       hover: null,
     });
+  },
+
+  sketchPlanePicked() {
+    const s = get().sketch;
+    if (!s?.planePending) return;
+    // picking the first plane is not an undo step: undo must not bring the placeholder back
+    set({ sketch: { ...s, planePending: false, tool: 'line', hint: undefined, past: [], future: [] } });
   },
 
   setSketchTool(tool) {
     const s = get().sketch;
     if (!s) return;
+    if (s.planePending && tool !== 'plane') {
+      get().showToast('Select a plane or a planar face for the sketch.', 'error');
+      return;
+    }
     set({ sketch: { ...s, tool, hint: undefined } });
   },
 

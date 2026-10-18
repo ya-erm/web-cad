@@ -42,7 +42,7 @@ export function SketchDialog() {
             if (e.key === 'Enter') commit();
           }}
         />
-        <button className="icon-btn fd-ok" title={`${t('Finish sketch')} (Enter)`} onClick={() => commit()}>
+        <button className="icon-btn fd-ok" title={`${t('Finish sketch')} (Enter)`} disabled={sketch.planePending} onClick={() => commit()}>
           <Icon name="check" size={20} />
         </button>
         <button className="icon-btn fd-cancel" title={`${t('Cancel')} (Esc)`} onClick={() => cancel()}>
@@ -53,7 +53,7 @@ export function SketchDialog() {
         <div
           className={'sel-field' + (sketch.tool === 'plane' ? ' active' : '')}
           data-tip={t('Click, then select another plane or planar face')}
-          onClick={() => useEditor.getState().setSketchTool(sketch.tool === 'plane' ? 'select' : 'plane')}
+          onClick={() => !sketch.planePending && useEditor.getState().setSketchTool(sketch.tool === 'plane' ? 'select' : 'plane')}
         >
           <div className="sel-label">{t('Sketch plane')}</div>
           {sketch.tool === 'plane' ? <div className="sel-empty">{t('Select a plane or a planar face for the sketch.')}</div> : <div className="sel-chip">{planeText}</div>}

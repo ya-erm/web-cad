@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { LengthUnit } from '../core/types';
-import { setRotationMode, useEditor } from '../store/editorStore';
+import { useEditor } from '../store/editorStore';
 import { activeAssembly, activeTab, newAssemblyTab, newDrawingTab, newPartStudio, useDoc } from '../store/docStore';
 import { AssemblyToolbar, InsertDialog, InstanceList, InstancePanel, MateDialog, MateList, selectedInstances } from '../assembly/AssemblyUI';
 import { RelationDialog } from '../assembly/RelationUI';
@@ -21,24 +21,26 @@ import { RightPanels } from './RightPanels';
 import { Viewport } from './Viewport';
 import { ContextMenu, ExportDialog, MeasurePanel, Toast } from './Overlays';
 import { handleKey } from './keyboard';
-import { download, exportSketch, safeName } from './exporting';
+import { exportSketch } from './exporting';
 import { DrawingEditor } from '../drawing/DrawingEditor';
 import { Icon } from './icons';
-import { getLang, setLang, t } from '../i18n';
+import { t } from '../i18n';
+import { AppSettingsItems } from './AppSettings';
 import { contextHelpPage, openHelp } from '../help/context';
 
-/** A document that is a file of the folder on the computer: its file, or a button to allow writing it again. */
+/** A document that is a file of a folder on the computer: its file, or a button to allow writing it again. */
 function FolderState({ docId }: { docId: string }) {
-  const file = useFolder((s) => s.links[docId]);
-  const failed = useFolder((s) => s.writeError === file);
-  if (!file) return null;
+  const link = useFolder((s) => s.links[docId]);
+  const folder = useFolder((s) => s.folders.find((f) => f.id === link?.folder));
+  const failed = useFolder((s) => s.writeError === docId);
+  if (!link || !folder) return null;
   return failed ? (
-    <button className="btn small folder-warn" title={t('Changes are kept in the browser; allow the folder to write them to the file')} onClick={() => void allowFolder()}>
+    <button className="btn small folder-warn" title={t('Changes are kept in the browser; allow the folder to write them to the file')} onClick={() => void allowFolder(folder.id)}>
       <Icon name="warning" size={14} /> {t('Allow writing to the folder')}
     </button>
   ) : (
-    <span className="save-state folder-file" title={`${t('A file of the folder on this computer')}: ${file}`}>
-      <Icon name="folder" size={13} /> {file}
+    <span className="save-state folder-file" title={`${t('A file of the folder on this computer')}: ${folder.dir.name}/${link.name}`}>
+      <Icon name="folder" size={13} /> {link.name}
     </span>
   );
 }
@@ -49,7 +51,6 @@ function TopBar({ onBack }: { onBack: () => void }) {
   const update = useDoc((s) => s.update);
   const [name, setName] = useState(doc.name);
   const [menu, setMenu] = useState<'doc' | null>(null);
-  const rotationMode = useEditor((s) => s.rotationMode);
   useEffect(() => setName(doc.name), [doc.name]);
   return (
     <div className="topbar">
@@ -96,48 +97,12 @@ function TopBar({ onBack }: { onBack: () => void }) {
                   })
                 }
               >
-                {doc.units.length === u ? '✓ ' : '   '}
+                <span className="menu-icon">{doc.units.length === u ? '✓' : ''}</span>
                 {u}
               </div>
             ))}
             <div className="dropdown-sep" />
-            <div className="dropdown-label">{t('Rotation')}</div>
-            {(
-              [
-                ['free', 'Free rotation'],
-                ['turntable', 'Turntable (Z up)'],
-              ] as const
-            ).map(([mode, label]) => (
-              <div key={mode} className="dropdown-item" onClick={() => setRotationMode(mode)}>
-                <span className="menu-icon">{rotationMode === mode ? '✓' : ''}</span>
-                {t(label)}
-              </div>
-            ))}
-            <div className="dropdown-sep" />
-            <div className="dropdown-label">{t('Language')}</div>
-            {(['ru', 'en'] as const).map((l) => (
-              <div
-                key={l}
-                className="dropdown-item"
-                onClick={() => {
-                  setLang(l);
-                  location.reload();
-                }}
-              >
-                {getLang() === l ? '✓ ' : '   '}
-                {l === 'ru' ? 'Русский' : 'English'}
-              </div>
-            ))}
-            <div className="dropdown-sep" />
-            <div
-              className="dropdown-item"
-              onClick={() => {
-                download(JSON.stringify(doc), `${safeName(doc.name)}.webcad.json`, 'application/json');
-                setMenu(null);
-              }}
-            >
-              <Icon name="download" size={14} /> {t('Export project')}
-            </div>
+            <AppSettingsItems />
           </div>
         )}
       </div>

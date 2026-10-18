@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
 import type { CadDocument, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
 import { uid } from '../core/ids';
+import { configuredFeatures } from '../core/config';
 import { LENGTH_FACTOR } from '../core/expr';
 import { kernel } from '../kernel/client';
 import { useDoc } from '../store/docStore';
@@ -26,7 +27,7 @@ import {
   scaleLabel,
   sheetSize,
   STD_SCALES,
-  TITLE_H,
+  titleBlockContent,
   titleBlockRect,
   titleBlockPrims,
   toModel,
@@ -36,6 +37,7 @@ import {
   viewRect,
   type ProjectionData,
 } from './sheet';
+import { TitleBlockSettings } from './TitleBlockSettings';
 
 // ---------------------------------------------------------------------------
 // Projection cache: builds the referenced part studio in the worker, then asks for HLR views.
@@ -45,19 +47,23 @@ const projCache = new Map<string, ProjectionData>();
 const builtStudios = new Map<string, unknown>();
 
 function studioKeyOf(s: PartStudioTab) {
-  return `${s.id}:${s.features.length}:${JSON.stringify(s.features).length}:${s.rollback}:${JSON.stringify(s.parts).length}`;
+  return `${s.id}:${s.features.length}:${JSON.stringify(s.features).length}:${s.rollback}:${JSON.stringify(s.parts).length}:${JSON.stringify([s.configuration, s.configChoice])}`;
 }
 
 async function ensureBuilt(doc: CadDocument, studio: PartStudioTab) {
-  if (builtStudios.get(studio.id) === studio.features && !useEditor.getState().editing) return;
+  // built as its chosen configuration has it
+  const inputs = [studio.features, studio.configuration, studio.configChoice];
+  const built = builtStudios.get(studio.id) as unknown[] | undefined;
+  if (built?.every((x, i) => x === inputs[i]) && !useEditor.getState().editing) return;
+  const features = configuredFeatures(studio);
   const upTo = studio.rollback ?? studio.features.length;
   await kernel().build(studio.id, {
     units: doc.units,
-    features: studio.features.slice(0, upTo),
+    features: features.slice(0, upTo),
     partMeta: Object.fromEntries(Object.entries(studio.parts).map(([k, v]) => [k, { name: v.name, color: v.color, hidden: v.hidden }])),
     upTo,
   });
-  builtStudios.set(studio.id, studio.features);
+  builtStudios.set(studio.id, inputs);
 }
 
 function viewKey(v: DrawingView, studio: PartStudioTab) {
@@ -175,7 +181,12 @@ interface DimDraft {
   circle?: { c: Vec2; r: number };
 }
 
-type TitleFields = Pick<DrawingData, 'title' | 'author' | 'designation'>;
+type TitleFields = Pick<DrawingData, 'title' | 'author' | 'designation' | 'titleBlock'>;
+
+const GOST_FIELDS = [
+  ['material', 'Material'], ['mass', 'Mass (with unit)'], ['organization', 'Organization'], ['revision', 'Version'], ['letter', 'Letter'],
+  ['checkedBy', 'Checked by'], ['technicalControl', 'Technical control'], ['standardsControl', 'Standards control'], ['approvedBy', 'Approved by'],
+] as const;
 
 function TitleBlockDialog({ drawing, extra, onSave, onClose }: {
   drawing: DrawingData;
@@ -183,9 +194,10 @@ function TitleBlockDialog({ drawing, extra, onSave, onClose }: {
   onSave: (fields: TitleFields) => void;
   onClose: () => void;
 }) {
-  const [fields, setFields] = useState<TitleFields>({ title: drawing.title, author: drawing.author, designation: drawing.designation ?? '' });
+  const [fields, setFields] = useState<TitleFields>({ title: drawing.title, author: drawing.author, designation: drawing.designation ?? '', titleBlock: drawing.titleBlock });
   const formRef = useRef<HTMLFormElement>(null);
-  const rect = titleBlockRect(drawing);
+  const preview = { ...drawing, ...fields };
+  const rect = titleBlockRect(preview);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     formRef.current?.querySelector('textarea')?.focus();
@@ -205,7 +217,7 @@ function TitleBlockDialog({ drawing, extra, onSave, onClose }: {
           if (e.key === 'Escape') { e.preventDefault(); onClose(); }
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); formRef.current?.requestSubmit(); }
           if (e.key === 'Tab') {
-            const controls = Array.from(formRef.current!.querySelectorAll<HTMLElement>('input, textarea, button'));
+            const controls = Array.from(formRef.current!.querySelectorAll<HTMLElement>('input, textarea, select, button'));
             const first = controls[0];
             const last = controls[controls.length - 1];
             if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -215,6 +227,7 @@ function TitleBlockDialog({ drawing, extra, onSave, onClose }: {
       >
         <div className="modal-header" id="drawing-title-dialog-heading">{t('Edit title block')}</div>
         <div className="modal-body">
+          <TitleBlockSettings drawing={preview} onChange={(titleBlock) => setFields((current) => ({ ...current, titleBlock }))} />
           <label className="drawing-field">
             <span>{t('Drawing title')}</span>
             <textarea rows={3} value={fields.title} onChange={(e) => setFields({ ...fields, title: e.target.value })} />
@@ -229,10 +242,26 @@ function TitleBlockDialog({ drawing, extra, onSave, onClose }: {
               <input value={fields.author} onChange={(e) => setFields({ ...fields, author: e.target.value })} />
             </label>
           </div>
+          {fields.titleBlock?.template === 'gost' && (
+            <details className="drawing-gost-fields">
+              <summary>{t('Additional GOST fields')}</summary>
+              <div className="drawing-field-grid">
+                {GOST_FIELDS.map(([key, label]) => (
+                  <label className="drawing-field" key={key}>
+                    <span>{t(label)}</span>
+                    <input value={fields.titleBlock?.[key] ?? ''} maxLength={key === 'letter' ? 3 : undefined} onChange={(e) => {
+                      const value = e.target.value;
+                      setFields((current) => ({ ...current, titleBlock: { ...current.titleBlock, template: 'gost', [key]: value } }));
+                    }} />
+                  </label>
+                ))}
+              </div>
+            </details>
+          )}
           <div className="drawing-title-preview">
-            <svg viewBox={`0 0 ${rect.x1 - rect.x0} ${TITLE_H}`} role="img" aria-label={t('Title block')}>
+            <svg viewBox={`-0.5 -0.5 ${rect.x1 - rect.x0 + 1} ${rect.y1 - rect.y0 + 1}`} role="img" aria-label={t('Title block')}>
               <g transform={`translate(${-rect.x0} ${rect.y1}) scale(1 -1)`}>
-                {titleBlockPrims({ ...drawing, ...fields }, extra).map((p, i) => <PrimSvg key={i} p={p} />)}
+                {titleBlockContent(preview, extra).map((p, i) => <PrimSvg key={i} p={p} />)}
               </g>
             </svg>
           </div>
@@ -331,7 +360,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       const th = top.bounds[1][1] - top.bounds[0][1];
       const f = frameRect(d);
       const availW = f.x1 - f.x0 - 30;
-      const availH = f.y1 - f.y0 - TITLE_H - 20;
+      const availH = Math.max(1, f.y1 - titleBlockRect(d).y1 - 20);
       // front + side horizontally, front + top vertically
       const scale = chooseScale(fw + th + 30, fh + th + 30, availW * 0.95, availH * 0.95);
       const gap = 20;
@@ -687,6 +716,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         </div>
         <div className="panel-header">{t('Title block')}</div>
         <div className="drawing-sheet-settings">
+          <TitleBlockSettings drawing={d} onChange={(config, key) => upd((dd) => { dd.titleBlock = config; }, key)} />
           <label className="drawing-field">
             <span>{t('Drawing title')}</span>
             <textarea rows={3} value={d.title} onChange={(e) => upd((dd) => void (dd.title = e.target.value), 'title')} onKeyDown={(e) => e.stopPropagation()} />
@@ -868,7 +898,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
               {tool === 'select' && (
                 <rect
                   className="drawing-title-hit"
-                  x={titleRect.x0} y={titleRect.y0} width={titleRect.x1 - titleRect.x0} height={TITLE_H}
+                  x={titleRect.x0} y={titleRect.y0} width={titleRect.x1 - titleRect.x0} height={titleRect.y1 - titleRect.y0}
                   role="button" tabIndex={0} aria-label={t('Edit title block')}
                   onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
                   onClick={() => setEditingTitle(true)}

@@ -2,7 +2,7 @@
 // are resolved against the model built just before the feature that uses them, so references
 // carry the same persistent signatures as picks made in the UI.
 
-import type { CadDocument, Feature, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
+import type { CadDocument, ConfigInput, Feature, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, PartMesh } from '../kernel/protocol';
 import { collectVariables, defaultParams, FEATURE_LABELS, makeEvalContext, nextFeatureName } from '../core/features';
 import { formatQuantity, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
@@ -10,6 +10,7 @@ import { uid } from '../core/ids';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { computeRegions, regionAt, type SketchRegion } from '../sketch/regions';
 import { pointInPolygon } from '../sketch/curves';
+import { chosenOption, configKey, configuredFeatures, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot } from '../sketch/sketchOps';
 import type {
   AgentOp,
@@ -118,7 +119,7 @@ class Runner {
   // ----- values -------------------------------------------------------------
 
   private ctx() {
-    return makeEvalContext({ units: this.units }, collectVariables(this.s.features, this.at, this.units));
+    return makeEvalContext({ units: this.units }, collectVariables(configuredFeatures(this.s), this.at, this.units));
   }
 
   /** Length in mm. */
@@ -145,7 +146,8 @@ class Runner {
   // ----- model --------------------------------------------------------------
 
   async model(): Promise<BuildResult> {
-    const feats = this.s.features.slice(0, this.at);
+    // as the chosen configuration has them
+    const feats = configuredFeatures(this.s).slice(0, this.at);
     const key = JSON.stringify(feats);
     if (this.cache?.key === key) return this.cache.res;
     const res = await this.kernel.build(feats);
@@ -554,7 +556,9 @@ class Runner {
       case 'setVariable': {
         const f = this.s.features.find((x) => x.type === 'variable' && x.params.name === op.name.replace(/^#/, ''));
         if (!f || f.type !== 'variable') throw new AgentError(`No variable #${op.name}`);
-        f.params.value = typeof op.value === 'number' ? (f.params.varType === 'number' ? `${op.value}` : `${op.value} ${f.params.varType === 'angle' ? 'deg' : this.units.length}`) : op.value;
+        const value = typeof op.value === 'number' ? (f.params.varType === 'number' ? `${op.value}` : `${op.value} ${f.params.varType === 'angle' ? 'deg' : this.units.length}`) : op.value;
+        // a configured variable: the chosen configuration's cell
+        if (!setConfigured(this.s, f.id, 'value', value)) f.params.value = value;
         return;
       }
       case 'sketch': {
@@ -754,7 +758,10 @@ class Runner {
         const saved = this.s.rollback;
         this.s.rollback = idx;
         try {
-          const patch = (await this.resolveParams(op.params ?? {})) as object;
+          const patch = (await this.resolveParams(op.params ?? {})) as Record<string, unknown>;
+          // configured parameters go to the chosen configuration's cells; the feature keeps its own values
+          for (const [k, v] of Object.entries(patch))
+            if ((typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') && setConfigured(this.s, f.id, k, String(v))) delete patch[k];
           Object.assign(f.params as object, patch);
         } finally {
           this.s.rollback = saved;
@@ -767,6 +774,7 @@ class Runner {
         this.s.features.splice(idx, 1);
         if (this.s.rollback !== null && idx < this.s.rollback) this.s.rollback--;
         for (const fo of this.s.folders ?? []) fo.featureIds = fo.featureIds.filter((x) => x !== f.id);
+        pruneConfiguration(this.s);
         if (this.lastSketch === f.id) this.lastSketch = null;
         return;
       }
@@ -775,9 +783,58 @@ class Runner {
         this.feature(op.feature).name = op.to;
         return;
       }
-      case 'suppress':
-        this.feature(op.feature).suppressed = op.value !== false;
+      case 'suppress': {
+        const f = this.feature(op.feature);
+        if (!setConfigured(this.s, f.id, 'suppressed', String(op.value !== false))) f.suppressed = op.value !== false;
         return;
+      }
+      case 'configuration': {
+        if (!op.name || !op.options?.length) throw new AgentError('configuration needs "name" and "options"');
+        const keys = (op.params ?? []).map((p) => {
+          if ('variable' in p) {
+            const v = this.s.features.find((f) => f.type === 'variable' && f.params.name === p.variable.replace(/^#/, ''));
+            if (!v) throw new AgentError(`No variable #${p.variable}`);
+            return configKey(v.id, 'value');
+          }
+          const f = this.feature(p.feature);
+          const param = p.param ?? 'suppressed';
+          if (param !== 'suppressed' && ownValue(f, param) === undefined)
+            throw new AgentError(`"${f.name}" has no parameter "${param}". Parameters: ${Object.keys(f.params).filter((k) => ownValue(f, k) !== undefined).join(', ')}`);
+          return configKey(f.id, param);
+        });
+        const old = this.s.configuration?.find((x) => x.name === op.name);
+        const input: ConfigInput = {
+          id: old?.id ?? uid('ci'),
+          name: op.name,
+          options: op.options.map((name) => ({ id: old?.options.find((o) => o.name === name)?.id ?? uid('co'), name })),
+          params: keys,
+          values: {},
+        };
+        for (const [name, row] of Object.entries(op.values ?? {})) {
+          const o = input.options.find((x) => x.name === name);
+          if (!o) throw new AgentError(`No option "${name}" in configuration "${op.name}". Options: ${op.options.join(', ')}`);
+          if (row.length !== keys.length) throw new AgentError(`"${name}": ${row.length} values for ${keys.length} parameters`);
+          const cells: Record<string, string> = {};
+          // a bare number takes the document's units, as in any field
+          row.forEach((v, k) => v !== null && v !== undefined && (cells[keys[k]] = String(v)));
+          input.values[o.id] = cells;
+        }
+        const inputs = this.s.configuration ?? [];
+        this.s.configuration = old ? inputs.map((x) => (x === old ? input : x)) : [...inputs, input];
+        return;
+      }
+      case 'configure': {
+        const choice = { ...this.s.configChoice };
+        for (const [name, option] of Object.entries(op.values ?? {})) {
+          const input = this.s.configuration?.find((x) => x.name === name || x.name.toLowerCase() === name.toLowerCase());
+          if (!input) throw new AgentError(`No configuration "${name}". Configurations: ${(this.s.configuration ?? []).map((x) => x.name).join(', ') || '(none)'}`);
+          const o = input.options.find((x) => x.name === option || x.name.toLowerCase() === String(option).toLowerCase());
+          if (!o) throw new AgentError(`No option "${option}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
+          choice[input.id] = o.id;
+        }
+        this.s.configChoice = choice;
+        return;
+      }
       case 'part': {
         const [p] = await this.partsOf(op.part);
         const meta = { ...(this.s.parts[p.id] ?? {}) };
@@ -820,7 +877,8 @@ function dedupe(refs: SelRef[]): SelRef[] {
 /** Summary of the model built from `studio` (document units). */
 export async function summarize(studio: PartStudioTab, units: Units, kernel: AgentKernel, build?: BuildResult): Promise<ModelSummary> {
   const rollback = studio.rollback === null ? studio.features.length : studio.rollback;
-  const res = build ?? (await kernel.build(studio.features.slice(0, rollback)));
+  const configured = configuredFeatures(studio);
+  const res = build ?? (await kernel.build(configured.slice(0, rollback)));
   const k = LENGTH_FACTOR[units.length];
   const parts = [];
   for (const p of res.parts) {
@@ -841,11 +899,27 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       edges: p.edges.filter((e) => !e.seam).length,
     });
   }
-  const vars = collectVariables(studio.features, rollback, units);
+  const vars = collectVariables(configured, rollback, units);
   const partNames = new Map(res.parts.map((p) => [p.id, p.name]));
+  // configured parameters by name: "Extrude 1.depth", "#w"
+  const paramName = (key: string) => {
+    const { featureId, param } = splitConfigKey(key);
+    const f = studio.features.find((x) => x.id === featureId);
+    return !f ? '?' : f.type === 'variable' && param === 'value' ? `#${f.params.name}` : `${f.name}.${param}`;
+  };
   return {
     units: { length: units.length, angle: units.angle },
-    features: studio.features.map((f, i) => {
+    ...(studio.configuration?.length
+      ? {
+          configuration: studio.configuration.map((i) => ({
+            name: i.name,
+            options: i.options.map((o) => o.name),
+            chosen: chosenOption(i, studio.configChoice)?.name ?? '',
+            params: i.params.map(paramName),
+          })),
+        }
+      : {}),
+    features: configured.map((f, i) => {
       const st = res.statuses[f.id];
       const status = i >= rollback ? 'rolledBack' : f.suppressed ? 'suppressed' : !st ? 'ok' : !st.ok ? 'error' : st.warning ? 'warning' : 'ok';
       const message = st?.error ?? st?.warning;
@@ -891,7 +965,7 @@ export async function runOps(studio: PartStudioTab, units: Units, ops: AgentOp[]
   }
   const before = new Map(studio.features.map((f) => [f.id, JSON.stringify(f)]));
   const rollback = s.rollback === null ? s.features.length : s.rollback;
-  const build = await kernel.build(s.features.slice(0, rollback));
+  const build = await kernel.build(configuredFeatures(s).slice(0, rollback));
   const added = s.features.filter((f) => !before.has(f.id));
   const changed = s.features.filter((f) => before.has(f.id) && before.get(f.id) !== JSON.stringify(f));
   const removed = studio.features.filter((f) => !s.features.some((x) => x.id === f.id));

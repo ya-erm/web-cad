@@ -152,22 +152,28 @@ export function Viewport() {
                   ['right', 'Right', 'Shift+4'],
                   ['top', 'Top', 'Shift+5'],
                   ['bottom', 'Bottom', 'Shift+6'],
-                  ['iso', 'Isometric', 'Shift+7'],
+                  // the axonometric views apart from the six principal ones
+                  ['|', '', ''],
+                  ['iso', 'Isometric', ''],
                   ['dimetric', 'Dimetric', ''],
                   ['trimetric', 'Trimetric', ''],
                 ] as const
-              ).map(([v, label, sc]) => (
-                <div
-                  key={v}
-                  className="dropdown-item"
-                  onClick={() => {
-                    view({ kind: 'std', view: v });
-                    setMenu(false);
-                  }}
-                >
-                  {t(label)} <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>{sc}</span>
-                </div>
-              ))}
+              ).map(([v, label, sc]) =>
+                v === '|' ? (
+                  <div key="axonometric" className="dropdown-sep" />
+                ) : (
+                  <div
+                    key={v}
+                    className="dropdown-item"
+                    onClick={() => {
+                      view({ kind: 'std', view: v });
+                      setMenu(false);
+                    }}
+                  >
+                    {t(label)} <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>{sc}</span>
+                  </div>
+                ),
+              )}
               <div className="dropdown-sep" />
               <div
                 className="dropdown-item"

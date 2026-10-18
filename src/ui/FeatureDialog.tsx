@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { Feature, FeatureType, SelRef } from '../core/types';
+import type { ConfigInput, Feature, FeatureType, SelRef } from '../core/types';
 import { FIELD_SPECS } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
+import { chosenOption, configuredOf, configuredParams } from '../core/config';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
@@ -132,7 +133,7 @@ function ExprInput({ value, unit, onChange }: { value: string; unit: 'length' | 
   useEffect(() => setText(value), [value]);
   const ctx = useMemo(() => {
     const studio = activeStudio(doc);
-    return doc ? makeEvalContext(doc, collectVariables(studio?.features ?? [], index, doc.units)) : null;
+    return doc ? makeEvalContext(doc, collectVariables(configuredOf(studio), index, doc.units)) : null;
   }, [doc, index]);
   const v = ctx ? tryEvaluate(text, unit, ctx) : null;
   const title =
@@ -238,8 +239,20 @@ export function FeatureDialog() {
   const commit = useEditor((s) => s.commitEditing);
   const cancel = useEditor((s) => s.cancelEditing);
   const update = useEditor((s) => s.updateDraft);
+  const studio = useDoc((s) => activeStudio(s.doc));
   if (!editing || editing.draft.type === 'sketch') return null;
   const draft = editing.draft;
+  // parameters set by the configuration: what is typed goes to the chosen configuration's cell
+  const configured = studio ? configuredParams(studio, draft.id) : new Map<string, ConfigInput>();
+  const configMark = (key: string) => {
+    const input = configured.get(key);
+    const opt = input && chosenOption(input, studio?.configChoice);
+    return input && opt ? (
+      <span className="cfg-mark" title={`${t('Set by the configuration')} «${input.name}»: ${opt.name}`}>
+        <Icon name="layers" size={13} />
+      </span>
+    ) : null;
+  };
   const p = draft.params as unknown as Record<string, unknown>;
   const rows = FORMS[draft.type] ?? [];
   // Don't nag with "select …" errors before the user picked anything in the first field.
@@ -283,7 +296,10 @@ export function FeatureDialog() {
       case 'expr':
         return (
           <div key={i} className="fd-row">
-            <label>{t(row.label)}</label>
+            <label>
+              {t(row.label)}
+              {configMark(row.key)}
+            </label>
             <div className="fd-control">
               <ExprInput
                 value={String(p[row.key] ?? '')}
@@ -307,6 +323,7 @@ export function FeatureDialog() {
           <label key={i} className="fd-check">
             <input type="checkbox" checked={!!p[row.key]} onChange={(e) => set(row.key, e.target.checked)} />
             {t(row.label)}
+            {configMark(row.key)}
           </label>
         );
       case 'flip':

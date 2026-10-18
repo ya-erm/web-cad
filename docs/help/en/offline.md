@@ -20,7 +20,7 @@ WebCAD works without a server and without an account: the geometry kernel (OpenC
 
 ## Backups and transfer {#backup}
 
-- **Settings** → **Export project** saves the whole document to a `.webcad.json` file.
+- **Export** with the **WebCAD project** format saves the whole document to a `.webcad.json` file.
 - **Import project** on the documents page opens such a file in any browser.
 - In Chrome and Edge, documents can live in a [folder on your computer](documents#folder): their `.webcad.json` files are updated on every save.
 - To use the geometry in other programs, save it as STEP — see [Import and export](import-export).

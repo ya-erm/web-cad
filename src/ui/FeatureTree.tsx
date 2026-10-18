@@ -3,6 +3,8 @@ import type { Draft } from 'immer';
 import type { Feature, FeatureFolder, PartStudioTab, SelRef, SketchData } from '../core/types';
 import { getEngine } from '../viewport/engineRef';
 import { FIELD_SPECS } from '../core/fieldSpecs';
+import { configuredFeatures, pruneConfiguration, setConfigured } from '../core/config';
+import { ConfigChooser } from './ConfigPanel';
 import { computeRegions } from '../sketch/regions';
 import { uid } from '../core/ids';
 import { useEditor, sameRef, type ContextMenuItem } from '../store/editorStore';
@@ -98,7 +100,8 @@ export function FeatureTree() {
     };
   }, []);
   if (!studio) return null;
-  const features = studio.features;
+  // as the chosen configuration has them (which are disabled); same ids and order as the studio's own
+  const features = configuredFeatures(studio);
   const rollback = effectiveRollback(studio);
   const hidden = new Set(studio.hidden ?? []);
   const folders = studio.folders ?? [];
@@ -206,6 +209,8 @@ export function FeatureTree() {
         if (s.rollback !== null && idx < s.rollback) s.rollback--;
       }
       cleanFolders(s);
+      // their configured parameters go too
+      pruneConfiguration(s);
     });
 
   deleteSelectedRef.current = () => {
@@ -214,9 +219,10 @@ export function FeatureTree() {
     setSel([]);
   };
 
+  // a configured suppression is set for the chosen configuration
   const setSuppressed = (ids: string[], v: boolean) =>
     studioUpdate((s) => {
-      for (const f of s.features) if (ids.includes(f.id)) f.suppressed = v;
+      for (const f of s.features) if (ids.includes(f.id) && !setConfigured(s, f.id, 'suppressed', String(v))) f.suppressed = v;
     });
 
   /** Move features (keeping their order) before `beforeId` (or to the end) and optionally into a folder. */
@@ -579,6 +585,7 @@ export function FeatureTree() {
           </button>
         )}
       </div>
+      <ConfigChooser studio={studio} />
       <div
         className="panel-body"
         ref={listRef}

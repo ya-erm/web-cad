@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import { kernel } from '../kernel/client';
 import type { BuildResult, PartMesh } from '../kernel/protocol';
 import type { CadDocument, PartStudioTab } from '../core/types';
+import { configuredFeatures } from '../core/config';
 import { effectiveRollback } from '../store/docStore';
 import { partColorFor } from '../store/rebuild';
 import type { AssemblySources, StudioData } from './compose';
@@ -13,7 +14,8 @@ async function buildStudioResult(doc: CadDocument, studio: PartStudioTab): Promi
   const upTo = effectiveRollback(studio);
   const partMeta: Record<string, { name?: string; color?: string; hidden?: boolean }> = {};
   for (const [id, m] of Object.entries(studio.parts)) partMeta[id] = { name: m.name, color: m.color };
-  const res = await kernel().build(studio.id, { units: doc.units, features: studio.features.slice(0, upTo), partMeta, upTo });
+  // the Part Studio as its chosen configuration has it
+  const res = await kernel().build(studio.id, { units: doc.units, features: configuredFeatures(studio).slice(0, upTo), partMeta, upTo });
   for (const p of res.parts) {
     if (!studio.parts[p.id]?.color) p.color = partColorFor(studio, p.id, res.partOrder);
     p.hidden = false;

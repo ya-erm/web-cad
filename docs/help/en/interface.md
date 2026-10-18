@@ -34,14 +34,15 @@ While you create or edit a feature, its **dialog** is open in the top-left corne
 
 ## Settings {#settings}
 
-The **Settings** menu in the top bar:
+The **Settings** menu in the top bar of a document (on the documents page — only **Rotation** and **Language**):
 
 | Item | What it does |
 |---|---|
 | **Units** | Document length units: mm, cm, m, in, ft. Numbers without units in fields and dimensions are interpreted in these units. |
 | **Rotation** | **Free rotation** rotates around the screen axes; **Turntable (Z up)** rotates around the Z axis and keeps the horizon level. The setting is remembered in the browser. |
 | **Language** | **Русский** or **English**. The page reloads. |
-| **Export project** | Saves the whole document to a `.webcad.json` file. See [Documents and tabs](documents#project-files). |
+
+The whole document goes to a `.webcad.json` file with the **Export** button and the **WebCAD project** format. See [Documents and tabs](documents#project-files).
 
 ## Context menus {#context-menus}
 

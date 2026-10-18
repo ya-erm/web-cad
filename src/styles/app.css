@@ -268,7 +268,9 @@ textarea {
   display: none;
   gap: 4px;
 }
-.doc-card:hover .doc-actions {
+/* the "⋯" stays while its menu is open (the button keeps the focus) */
+.doc-card:hover .doc-actions,
+.doc-card .doc-actions:focus-within {
   display: flex;
 }
 .doc-actions .icon-btn {
@@ -325,6 +327,20 @@ textarea {
   font-size: 11px;
   color: var(--text-3);
 }
+/* folders on the computer */
+.docs-nav-head {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.docs-nav-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .docs-title {
   display: flex;
   align-items: center;
@@ -339,15 +355,36 @@ textarea {
   font-size: 12px;
   margin: -6px 0 14px;
 }
+/* "moved to the trash": in the middle of the header */
+.docs-top {
+  position: relative;
+}
 .docs-notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  max-width: calc(100% - 520px);
+  padding: 4px 6px 4px 12px;
   background: #fff8e6;
   border: 1px solid #f0d58a;
   border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(120, 90, 0, 0.12);
+  font-size: 13px;
+  animation: tip-in 0.12s ease-out;
+}
+.docs-notice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docs-notice .icon-btn {
+  width: 24px;
+  height: 24px;
+  flex: none;
 }
 .doc-card.trashed {
   cursor: default;
@@ -503,6 +540,16 @@ textarea {
   left: 8px;
   top: 5px;
   color: var(--text-3);
+}
+/* results of the tool search: placed in the window (the toolbar clips what sticks out of it) */
+.tool-search-results {
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: 60;
+}
+.tool-search-results .dropdown-item.active {
+  background: var(--accent-soft);
 }
 
 .workspace {
@@ -731,6 +778,10 @@ textarea {
   align-items: center;
   gap: 6px;
   font-weight: 600;
+}
+/* the close button at the right of the header */
+.section-head .spacer {
+  flex: 1;
 }
 .section-row {
   display: flex;
@@ -1151,6 +1202,11 @@ textarea {
 .finish-btn:hover {
   background: #dff4e5;
 }
+.finish-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: #eefaf1;
+}
 
 .bottombar {
   display: flex;
@@ -1244,7 +1300,8 @@ textarea {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  place-items: end center;
+  padding-bottom: 24px;
   background: rgba(255, 255, 255, 0.6);
   z-index: 40;
   color: var(--text-2);
@@ -1507,6 +1564,9 @@ textarea {
   border-radius: 4px;
 }
 .drawing-title-preview svg { display: block; width: 100%; }
+.drawing-title-preview svg { max-height: 320px; }
+.drawing-gost-fields summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
+.drawing-gost-fields[open] summary { margin-bottom: 12px; }
 @media (max-width: 900px) {
   .drawing-side { width: 250px; }
   .drawing-title-tool { display: none; }
@@ -1646,12 +1706,14 @@ textarea {
   padding: 2px;
   z-index: 12;
 }
+/* opens next to its button in the strip (left of it, at the same height); moved by its header */
 .right-panel {
   position: absolute;
-  right: 56px;
-  top: 8px;
+  right: 60px;
+  top: 164px;
   width: 360px;
-  max-height: calc(100% - 16px);
+  max-height: calc(100% - 172px);
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -1660,6 +1722,206 @@ textarea {
   box-shadow: 0 6px 22px rgba(20, 40, 70, 0.2);
   z-index: 19;
   overflow: hidden;
+}
+.panel-header.drag-handle {
+  cursor: move;
+  user-select: none;
+}
+/* configurations: inputs with a table each (options in rows, configured parameters in columns) */
+/* as wide as its tables need, within the graphics area */
+.right-panel.cfg-panel {
+  width: auto;
+  min-width: 420px;
+  max-width: calc(100% - 80px);
+}
+.cfg-body {
+  overflow: auto;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cfg-empty {
+  padding: 4px 2px;
+  line-height: 1.5;
+}
+.cfg-input-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cfg-input-head .spacer {
+  flex: 1;
+}
+.cfg-input-name {
+  font-weight: 600;
+  max-width: 200px;
+}
+/* as wide as its columns (scrolls sideways when they do not fit) */
+.cfg-table-wrap {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.cfg-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cfg-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.cfg-col-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.cfg-col-title span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.cfg-table th.cfg-no-params {
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: normal;
+  min-width: 160px;
+}
+/* deleting an option: on hovering its row */
+.cfg-table td.cfg-row-actions,
+.cfg-table th.cfg-row-actions {
+  width: 26px;
+  padding: 0 4px;
+}
+.cfg-row-actions .icon-btn {
+  visibility: hidden;
+}
+.cfg-table tr:hover .cfg-row-actions .icon-btn {
+  visibility: visible;
+}
+.cfg-table th,
+.cfg-table td {
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--panel-2);
+  text-align: left;
+  white-space: nowrap;
+}
+.cfg-table th {
+  background: var(--panel);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.cfg-table th.gone {
+  color: var(--danger);
+}
+.cfg-table tr.chosen td {
+  background: var(--accent-soft);
+}
+.cfg-col {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cfg-col b {
+  font-weight: 600;
+  color: var(--text);
+}
+.cfg-col .icon-btn,
+.cfg-table td .icon-btn {
+  width: 18px;
+  height: 18px;
+}
+.cfg-cell {
+  width: 100%;
+  min-width: 70px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  padding: 2px 5px;
+  font: inherit;
+  color: inherit;
+}
+.cfg-cell:hover {
+  border-color: var(--border);
+}
+.cfg-cell:focus {
+  border-color: var(--accent);
+  background: #fff;
+  outline: none;
+}
+.cfg-cell::placeholder {
+  color: var(--text-3);
+}
+.cfg-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cfg-name .cfg-cell {
+  min-width: 110px;
+}
+.cfg-table td .cfg-cell {
+  width: 90px;
+}
+.cfg-table td .cfg-name .cfg-cell {
+  width: 130px;
+}
+.cfg-default {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.cfg-add-row {
+  margin-top: 6px;
+}
+.cfg-add-menu {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.cfg-add-feature {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: none;
+}
+/* above the feature list: the chosen configuration */
+.cfg-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.cfg-choose {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.cfg-choose span {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-choose select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+}
+.cfg-mark {
+  display: inline-flex;
+  margin-left: 4px;
+  color: var(--accent);
+  vertical-align: middle;
 }
 .var-table {
   overflow: auto;

@@ -1,6 +1,6 @@
 # Feature list
 
-The **Features** list in the left panel is the build history of the Part Studio. Features run from top to bottom; each one can use the result of the features above it. The number in the header is the feature count.
+The **Features** list in the left panel is the build history of the Part Studio. Features run from top to bottom; each one can use the result of the features above it. The number in the header is the feature count. When the Part Studio has [configurations](configurations), their inputs stand above the list: choose an option and the model rebuilds in it.
 
 ```figure
 image: ../images/feature-tree-menu.png

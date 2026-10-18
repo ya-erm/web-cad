@@ -6,6 +6,7 @@ The Agent API lets you create and modify WebCAD models programmatically, with de
 
 - Operations: variables, sketches from shapes (rectangles, circles, lines, arcs, slots, polygons, points), extrude, revolve, fillets, chamfers, shells, holes, patterns, mirror, Boolean operations, planes, mate connectors, section view, and any other features with "raw" parameters.
 - [Assemblies](assembly): create an assembly tab, insert parts and sub-assemblies ([flexible](assembly#flexible) ones too), place and fix instances, mate them (faces and edges found with the same queries), group them, add mate relations. One call can build the parts and then assemble them.
+- [Configurations](configurations): set up a table of variants (feature parameters, disabled features, variables) and choose a variant.
 - Queries for faces, edges and parts by geometry ("top planar face", "edges parallel to Z").
 - A model report: features and their errors, variables, parts with their bounding boxes, volume and area; for an assembly — its instances (placement and bounding box) and whether every mate holds.
 - Screenshots of the graphics area and export (STL, STEP — an assembly with its product tree, project file).

@@ -19,9 +19,19 @@ export const folderSupported = () => typeof window !== 'undefined' && 'showDirec
 // --- the remembered folder (its handle survives reloads in IndexedDB) -------------------------------------
 
 const DB = 'webcad-folders';
-/** `handles`: the folder; `links`: document id → its file name in the folder. */
+/** `handles`: folder id → its handle; `links`: document id → its file (`FileLink`). */
 const STORES = ['handles', 'links'] as const;
-const KEY = 'folder';
+
+/** Where a document's file is: the folder (by id) and the file name in it. */
+export interface FileLink {
+  folder: string;
+  name: string;
+  /** The document's name when the file got its name: renaming the document renames the file. */
+  title?: string;
+}
+
+/** The id the single folder of the first version was kept under (its links were just file names). */
+const OLD_FOLDER = 'folder';
 
 let opened: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
@@ -42,47 +52,62 @@ async function idb<T>(store: (typeof STORES)[number], mode: IDBTransactionMode, 
   });
 }
 
-/** The folder chosen last time (permission may have to be asked again). */
-export const savedFolder = () => idb<FileSystemDirectoryHandle | undefined>('handles', 'readonly', (s) => s.get(KEY)).catch(() => undefined);
-
-/** Forget the folder and which documents were its files (the files and the documents stay). */
-export async function forgetFolder() {
-  await idb('handles', 'readwrite', (s) => s.delete(KEY));
-  await idb('links', 'readwrite', (s) => s.clear());
+/** Every entry of a store: key → value. */
+async function entries<T>(store: (typeof STORES)[number]): Promise<[string, T][]> {
+  const d = await db();
+  return new Promise<[string, T][]>((resolve, reject) => {
+    const out: [string, T][] = [];
+    const r = d.transaction(store).objectStore(store).openCursor();
+    r.onsuccess = () => {
+      const c = r.result;
+      if (!c) return resolve(out);
+      out.push([String(c.key), c.value as T]);
+      c.continue();
+    };
+    r.onerror = () => reject(r.error);
+  }).catch(() => []);
 }
 
-/** Ask the user for a folder (read and write) and remember it. Null when the dialog was cancelled. */
-export async function pickFolder(): Promise<FileSystemDirectoryHandle | null> {
+/** The folders added so far, in the order they were added (permission may have to be asked again). */
+export async function savedFolders(): Promise<{ id: string; dir: FileSystemDirectoryHandle }[]> {
+  return (await entries<FileSystemDirectoryHandle>('handles')).map(([id, dir]) => ({ id, dir }));
+}
+
+/**
+ * Ask the user for a folder (read and write) and remember it with the others; a folder added before keeps its id.
+ * Null when the dialog was cancelled.
+ */
+export async function pickFolder(): Promise<{ id: string; dir: FileSystemDirectoryHandle } | null> {
+  let dir: FileSystemDirectoryHandle;
   try {
-    const dir = await (window as unknown as { showDirectoryPicker: DirectoryPicker }).showDirectoryPicker({ id: 'webcad', mode: 'readwrite' });
-    // another folder: the documents are no longer linked to files of the previous one
-    const prev = await savedFolder();
-    if (!prev || !(await prev.isSameEntry(dir))) await idb('links', 'readwrite', (s) => s.clear());
-    await idb('handles', 'readwrite', (s) => s.put(dir, KEY));
-    return dir;
+    dir = await (window as unknown as { showDirectoryPicker: DirectoryPicker }).showDirectoryPicker({ id: 'webcad', mode: 'readwrite' });
   } catch (e) {
     if ((e as DOMException).name === 'AbortError') return null;
     throw e;
   }
+  for (const f of await savedFolders()) if (await f.dir.isSameEntry(dir).catch(() => false)) return f;
+  // ids in the order of adding
+  const id = `fo${Date.now().toString(36)}`;
+  await idb('handles', 'readwrite', (s) => s.put(dir, id));
+  return { id, dir };
 }
 
-/** Which documents are files of the folder: document id → file name. */
-export async function folderLinks(): Promise<Record<string, string>> {
-  const d = await db();
-  return new Promise<Record<string, string>>((resolve, reject) => {
-    const out: Record<string, string> = {};
-    const r = d.transaction('links').objectStore('links').openCursor();
-    r.onsuccess = () => {
-      const c = r.result;
-      if (!c) return resolve(out);
-      out[String(c.key)] = String(c.value);
-      c.continue();
-    };
-    r.onerror = () => reject(r.error);
-  }).catch(() => ({}));
+/** Forget a folder and which documents were its files (the files and the documents stay). */
+export async function forgetFolder(id: string) {
+  await idb('handles', 'readwrite', (s) => s.delete(id));
+  for (const [docId, link] of await entries<FileLink>('links')) if (link.folder === id) await idb('links', 'readwrite', (s) => s.delete(docId));
 }
 
-export const linkFile = (docId: string, name: string) => idb('links', 'readwrite', (s) => s.put(name, docId));
+/** Which documents are files of the folders: document id → its file. */
+export async function folderLinks(): Promise<Record<string, FileLink>> {
+  return Object.fromEntries(
+    (await entries<FileLink | string>('links')).flatMap(([id, l]): [string, FileLink][] =>
+      typeof l === 'string' ? [[id, { folder: OLD_FOLDER, name: l }]] : l?.folder ? [[id, l]] : [],
+    ),
+  );
+}
+
+export const linkFile = (docId: string, link: FileLink) => idb('links', 'readwrite', (s) => s.put(link, docId));
 
 /**
  * Whether the folder may be read and written now; with `ask` the browser asks the user (only from a click or
@@ -124,6 +149,27 @@ export async function writeFolderFile(dir: FileSystemDirectoryHandle, name: stri
   const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
   await w.write(text);
   await w.close();
+}
+
+/**
+ * Rename a file of the folder (its content stays): `move` where the browser has it, otherwise a copy under the new
+ * name and the old one removed. Returns the name it has now — the old one when only the letter case would change
+ * and the browser cannot move files (the copy would land on the same file).
+ */
+export async function renameFolderFile(dir: FileSystemDirectoryHandle, from: string, to: string): Promise<string> {
+  if (from === to) return from;
+  const h = (await dir.getFileHandle(from)) as FileSystemFileHandle & { move?: (name: string) => Promise<void> };
+  if (h.move)
+    try {
+      await h.move(to);
+      return to;
+    } catch {
+      // not for this file system: copy
+    }
+  if (from.toLowerCase() === to.toLowerCase()) return from;
+  await writeFolderFile(dir, to, await (await h.getFile()).text());
+  await dir.removeEntry(from);
+  return to;
 }
 
 /** A file name for a document that is not taken in the folder: "Bracket.webcad.json", "Bracket (2).webcad.json"… */

@@ -8,6 +8,7 @@ import { uid } from '../core/ids';
 import { expandPatterns, isCopyId, parseCopyId, patternCenter, patternInstances, patternParams, seedCenter } from '../sketch/patterns';
 import { STD_PLANES, toLocal } from '../core/math';
 import { collectVariables, isDimension, makeEvalContext, sketchDims } from '../core/features';
+import { configuredOf } from '../core/config';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { sampleEntity } from '../sketch/curves';
 import { arcAngles, closestPointOnEntity, entityMap, naturalHandles, pointOf, type EntityMap } from '../sketch/curves';
@@ -167,6 +168,8 @@ export class SketchEditor {
   private editingDim: { id: string; isNew: boolean } | null = null;
   private inferLabel: HTMLDivElement;
   private planeKey = '';
+  /** The new sketch had no plane when the view was last placed (see SketchSession.planePending). */
+  private awaitingPlane = false;
   /** Optional dimensions offered right after a shape is drawn (typing a value + Enter adds them). */
   private quick: { box: HTMLDivElement; items: QuickDim[] } | null = null;
   /** Number of polygon sides (kept for the next polygon) and digits typed while drawing one. */
@@ -222,7 +225,7 @@ export class SketchEditor {
       return;
     }
     if (!this.active || this.featureId !== ed.editing!.featureId) this.activate(ed.editing!.featureId, ed.editing!.isNew);
-    else if (JSON.stringify(this.data()?.plane ?? null) !== this.planeKey) {
+    else if (JSON.stringify(this.data()?.plane ?? null) !== this.planeKey || (this.awaitingPlane && !ed.sketch!.planePending)) {
       this.applyFrame(true);
       this.renderSketch(true);
     }
@@ -250,13 +253,15 @@ export class SketchEditor {
   /** Place the sketch on its plane (on activation and when the plane is changed in the dialog). */
   private applyFrame(lookAt: boolean) {
     this.planeKey = JSON.stringify(this.data()?.plane ?? null);
+    // a new sketch without a plane yet: keep the view until the plane is picked
+    this.awaitingPlane = !!useEditor.getState().sketch?.planePending;
     this.frame = this.engine.sketchFrame(this.featureId!) ?? STD_PLANES.top;
     const m = frameMatrix(this.frame);
     this.root.matrix.copy(m);
     this.root.matrixWorldNeedsUpdate = true;
     this.pickRoot.matrix.copy(m);
     this.pickRoot.matrixWorldNeedsUpdate = true;
-    if (lookAt) {
+    if (lookAt && !this.awaitingPlane) {
       const f = this.frame;
       useEditor.getState().view({ kind: 'normal', normal: f.normal, up: f.yDir, center: f.origin });
     }
@@ -363,7 +368,7 @@ export class SketchEditor {
     const doc = useDoc.getState().doc!;
     const studio = activeStudio(doc);
     const idx = useEditor.getState().editing?.index ?? 0;
-    return makeEvalContext(doc, collectVariables(studio?.features ?? [], idx, doc.units));
+    return makeEvalContext(doc, collectVariables(configuredOf(studio), idx, doc.units));
   }
 
   private solve(d: SketchData, opts: { analyze?: boolean; drag?: { points?: Record<string, Vec2>; radii?: Record<string, number> } } = {}) {
@@ -378,11 +383,13 @@ export class SketchEditor {
   /** Apply an edit, re-solve and store (undoable). Returns false if the result is over-constrained. */
   /** Put the sketch on another plane (picked in the graphics area or in the feature list) and leave plane picking. */
   setPlane(plane: SketchData['plane']) {
+    const pending = !!useEditor.getState().sketch?.planePending;
     this.change((d) => {
       d.plane = plane as Draft<SketchData['plane']>;
     });
     useEditor.getState().setHover(null);
-    useEditor.getState().setSketchTool('select');
+    if (pending) useEditor.getState().sketchPlanePicked();
+    else useEditor.getState().setSketchTool('select');
   }
 
   change(fn: (d: Draft<SketchData>) => void, opts: { checkConflict?: boolean } = {}): boolean {
@@ -851,6 +858,7 @@ export class SketchEditor {
     if (e.key === 'Escape') {
       if (this.tool.k !== 'idle') this.endTool();
       else if ((useEditor.getState().sketch?.selection.length ?? 0) > 0) useEditor.getState().setSketchSelection([]);
+      else if (useEditor.getState().sketch?.planePending) useEditor.getState().cancelEditing();
       else useEditor.getState().setSketchTool('select');
       return true;
     }

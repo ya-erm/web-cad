@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420" fill="none">
+<rect width="800" height="420" rx="12" fill="#f6f8fb"/>
+<g stroke="#8193a9" stroke-width="2"><path d="M255 182.5L455 262.5V362.5L255 282.5Z" fill="#dce6f1"/><path d="M455 262.5L545 217.5V317.5L455 362.5Z" fill="#cfdeed"/><path d="M345 137.5L545 217.5L455 262.5L255 182.5Z" fill="#e8eef5"/></g>
+<path d="M335 45L585 145L465 205L215 105Z" fill="#f4b76a" fill-opacity=".4" stroke="#d47a1e" stroke-width="3"/>
+<path d="M455 362.5V262.5M447 277L455 262.5L463 277" stroke="#3976b7" stroke-width="5"/>
+<path d="M400 125V38M392 52L400 38L408 52" stroke="#3976b7" stroke-width="3"/>
+<circle cx="400" cy="125" r="7" fill="#df8326"/><circle cx="400" cy="125" r="15" stroke="#df8326" stroke-width="2"/>
+<path d="M400 141V300" stroke="#9aa9bc" stroke-width="2" stroke-dasharray="6 6"/>
+<g font-family="sans-serif" font-size="22"><text x="419" y="125" fill="#a64d08">A</text><text x="420" y="48" fill="#3976b7">N</text><text x="478" y="321" fill="#3976b7">2</text><text x="375" y="161" fill="#a64d08">1</text><text x="610" y="145" fill="#64748b">A: Z = 35 mm</text></g>
+</svg>

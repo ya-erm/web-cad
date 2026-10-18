@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="430" viewBox="0 0 800 430" fill="none">
+<rect width="800" height="430" rx="12" fill="#f6f8fb"/>
+<g transform="translate(-55 0)">
+<g stroke="#8193a9" stroke-width="2" fill-opacity=".4"><path d="M255 182.5L455 262.5V362.5L255 282.5Z" fill="#dce6f1"/><path d="M455 262.5L545 217.5V317.5L455 362.5Z" fill="#cfdeed"/><path d="M345 137.5L545 217.5L455 262.5L255 182.5Z" fill="#e8eef5"/></g>
+<g fill="#94bde9" fill-opacity=".25" stroke="#3976b7" stroke-width="3"><path d="M345 137.5L255 182.5V282.5L345 237.5Z"/><path d="M545 217.5L455 262.5V362.5L545 317.5Z"/></g>
+<path d="M460 120L340 180V355L460 295Z" fill="#f4b76a" fill-opacity=".5" stroke="#d47a1e" stroke-width="3"/>
+<g font-family="sans-serif" font-size="23" fill="#3976b7"><text x="245" y="145">1</text><text x="561" y="274">2</text></g>
+</g>
+<path d="M590 210V365M760 210V365" stroke="#3976b7" stroke-width="4"/><path d="M675 210V365" stroke="#d47a1e" stroke-width="4"/>
+<path d="M590 275H760M590 267V283M675 267V283M760 267V283" stroke="#64748b" stroke-width="2"/>
+<g font-family="sans-serif" font-size="18" fill="#17212f"><text x="606" y="254">20 mm</text><text x="692" y="254">20 mm</text></g>
+</svg>

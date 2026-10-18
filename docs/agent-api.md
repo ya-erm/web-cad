@@ -58,6 +58,9 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
   `"1 in"`. Углы — числа в градусах или выражения (`"30 deg"`).
 - **Размер, заданный строкой, становится управляющим размером эскиза** (`"w":"#w"`), число — просто
   геометрия. Для параметрики заводите переменные и меняйте их через `setVariable`.
+- **Конфигурации** (`configuration`, `configure`): модель строится в выбранном варианте; `set`, `setVariable`
+  и `suppress` для параметра, который задаёт конфигурация, пишут в ячейку выбранного варианта. Отчёт
+  содержит `configuration: [{name, options, chosen, params}]` (`params` — `"Extrude 1.depth"`, `"#w"`).
 - Оси мира как в Onshape: Top = XY (нормаль +Z), Front = XZ (x эскиза = +X, y эскиза = +Z),
   Right = YZ (x эскиза = +Y, y эскиза = +Z). Отчёт `state` показывает систему координат каждого
   эскиза (`origin`, `xDir`, `yDir`, `normal`) — в том числе эскизов на гранях.
@@ -89,6 +92,8 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `feature` | `type`, `params` — любая фича с «сырыми» параметрами (sweep, loft, thicken, draft, split, transform, helix…) |
 | `set` | `feature`, `params` — изменить параметры существующей фичи (например `{"depth":"20 mm"}`) |
 | `delete` / `rename` (`to`) / `suppress` (`value?`) | `feature` |
+| `configuration` | `name`, `options` (имена вариантов, первый — по умолчанию), `params?` — столбцы: `{"feature":"Extrude 1","param":"depth"}` (поле диалога; без `param` — `suppressed`, отключена ли фича) или `{"variable":"w"}`; `values?` `{"Large":[80,"25 mm",true]}` — по значению на столбец (`null` — значение самой фичи). Заменяет вход с тем же именем |
+| `configure` | `values` `{"Size":"Large"}` — выбрать варианты входов |
 
 `regions`: `"auto"` (по умолчанию — все замкнутые области, кроме «островов» внутри отверстий),
 `"all"` или список точек `[[x, y], …]` в координатах эскиза — берутся области, содержащие точки.

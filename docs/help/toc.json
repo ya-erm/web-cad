@@ -22,6 +22,7 @@
         { "id": "feature-dialogs", "icon": "edit", "title": { "ru": "Диалоги фич", "en": "Feature dialogs" } },
         { "id": "parts", "icon": "parts", "title": { "ru": "Детали и внешний вид", "en": "Parts and appearance" } },
         { "id": "variables", "icon": "variable", "title": { "ru": "Переменные и выражения", "en": "Variables and expressions" } },
+        { "id": "configurations", "icon": "layers", "title": { "ru": "Конфигурации", "en": "Configurations" } },
         { "id": "measure", "icon": "measure", "title": { "ru": "Измерения", "en": "Measure" } },
         { "id": "section-view", "icon": "sectionView", "title": { "ru": "Сечение", "en": "Section view" } },
         { "id": "import-export", "icon": "export", "title": { "ru": "Импорт и экспорт", "en": "Import and export" } }

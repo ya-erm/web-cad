@@ -5,6 +5,7 @@ import { kernel, SupersededError } from '../kernel/client';
 import { activeAssembly, activeStudio, effectiveRollback, studioById, useDoc } from './docStore';
 import { useEditor } from './editorStore';
 import type { AssemblyTab, CadDocument, Feature, PartStudioTab } from '../core/types';
+import { configuredFeatures } from '../core/config';
 import type { AssemblySources } from '../assembly/compose';
 import { buildStudio, useAssembly } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
@@ -30,13 +31,13 @@ function inputsOf(): unknown[] | null {
       asm.instances,
       doc.units,
       ...used.subs.flatMap((s) => [s.instances, s.mates, s.groups, s.relations]),
-      ...studios.flatMap((s) => (s ? [s.features, s.rollback, s.parts] : [null])),
+      ...studios.flatMap((s) => (s ? [s.features, s.rollback, s.parts, s.configuration, s.configChoice] : [null])),
     ];
   }
   const studio = activeStudio(doc);
   if (!doc || !studio) return null;
   const ed = useEditor.getState().editing;
-  return [studio.id, studio.features, studio.rollback, studio.parts, doc.units, ed?.index, ed?.draft, ed?.isNew];
+  return [studio.id, studio.features, studio.rollback, studio.parts, studio.configuration, studio.configChoice, doc.units, ed?.index, ed?.draft, ed?.isNew];
 }
 
 function sameInputs(a: unknown[], b: unknown[]) {
@@ -118,7 +119,8 @@ async function run() {
   try {
     const res = await kernel().build(studio.id, {
       units: doc.units,
-      features: studio.features.slice(0, upTo),
+      // as the chosen configuration has them
+      features: configuredFeatures(studio).slice(0, upTo),
       partMeta,
       upTo,
       preview,

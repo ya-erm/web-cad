@@ -40,6 +40,7 @@ width: 377
 - Double-click a row to open the variable dialog.
 - The **+** button (**Add variable**) inserts a new variable at the rollback bar position and opens its dialog.
 - Variables below the rollback bar and suppressed variables are shown dimmed.
+- The table opens to the left of its button. Drag it by its header anywhere in the graphics area — it opens there from then on; double-click the header to put it back next to its button.
 
 ## Expressions {#expressions}
 

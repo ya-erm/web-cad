@@ -11,7 +11,7 @@ Build a **40 × 30 × 10 mm** plate with **R3** fillets on its vertical edges. U
 ### 1. A 40 × 30 mm sketch {#first-sketch}
 
 1. On the **Documents** page, click **Create**. A new document opens with a **Part Studio** tab.
-2. Click **Sketch** on the toolbar (`Shift+S`). If nothing is selected, the sketch is created on the **Top** plane, and the view turns normal to it.
+2. Click **Sketch** on the toolbar (`Shift+S`), then click the **Top** plane in the graphics area or in the feature list. The view turns normal to it, and the **Line** tool is active.
 3. Select **Center rectangle** (`R`), click the origin, then click a corner point.
 4. Select **Dimension** (`D`). Click the top edge, click where to place the dimension, type `40`, and press `Enter`. Set the side edge to `30` the same way.
 5. Click **Finish sketch** (`Enter`).
@@ -38,7 +38,7 @@ Build a **40 × 30 × 10 mm** plate with **R3** fillets on its vertical edges. U
 2. For another CAD system, choose **STEP** and **mm**. For 3D printing, choose **3MF** or **STL binary**; see [Import and export](import-export).
 3. Check the parts listed in the dialog and click **Export**.
 
-The document saves automatically in this browser. A geometry file does not contain the editable history: use **Settings → Export project** (`.webcad.json`) for a backup.
+The document saves automatically in this browser. A geometry file does not contain the editable history: for a backup, choose the **WebCAD project** format (`.webcad.json`) in **Export**, or work in a [folder on your computer](documents#folder).
 
 | If something goes wrong | What to check |
 |---|---|

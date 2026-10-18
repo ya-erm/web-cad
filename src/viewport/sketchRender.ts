@@ -73,8 +73,9 @@ function labelTexture(text: string): { texture: THREE.CanvasTexture; aspect: num
  */
 export function planeLabel(text: string, h: number): THREE.Mesh {
   const { texture, aspect } = labelTexture(text);
-  const height = h * 0.14;
-  const margin = h * 0.025;
+  // about as big as in Onshape: some 4 % of the plane's size
+  const height = h * 0.08;
+  const margin = h * 0.02;
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(height * aspect, height),
     new THREE.MeshBasicMaterial({

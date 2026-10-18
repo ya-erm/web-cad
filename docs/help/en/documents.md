@@ -15,9 +15,10 @@ The **Documents** page opens when you start WebCAD and when you click the ◆ lo
 |---|---|
 | Create a document | The **Create** button (or **New document** if there are no documents yet). The new document opens immediately. |
 | Open | Click the document card. |
-| Rename | Hover over the card and click **Rename**; `Enter` saves, `Esc` cancels. In an open document, you can change the name directly in the top bar. |
-| Duplicate | The **Duplicate** button on the card. |
-| Move to trash | The trash icon on the card (**Move to trash**). The document leaves the list and can be restored. |
+| Document menu | Hover over the card and click **⋯** (**Actions**) in its corner, or right-click the card. Click outside the menu or press `Esc` to close it. |
+| Rename | **Rename** in the document menu; `Enter` saves, `Esc` cancels. In an open document, you can change the name directly in the top bar. |
+| Duplicate | **Duplicate** in the document menu. |
+| Move to trash | **Move to trash** in the document menu. The document leaves the list and can be restored — right away too, with **Restore** in the notice in the middle of the header (it closes with its cross or by itself after a few seconds). |
 | Import project | The **Import project** button opens a `.webcad.json` file as a new document. |
 | Folder on this computer | Documents as files of a folder, saved by themselves (Chrome, Edge), see [below](#folder). |
 
@@ -30,7 +31,7 @@ Each document has its own address of the form `#/doc/<id>`, which you can bookma
 1. Click **Trash** on the left of the Documents page.
 2. Find the document and click **Restore** to return it to **Documents**.
 
-**Delete permanently** removes one trashed document; **Empty trash** removes all of them. These actions require a second button click. Once permanently deleted, a document can only be recovered from a previously saved project file.
+**Delete permanently** removes one trashed document; **Empty trash** removes all of them. These actions require a second button click. **Restore** and **Delete permanently** are also in the menu you get by right-clicking the card; after **Delete permanently** in the menu, confirm with the button on the card. Once permanently deleted, a document can only be recovered from a previously saved project file.
 
 ## Document tabs {#tabs}
 
@@ -52,7 +53,7 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 You can save the whole document (all tabs, feature history, settings) to a file and open it in another browser or on another computer:
 
-1. In the open document, open **Settings** → **Export project**. A `<name>.webcad.json` file downloads.
+1. In the open document, click **Export** at the top right and choose the **WebCAD project (.webcad.json)** format. A `<name>.webcad.json` file downloads.
 2. On the **Documents** page, click **Import project** and select that file.
 
 > **Tip.** Project files are an easy way to make a backup: documents are stored only in this browser, see [Offline use and storage](offline). To have the files kept up to date by themselves, work in a [folder on your computer](#folder).
@@ -65,14 +66,16 @@ In Chrome and Edge, WebCAD can work right in a folder on your computer: its docu
 
 1. On the documents page, click **Folder on this computer** at the left, then **Choose folder…**, and let the browser view and edit the files in it.
 2. The cards show the WebCAD files of the folder. Click a card to open the document.
-3. **New document in the folder** creates a document as a file of the folder right away. A document of the browser goes into the folder with the folder icon on its card (**Save to the folder**).
+3. **New document in the folder** creates a document as a file of the folder right away. A document of the browser goes into a folder with **Save to the folder «…»** in its card menu (one item per folder).
+
+You can add several folders: they are listed at the left under **Folders on this computer**, and **Add folder…** adds one more. **Remove folder from the list** on a folder's page turns it off — the files and the documents stay, but are no longer linked.
 
 How it works:
 
 - a document opened from the folder is linked to its file: every autosave writes the file too (the file name is shown next to **Saved**), and its card in **Documents** has a folder icon;
+- **Rename** in a file's card menu (**⋯** or a right click) renames both the file and the document in it. Renaming a linked document in the editor or in **Documents** renames its file too (a file name that differs from the document's stays until the document is renamed);
 - the file is the main copy. Opened from the folder, the document is read from the file — unless the browser has newer changes that could not be written; those are written to the file;
 - a file with the same document under another name (a copy) opens as a separate document;
-- the folder is remembered. After the browser restarts it asks for permission again: click **Allow access** on the folder page or **Allow writing to the folder** in the open document — the changes made meanwhile are written to the file;
-- **Another folder…** chooses a new folder, **Forget folder** turns it off. The files and the documents stay, but are no longer linked.
+- the folders are remembered. After the browser restarts it asks for permission again (such a folder has a lock icon at the left): click **Allow access** on the folder page or **Allow writing to the folder** in the open document — the changes made meanwhile are written to the file.
 
-> **Limitation.** Renaming, deleting or trashing a document in the browser does not change its file. Changes made to a file by other programs are seen the next time the document is opened from the folder (**Refresh** reads the list of files again). Folders are not available in Firefox and Safari — use **Export project** and **Import project**.
+> **Limitation.** Deleting or trashing a document in the browser does not touch its file. Changes made to a file by other programs are seen the next time the document is opened from the folder (**Refresh** reads the list of files again). Folders are not available in Firefox and Safari — use project **Export** and **Import project**.

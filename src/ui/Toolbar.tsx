@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ConstraintType, FeatureType } from '../core/types';
 import { toggleShowConstraints, useEditor, type SketchTool } from '../store/editorStore';
 import { useDoc } from '../store/docStore';
@@ -95,6 +95,26 @@ export const CONSTRAINT_TOOLS: { id: ConstraintType; icon: IconName; label: stri
 
 const tip = (label: string, sc?: string) => (sc ? `${t(label)} (${sc})` : t(label));
 
+/**
+ * Feature tools whose name — in the interface language or in English — has the query in it: names that start with
+ * it first, then those with a word that does, then the rest.
+ */
+export function searchTools(query: string, tr: (s: string) => string = t): ToolDef[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const rank = (x: ToolDef) => {
+    const names = [tr(x.label), x.label].map((n) => n.toLowerCase());
+    if (names.some((n) => n.startsWith(q))) return 0;
+    if (names.some((n) => n.split(/[\s-]+/).some((w) => w.startsWith(q)))) return 1;
+    return names.some((n) => n.includes(q)) ? 2 : -1;
+  };
+  return (FEATURE_TOOLS.filter((x) => x !== '|') as ToolDef[])
+    .map((x) => ({ x, r: rank(x) }))
+    .filter((m) => m.r >= 0)
+    .sort((a, b) => a.r - b.r)
+    .map((m) => m.x);
+}
+
 function FeatureToolbar() {
   const start = useEditor((s) => s.startFeature);
   const editing = useEditor((s) => s.editing);
@@ -103,11 +123,18 @@ function FeatureToolbar() {
   const canUndo = useDoc((s) => s.past.length > 0);
   const canRedo = useDoc((s) => s.future.length > 0);
   const [q, setQ] = useState('');
-  const matches = q
-    ? (FEATURE_TOOLS.filter((x) => x !== '|') as ToolDef[]).filter(
-        (x) => t(x.label).toLowerCase().includes(q.toLowerCase()) || x.label.toLowerCase().includes(q.toLowerCase()),
-      )
-    : [];
+  /** The highlighted result (Enter starts it; arrows move it). */
+  const [active, setActive] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const matches = searchTools(q);
+  const pick = (id: FeatureType) => {
+    start(id);
+    setQ('');
+    input.current?.blur();
+  };
+  // the toolbar clips what sticks out of it (it scrolls sideways): the results are placed in the window instead
+  const box = focused && matches.length ? input.current?.getBoundingClientRect() : undefined;
   return (
     <div className="toolbar">
       <button className="icon-btn" title={`${t('Undo')} (Ctrl+Z)`} disabled={!canUndo || !!editing} onClick={undo}>
@@ -137,30 +164,44 @@ function FeatureToolbar() {
           <Icon name="search" size={16} />
         </span>
         <input
+          ref={input}
           placeholder={t('Search tools')}
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          disabled={!!editing}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setActive(0);
+          }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && matches[0]) {
-              start(matches[0].id);
-              setQ('');
-            }
-            if (e.key === 'Escape') setQ('');
             e.stopPropagation();
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (matches.length) setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
+            }
+            if (e.key === 'Enter' && matches.length) pick(matches[Math.min(active, matches.length - 1)].id);
+            if (e.key === 'Escape') {
+              setQ('');
+              input.current?.blur();
+            }
           }}
         />
-        {matches.length > 0 && (
-          <div className="dropdown">
-            {matches.map((m) => (
+        {box && (
+          <div className="dropdown tool-search-results" style={{ position: 'fixed', top: box.bottom + 4, right: window.innerWidth - box.right }}>
+            {matches.map((m, i) => (
               <div
                 key={m.id}
-                className="dropdown-item"
-                onMouseDown={() => {
-                  start(m.id);
-                  setQ('');
+                className={'dropdown-item' + (i === Math.min(active, matches.length - 1) ? ' active' : '')}
+                // before the input loses focus (and the list closes)
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(m.id);
                 }}
+                onMouseEnter={() => setActive(i)}
               >
                 <Icon name={m.icon} size={18} /> {t(m.label)}
+                {m.shortcut && <span className="menu-shortcut">{m.shortcut}</span>}
               </div>
             ))}
           </div>
@@ -178,9 +219,11 @@ function SketchToolbar() {
   const undo = useEditor((s) => s.sketchUndo);
   const redo = useEditor((s) => s.sketchRedo);
   if (!sketch) return null;
+  // a new sketch waiting for its plane: nothing to draw on yet
+  const off = !!sketch.planePending;
   return (
     <div className="toolbar">
-      <button className="finish-btn" title={`${t('Finish sketch')} (Enter)`} onClick={() => commit()}>
+      <button className="finish-btn" title={`${t('Finish sketch')} (Enter)`} disabled={off} onClick={() => commit()}>
         <Icon name="check" size={18} /> {t('Finish sketch')}
       </button>
       <div className="tb-sep" />
@@ -199,25 +242,27 @@ function SketchToolbar() {
             key={tool.id}
             className={'icon-btn' + (sketch.tool === tool.id ? ' active' : '')}
             title={tip(tool.label, tool.shortcut)}
+            disabled={off}
             onClick={() => setTool(tool.id)}
           >
             <Icon name={tool.icon} />
           </button>
         ),
       )}
-      <button className="icon-btn" title={tip('Sketch mirror')} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
+      <button className="icon-btn" title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
         <Icon name="sketchMirror" />
       </button>
-      <button className="icon-btn" title={tip('Sketch linear pattern')} onClick={() => getEngine()?.sketchEditor.startPattern('linear')}>
+      <button className="icon-btn" title={tip('Sketch linear pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('linear')}>
         <Icon name="sketchLinearPattern" />
       </button>
-      <button className="icon-btn" title={tip('Sketch circular pattern')} onClick={() => getEngine()?.sketchEditor.startPattern('circular')}>
+      <button className="icon-btn" title={tip('Sketch circular pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('circular')}>
         <Icon name="sketchCircularPattern" />
       </button>
       <div className="tb-sep" />
       <button
         className={'icon-btn' + (sketch.construction ? ' active' : '')}
         title={tip('Construction', 'Q')}
+        disabled={off}
         onClick={() => getEngine()?.sketchEditor.toggleConstruction()}
       >
         <Icon name="construction" />
@@ -231,7 +276,7 @@ function SketchToolbar() {
         <Icon name={showConstraints ? 'eye' : 'eyeOff'} />
       </button>
       {CONSTRAINT_TOOLS.map((c) => (
-        <button key={c.id} className="icon-btn" title={tip(c.label, c.shortcut)} onClick={() => getEngine()?.sketchEditor.applyConstraint(c.id)}>
+        <button key={c.id} className="icon-btn" title={tip(c.label, c.shortcut)} disabled={off} onClick={() => getEngine()?.sketchEditor.applyConstraint(c.id)}>
           <Icon name={c.icon} />
         </button>
       ))}

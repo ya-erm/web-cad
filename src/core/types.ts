@@ -545,6 +545,22 @@ export interface DrawingNote {
   height: number;
 }
 
+export interface DrawingTitleBlock {
+  template: 'custom' | 'gost';
+  /** Custom dimensions in sheet millimetres; retained when switching templates. */
+  width?: number;
+  height?: number;
+  material?: string;
+  mass?: string;
+  organization?: string;
+  revision?: string;
+  letter?: string;
+  checkedBy?: string;
+  technicalControl?: string;
+  standardsControl?: string;
+  approvedBy?: string;
+}
+
 export interface DrawingData {
   sheet: 'A4' | 'A3' | 'A2' | 'A1' | 'A0' | 'Letter' | 'Tabloid';
   landscape: boolean;
@@ -554,6 +570,8 @@ export interface DrawingData {
   title: string;
   author: string;
   designation?: string;
+  /** Absent in older documents: use the original custom template, 185 × 55 mm. */
+  titleBlock?: DrawingTitleBlock;
   scaleLabel?: string;
   /** First-angle (ISO/ГОСТ, default) or third-angle (ANSI) projection. */
   projection?: 'first' | 'third';

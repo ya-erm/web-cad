@@ -42,6 +42,41 @@ describe('agent API', () => {
     expect(r2.model!.features.every((f) => f.status === 'ok')).toBe(true);
   }, 60000);
 
+  it('makes variants of a plate with a configuration and switches between them', async () => {
+    const s = await session();
+    const r1 = await s.run([
+      { op: 'variable', name: 'w', value: 40 },
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: '#w', h: 30 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'fillet', edges: { dir: 'z' }, radius: 3 },
+      {
+        op: 'configuration',
+        name: 'Size',
+        options: ['Small', 'Large'],
+        params: [{ variable: 'w' }, { feature: 'Extrude 1', param: 'depth' }, { feature: 'Fillet 1' }],
+        // Small keeps the features' own values; Large: wider, thicker, no fillet
+        values: { Small: [null, null, null], Large: [80, '25 mm', true] },
+      },
+    ]);
+    expect(r1.ok).toBe(true);
+    expect(r1.model!.configuration).toEqual([{ name: 'Size', options: ['Small', 'Large'], chosen: 'Small', params: ['#w', 'Extrude 1.depth', 'Fillet 1.suppressed'] }]);
+    expect(r1.model!.parts[0].size).toEqual([40, 30, 10]);
+    const r2 = await s.run([{ op: 'configure', values: { Size: 'Large' } }]);
+    expect(r2.ok).toBe(true);
+    expect(r2.model!.parts[0].size).toEqual([80, 30, 25]);
+    expect(r2.model!.parts[0].volume).toBeCloseTo(80 * 30 * 25, 3);
+    expect(r2.model!.features.find((f) => f.name === 'Fillet 1')?.status).toBe('suppressed');
+    expect(r2.model!.variables.w).toBe('80 mm');
+    // setVariable in the Large configuration changes its cell, not the variable's own value
+    const r3 = await s.run([{ op: 'setVariable', name: 'w', value: 70 }, { op: 'configure', values: { Size: 'Small' } }]);
+    expect(r3.model!.parts[0].size).toEqual([40, 30, 10]);
+    const r4 = await s.run([{ op: 'configure', values: { Size: 'Large' } }]);
+    expect(r4.model!.parts[0].size).toEqual([70, 30, 25]);
+    // unknown names are reported
+    const bad = await s.run([{ op: 'configure', values: { Size: 'Huge' } }]);
+    expect(bad.error).toMatch(/No option "Huge" in "Size"/);
+  }, 60000);
+
   it('reports bad queries without changing the document', async () => {
     const s = await session();
     await s.run([{ op: 'sketch', shapes: [{ type: 'rect', w: 20, h: 20 }] }, { op: 'extrude', depth: 5 }]);

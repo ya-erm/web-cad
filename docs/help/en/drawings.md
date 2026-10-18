@@ -39,6 +39,13 @@ The left panel has two blocks: **Sheet** (format and projection) and **Title blo
 
 Edit the title in the multiline **Drawing title** field on the left. Long titles wrap in the title block and use a smaller font when needed. Values that still do not fit end with an ellipsis; the full text remains available in the editor.
 
+Choose **Title block template** in the sidebar or in the title block editor:
+
+- **GOST · form 1** — the main table of form 1 in GOST R 2.104-2023, with fixed dimensions of **185 × 55 mm**. Title, designation, and author use the shared fields. Open **Additional GOST fields** in the editor for material, mass (including its unit), organization, version, letter, and reviewers. Signatures and the change register remain blank. This template covers the main table; additional fields outside it, such as inventory numbers along the binding margin, are not generated.
+- **Custom title block** — the simplified table with **Table width (mm)** and **Table height (mm)** controls. The minimum size is **100 × 35 mm**; the maximum is the current sheet's inner frame. The table stays in the bottom-right corner, and its cells and text scale with it.
+
+Switching templates retains custom dimensions and GOST fields. On a smaller sheet, a custom table is limited to the inner frame; returning to a larger sheet restores the requested dimensions. Existing and new drawings default to the **185 × 55 mm** custom template.
+
 Click the title block at the bottom right of the sheet, or **Title block** in the toolbar, to open an editor with a preview. **Apply** saves the title, designation, and author as one undoable action. **Cancel** or `Esc` closes the editor without changes; `Ctrl+Enter` (`⌘+Enter` on macOS) applies changes. To rename the drawing tab itself, double-click its name in the bottom bar.
 
 ## Views {#views}
@@ -60,5 +67,7 @@ Mouse wheel: zoom; right or middle button: pan; **Zoom to fit** (`F`): the whole
 ## Export {#export}
 
 The **Export** button on the right of the drawing toolbar: **PDF**, **SVG**, or **DXF**; the whole sheet at 1:1 scale in millimeters.
+
+All three formats preserve the selected template and its dimensions. The current PDF writer does not support Cyrillic text and uses English service labels. Use SVG or DXF for Cyrillic titles and fields.
 
 > **Limitation.** Drawing dimensions are attached to view points, not to model edges, so check them after you change the model. Section views, detail views, tolerances, and surface finish symbols are not supported yet.

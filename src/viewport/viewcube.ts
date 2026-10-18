@@ -43,6 +43,12 @@ export class ViewCube {
   private hoverFace = -1;
   private highlight: THREE.Mesh;
   onPick: (dir: THREE.Vector3, up: THREE.Vector3) => void = () => {};
+  /** Dragging the cube turns the camera (by the mouse motion in pixels, as dragging in the graphics area does). */
+  onRotate: (dx: number, dy: number) => void = () => {};
+  /** Right click on the cube: its menu (window coordinates). */
+  onMenu: (x: number, y: number) => void = () => {};
+  /** A press on the cube: a click picks a view, a drag (past a few pixels) turns the camera. */
+  private press: { x: number; y: number; dragged: boolean } | null = null;
 
   constructor(size = 110) {
     this.canvas = document.createElement('canvas');
@@ -88,9 +94,32 @@ export class ViewCube {
     this.highlight.visible = false;
     this.scene.add(this.highlight);
 
+    this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
-    this.canvas.addEventListener('pointerleave', () => this.setHover(-1, null));
-    this.canvas.addEventListener('click', (e) => this.onClick(e));
+    this.canvas.addEventListener('pointerup', (e) => this.onUp(e));
+    this.canvas.addEventListener('pointercancel', () => (this.press = null));
+    this.canvas.addEventListener('pointerleave', () => !this.press && this.setHover(-1, null));
+    this.canvas.addEventListener('contextmenu', (e) => {
+      // the cube's own menu, not the browser's ("Save image as…")
+      e.preventDefault();
+      e.stopPropagation();
+      this.onMenu(e.clientX, e.clientY);
+    });
+  }
+
+  private onDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    this.press = { x: e.clientX, y: e.clientY, dragged: false };
+    this.canvas.setPointerCapture(e.pointerId);
+  }
+
+  private onUp(e: PointerEvent) {
+    const p = this.press;
+    this.press = null;
+    if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+    if (!p) return;
+    if (p.dragged) this.onMove(e);
+    else this.onClick(e);
   }
 
   private hit(e: PointerEvent | MouseEvent) {
@@ -124,6 +153,20 @@ export class ViewCube {
   }
 
   private onMove(e: PointerEvent) {
+    const p = this.press;
+    if (p) {
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      if (!p.dragged && Math.hypot(dx, dy) < 3) return;
+      // the cube is small: it turns the view twice as fast as the graphics area does
+      if (!p.dragged) this.setHover(-1, null);
+      p.dragged = true;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      this.canvas.style.cursor = 'grabbing';
+      this.onRotate(dx * 2, dy * 2);
+      return;
+    }
     const h = this.hit(e);
     this.setHover(h ? h.face : -1, h ? h.point : null, h?.dir);
   }

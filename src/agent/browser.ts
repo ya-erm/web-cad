@@ -2,7 +2,7 @@
 // (vite.config.ts) that lets command-line agents call it: `npm run agent -- run ops.json`.
 
 import type { Draft } from 'immer';
-import type { DocTab, Feature, PartStudioTab } from '../core/types';
+import type { ConfigInput, DocTab, Feature, PartStudioTab } from '../core/types';
 import { kernel } from '../kernel/client';
 import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
@@ -14,6 +14,7 @@ import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { AgentError, queryModel, runOps, summarize, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
+import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
 import type { AgentOp, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
 
@@ -149,6 +150,8 @@ export const webcadApi = {
           s.rollback = next.rollback;
           s.parts = next.parts;
           if (next.folders) s.folders = next.folders;
+          s.configuration = next.configuration as Draft<ConfigInput>[] | undefined;
+          s.configChoice = next.configChoice;
         }),
       );
       report.applied = true;
@@ -246,7 +249,7 @@ export const webcadApi = {
     }
     const { doc, studio } = current();
     const k = agentKernel(studio, doc.units);
-    await k.build(studio.features.slice(0, studio.rollback ?? studio.features.length));
+    await k.build(configuredFeatures(studio).slice(0, studio.rollback ?? studio.features.length));
     const res = await kernel().exportFile({ studioKey: `agent:${studio.id}`, format, partIds: [], tolerance: 0.01, angularTolerance: 0.2 });
     return { fileName: `${safe}.${format}`, mime: res.mime, base64: toBase64(res.data) };
   },

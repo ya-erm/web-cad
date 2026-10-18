@@ -285,6 +285,9 @@ export class Engine {
     this.viewCube = new ViewCube(112);
     container.appendChild(this.viewCube.canvas);
     this.viewCube.onPick = (dir, up) => this.cam.viewFrom(dir, up, this.fitBox());
+    // dragging the cube turns the camera about the centre of the view
+    this.viewCube.onRotate = (dx, dy) => this.cam.rotate(dx, dy);
+    this.viewCube.onMenu = (x, y) => this.viewCubeMenu(x, y);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa3ad, 1.0));
@@ -1872,6 +1875,37 @@ export class Engine {
       return;
     }
     ed.select(ref, true);
+  }
+
+  /** The view cube's menu (Onshape): the standard views, the axonometric ones, fit and perspective. */
+  private viewCubeMenu(x: number, y: number) {
+    const ed = useEditor.getState();
+    const std = (view: 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso' | 'dimetric' | 'trimetric', label: string, shortcut?: string) => ({
+      label: t(label),
+      shortcut,
+      action: () => ed.view({ kind: 'std', view }),
+    });
+    useEditor.setState({
+      contextMenu: {
+        x,
+        y,
+        items: [
+          std('front', 'Front', 'Shift+1'),
+          std('back', 'Back', 'Shift+2'),
+          std('left', 'Left', 'Shift+3'),
+          std('right', 'Right', 'Shift+4'),
+          std('top', 'Top', 'Shift+5'),
+          std('bottom', 'Bottom', 'Shift+6'),
+          { separator: true, label: '' },
+          std('iso', 'Isometric'),
+          std('dimetric', 'Dimetric'),
+          std('trimetric', 'Trimetric'),
+          { separator: true, label: '' },
+          { label: t('Zoom to fit'), icon: 'zoomFit', shortcut: 'F', action: () => this.cam.fit(this.fitBox()) },
+          { label: t('Perspective'), icon: ed.perspective ? 'check' : undefined, action: () => useEditor.setState({ perspective: !useEditor.getState().perspective }) },
+        ],
+      },
+    });
   }
 
   private onContextMenu(e: MouseEvent) {

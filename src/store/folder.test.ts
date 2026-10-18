@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { freeFileName, listFolder, readFolderFile, writeFolderFile } from './localFolder';
 import { parseProject, projectText } from './folderStore';
 import type { CadDocument } from '../core/types';
+import { docId } from '../core/ids';
 
 type Disk = Record<string, { text: string; modified: number }>;
 
@@ -76,6 +77,11 @@ describe('a folder on the computer', () => {
     expect(p.id).toMatch(/^doc/);
     expect(() => parseProject('{"a":1}', 'x')).toThrow('Invalid project file');
     expect(() => parseProject('not json', 'x')).toThrow();
+  });
+
+  it('gives a new document an id with the date and time it was made', () => {
+    expect(docId(new Date(2026, 9, 18, 14, 35, 7))).toMatch(/^doc-20261018-143507-[0-9a-z]{4}$/);
+    expect(docId()).not.toBe(docId());
   });
 
   it('names a new file after the document, not over an existing one', () => {

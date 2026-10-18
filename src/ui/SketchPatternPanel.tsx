@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useEditor } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
 import { collectVariables, makeEvalContext } from '../core/features';
+import { configuredOf } from '../core/config';
 import { tryEvaluate } from '../core/expr';
 import type { SkPattern } from '../core/types';
 import { getEngine } from '../viewport/engineRef';
@@ -21,7 +22,7 @@ function Field({
 }) {
   const doc = useDoc((s) => s.doc);
   const index = useEditor((s) => s.editing?.index ?? 0);
-  const ctx = useMemo(() => (doc ? makeEvalContext(doc, collectVariables(activeStudio(doc)?.features ?? [], index, doc.units)) : null), [doc, index]);
+  const ctx = useMemo(() => (doc ? makeEvalContext(doc, collectVariables(configuredOf(activeStudio(doc)), index, doc.units)) : null), [doc, index]);
   const ok = ctx ? tryEvaluate(value, unit, ctx) !== null : true;
   return (
     <div className="fd-row">

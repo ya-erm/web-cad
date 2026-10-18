@@ -9,6 +9,9 @@ import type { FeatureOf } from '../core/types';
 import { useEditor } from '../store/editorStore';
 import { activeStudio, effectiveRollback, useDoc, withStudio } from '../store/docStore';
 import { Icon } from './icons';
+import { useDraggable } from './useDraggable';
+import { configuredFeatures, setConfigured } from '../core/config';
+import { ConfigPanel } from './ConfigPanel';
 import { t, tName } from '../i18n';
 
 function VariableTable({ onClose }: { onClose: () => void }) {
@@ -18,16 +21,21 @@ function VariableTable({ onClose }: { onClose: () => void }) {
   const editing = useEditor((s) => s.editing);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // next to its button; moved by its header (double click: back there)
+  const drag = useDraggable('variables');
   if (!studio) return null;
   const rollback = effectiveRollback(studio);
-  const rows = studio.features
+  // values of the chosen configuration
+  const configured = configuredFeatures(studio);
+  const rows = configured
     .map((f, i) => ({ f, i }))
     .filter((x): x is { f: FeatureOf<'variable'>; i: number } => x.f.type === 'variable');
   const commit = (id: string, value: string) => {
     useDoc.getState().update((d) =>
       withStudio(d, (s) => {
         const f = s.features.find((x) => x.id === id);
-        if (f && f.type === 'variable') f.params.value = value;
+        // a configured variable: the chosen configuration's cell
+        if (f && f.type === 'variable' && !setConfigured(s, id, 'value', value)) f.params.value = value;
       }),
     );
     setEditingId(null);
@@ -50,8 +58,8 @@ function VariableTable({ onClose }: { onClose: () => void }) {
     useEditor.getState().editFeature(f.id);
   };
   return (
-    <div className="right-panel">
-      <div className="panel-header">
+    <div className="right-panel" ref={drag.ref} style={drag.style}>
+      <div className="panel-header drag-handle" title={t('Drag to move; double-click to put it back next to its button')} onPointerDown={drag.onPointerDown} onDoubleClick={drag.reset}>
         <Icon name="variable" size={16} /> {t('Variable table')}
         <span className="spacer" />
         <button className="icon-btn" style={{ width: 22, height: 22 }} title={t('Add variable')} disabled={!!editing} onClick={addVariable}>
@@ -69,7 +77,7 @@ function VariableTable({ onClose }: { onClose: () => void }) {
         </div>
         {rows.length === 0 && <div className="sel-empty" style={{ padding: 10 }}>{t('No variables yet. Use # in any value field after creating one.')}</div>}
         {rows.map(({ f, i }) => {
-          const vars = collectVariables(studio.features, i + 1, doc.units);
+          const vars = collectVariables(configured, i + 1, doc.units);
           const q = vars[f.params.name];
           const err = statuses?.[f.id] && !statuses[f.id].ok;
           const rolled = i >= rollback;
@@ -116,7 +124,7 @@ function VariableTable({ onClose }: { onClose: () => void }) {
 }
 
 export function RightPanels() {
-  const [open, setOpen] = useState<'variables' | null>(null);
+  const [open, setOpen] = useState<'variables' | 'configuration' | null>(null);
   return (
     <>
       <div className="right-strip">
@@ -127,8 +135,16 @@ export function RightPanels() {
         >
           <Icon name="variable" size={18} />
         </button>
+        <button
+          className={'icon-btn' + (open === 'configuration' ? ' active' : '')}
+          title={t('Configurations')}
+          onClick={() => setOpen(open === 'configuration' ? null : 'configuration')}
+        >
+          <Icon name="layers" size={18} />
+        </button>
       </div>
       {open === 'variables' && <VariableTable onClose={() => setOpen(null)} />}
+      {open === 'configuration' && <ConfigPanel onClose={() => setOpen(null)} />}
     </>
   );
 }

@@ -39,7 +39,7 @@ alt: Sketch mode: sketch toolbar, sketch dialog, geometry with constraints and d
 1. Select a plane (**Top**, **Front**, **Right** in the [feature list](feature-list), or a [plane](plane)) or a planar face of a part.
 2. Click **Sketch** in the toolbar (`Shift+S`).
 
-If nothing is selected, the sketch is created on the **Top** plane. If you select anything other than a plane or planar face, the message "Select a plane or planar face" appears. You can also start a sketch by double-clicking a plane in the feature list, or with **New sketch** in the context menu of a planar face. The view automatically turns normal to the new sketch plane.
+If nothing is selected, the sketch dialog opens with the **Sketch plane** field active: click a plane or planar face in the graphics area, or a plane in the feature list. Until a plane is chosen, the drawing tools and **Finish sketch** are unavailable, and `Esc` closes the sketch. If you select anything other than a plane or planar face, the message "Select a plane or planar face" appears. You can also start a sketch by double-clicking a plane in the feature list, or with **New sketch** in the context menu of a planar face. The view automatically turns normal to the new sketch plane.
 
 To open an existing sketch, double-click it in the feature list or choose **Edit** in the context menu of its region.
 

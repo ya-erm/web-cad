@@ -20,6 +20,9 @@ The view rotates around the point on the part under the cursor (if there is no p
 
 The cube in the top-right corner of the graphics area rotates together with the model. Click a face of the cube (**Front**, **Top**, **Right**, and so on) to view the model from that side; click an edge or a corner to view it at an angle.
 
+- **Drag the cube** to rotate the view, as right-dragging in the graphics area does (about the centre of the view; the rotation mode from **Settings** applies here too).
+- **Right-click the cube** for its menu: the standard views, isometric, dimetric, trimetric, **Zoom to fit** (`F`) and **Perspective**.
+
 ## View menu {#view-menu}
 
 ```figure
@@ -43,8 +46,7 @@ The **Views** menu:
 | Item | Keys |
 |---|---|
 | **Front**, **Back**, **Left**, **Right**, **Top**, **Bottom** | `Shift+1` … `Shift+6` |
-| **Isometric** | `Shift+7` |
-| **Dimetric**, **Trimetric** | — |
+| **Isometric**, **Dimetric**, **Trimetric** (a group of their own) | Isometric — also `Shift+7` (the menu does not show the key) |
 | **Perspective** | Toggles perspective projection (orthographic by default). |
 | **Show planes** | `P` shows or hides planes |
 | **Show sketches** | `Shift+H` shows or hides all sketches |

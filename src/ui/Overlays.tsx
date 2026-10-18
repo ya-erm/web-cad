@@ -4,7 +4,7 @@ import { activeAssembly, activeStudio, useDoc } from '../store/docStore';
 import { kernel } from '../kernel/client';
 import type { MeasureResult } from '../kernel/protocol';
 import { formatNumber, LENGTH_FACTOR } from '../core/expr';
-import { exportAssembly, exportParts, type ExportKind } from './exporting';
+import { download, exportAssembly, exportParts, safeName, type ExportKind } from './exporting';
 import { useAssembly } from '../assembly/sources';
 import { Icon, type IconName } from './icons';
 import { t } from '../i18n';
@@ -155,7 +155,7 @@ export function ExportDialog() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const asm = activeAssembly(doc);
-  const [kind, setKind] = useState<ExportKind>('step');
+  const [kind, setKind] = useState<ExportKind | 'project'>('step');
   const [res, setRes] = useState('medium');
   const [unit, setUnit] = useState<'mm' | 'in'>('mm');
   const [busy, setBusy] = useState(false);
@@ -164,14 +164,20 @@ export function ExportDialog() {
   // an assembly exports its instances (the selected ones, else the shown ones) where they stand
   const instances = asm ? asm.instances.filter((i) => (open.partIds.length ? open.partIds.includes(i.id) : !i.hidden)) : [];
   const parts = asm ? instances : (build?.parts ?? []).filter((p) => (open.partIds.length ? open.partIds.includes(p.id) : !p.hidden));
+  // the whole document for WebCAD (tabs, feature history), not geometry for other programs
+  const project = kind === 'project';
   const run = async () => {
+    if (project) {
+      download(JSON.stringify(doc), `${safeName(doc.name)}.webcad.json`, 'application/json');
+      return close();
+    }
     setBusy(true);
     try {
       const [tol, ang] = RES[res];
       const name = parts.length === 1 ? parts[0].name : asm ? `${doc.name} — ${asm.name}` : doc.name;
       const opts = { tolerance: tol, angularTolerance: ang, unit, baseName: name };
-      if (asm) await exportAssembly(asm, useAssembly.getState().sources, instances.map((i) => i.id), kind, opts);
-      else if (studio) await exportParts(studio.id, parts.map((p) => p.id), kind, opts);
+      if (asm) await exportAssembly(asm, useAssembly.getState().sources, instances.map((i) => i.id), kind as ExportKind, opts);
+      else if (studio) await exportParts(studio.id, parts.map((p) => p.id), kind as ExportKind, opts);
       close();
     } catch (e) {
       useEditor.getState().showToast(String((e as Error).message ?? e), 'error');
@@ -183,7 +189,7 @@ export function ExportDialog() {
     <div className="modal-backdrop" onPointerDown={close}>
       <div className="modal" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <Icon name="export" /> &nbsp;{asm ? t('Export assembly') : t('Export parts')}
+          <Icon name="export" /> &nbsp;{project ? t('Export') : asm ? t('Export assembly') : t('Export parts')}
           <span className="spacer" />
           <button className="icon-btn" onClick={close}>
             <Icon name="close" size={18} />
@@ -193,16 +199,18 @@ export function ExportDialog() {
           <div className="fd-row">
             <label>{t('Format')}</label>
             <div className="fd-control">
-              <select value={kind} onChange={(e) => setKind(e.target.value as ExportKind)}>
+              <select value={kind} onChange={(e) => setKind(e.target.value as ExportKind | 'project')}>
                 <option value="step">STEP (.step)</option>
                 <option value="stl">STL binary (.stl)</option>
                 <option value="stl-ascii">STL ASCII (.stl)</option>
                 <option value="obj">OBJ (.obj)</option>
                 <option value="3mf">3MF (.3mf)</option>
+                <option value="project">{t('WebCAD project (.webcad.json)')}</option>
               </select>
             </div>
           </div>
-          {kind !== 'step' && (
+          {project && <div className="fd-hint">{t('The whole document — every tab with its feature history — to open again in WebCAD (Import project).')}</div>}
+          {kind !== 'step' && !project && (
             <div className="fd-row">
               <label>{t('Resolution')}</label>
               <div className="fd-control">
@@ -216,24 +224,28 @@ export function ExportDialog() {
               </div>
             </div>
           )}
-          <div className="fd-row">
-            <label>{t('Units')}</label>
-            <div className="fd-control">
-              <select value={unit} onChange={(e) => setUnit(e.target.value as 'mm' | 'in')}>
-                <option value="mm">mm</option>
-                <option value="in">inch</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ color: 'var(--text-2)' }}>
-            {asm ? t('Instances') : t('Parts')}: {parts.map((p) => p.name).join(', ') || '—'}
-          </div>
+          {!project && (
+            <>
+              <div className="fd-row">
+                <label>{t('Units')}</label>
+                <div className="fd-control">
+                  <select value={unit} onChange={(e) => setUnit(e.target.value as 'mm' | 'in')}>
+                    <option value="mm">mm</option>
+                    <option value="in">inch</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ color: 'var(--text-2)' }}>
+                {asm ? t('Instances') : t('Parts')}: {parts.map((p) => p.name).join(', ') || '—'}
+              </div>
+            </>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={close}>
             {t('Cancel')}
           </button>
-          <button className="btn primary" disabled={busy || !parts.length} onClick={run}>
+          <button className="btn primary" disabled={busy || (!project && !parts.length)} onClick={run}>
             {busy ? <div className="spinner" /> : <Icon name="download" size={16} />} {t('Export')}
           </button>
         </div>

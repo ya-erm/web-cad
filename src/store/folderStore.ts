@@ -1,27 +1,49 @@
-// Documents in a folder on the computer (Chrome / Edge): the folder's project files open as documents linked to
-// their files; every save of a linked document writes its file too. The file is the document's main copy — opened
-// from the folder, the newer of the file and the copy in the browser wins.
+// Documents in folders on the computer (Chrome / Edge): a folder's project files open as documents linked to their
+// files; every save of a linked document writes its file too. The file is the document's main copy — opened from
+// the folder, the newer of the file and the copy in the browser wins. Several folders can be added.
 
 import { create } from 'zustand';
 import type { CadDocument } from '../core/types';
-import { uid } from '../core/ids';
+import { docId } from '../core/ids';
 import * as db from './persistence';
 import { useDoc } from './docStore';
-import { folderAccess, folderLinks, folderSupported, forgetFolder, freeFileName, linkFile, listFolder, pickFolder, readFolderFile, savedFolder, writeFolderFile, type FolderFile } from './localFolder';
+import {
+  folderAccess,
+  folderLinks,
+  folderSupported,
+  forgetFolder,
+  freeFileName,
+  linkFile,
+  listFolder,
+  pickFolder,
+  readFolderFile,
+  renameFolderFile,
+  savedFolders,
+  writeFolderFile,
+  type FileLink,
+  type FolderFile,
+} from './localFolder';
 
-interface FolderState {
-  /** The chosen folder (null: none). */
-  dir: FileSystemDirectoryHandle | null;
+export interface Folder {
+  id: string;
+  dir: FileSystemDirectoryHandle;
   /** Whether it may be read and written now (after a browser restart it has to be allowed again). */
   access: boolean;
   files: FolderFile[];
-  /** Documents that are files of the folder: id → file name. */
-  links: Record<string, string>;
-  /** The last write of a linked document failed (no access, the file is busy…). */
+}
+
+interface FolderState {
+  folders: Folder[];
+  /** Documents that are files of the folders: id → the file. */
+  links: Record<string, FileLink>;
+  /** The document whose last write to its file failed (no access, the file is busy…). */
   writeError: string | null;
 }
 
-export const useFolder = create<FolderState>(() => ({ dir: null, access: false, files: [], links: {}, writeError: null }));
+export const useFolder = create<FolderState>(() => ({ folders: [], links: {}, writeError: null }));
+
+const folderOf = (id: string) => useFolder.getState().folders.find((f) => f.id === id);
+const setFolder = (id: string, patch: Partial<Folder>) => useFolder.setState((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, ...patch } : f)) }));
 
 /** The text of a project file: the document as JSON (indented, so that it reads and compares well). */
 export const projectText = (doc: CadDocument) => JSON.stringify(doc, null, 1);
@@ -31,120 +53,174 @@ export function parseProject(text: string, title: string): CadDocument {
   const doc = JSON.parse(text) as CadDocument;
   if (!doc || typeof doc !== 'object' || !Array.isArray(doc.tabs) || !doc.units) throw new Error('Invalid project file');
   const now = Date.now();
-  return { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : uid('doc'), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 };
+  return { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : docId(), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 };
 }
 
-/** Read the folder's file list again. */
-export async function refreshFolder() {
-  const { dir, access } = useFolder.getState();
-  if (!dir || !access) return useFolder.setState({ files: [] });
+/** Read a folder's file list again. */
+export async function refreshFolder(id: string) {
+  const f = folderOf(id);
+  if (!f) return;
+  if (!f.access) return setFolder(id, { files: [] });
   try {
-    useFolder.setState({ files: await listFolder(dir) });
+    setFolder(id, { files: await listFolder(f.dir) });
   } catch {
     // the folder was moved or deleted
-    useFolder.setState({ access: false, files: [] });
+    setFolder(id, { access: false, files: [] });
   }
 }
 
 let started = false;
 
-/** Load the remembered folder and start writing linked documents to their files. */
+/** Load the folders added before and start writing linked documents to their files. */
 export async function startFolder() {
   if (started || !folderSupported()) return;
   started = true;
-  const dir = (await savedFolder()) ?? null;
-  useFolder.setState({ dir, access: dir ? await folderAccess(dir).catch(() => false) : false, links: await folderLinks() });
-  await refreshFolder();
+  const saved = await savedFolders();
+  const folders = await Promise.all(saved.map(async ({ id, dir }) => ({ id, dir, access: await folderAccess(dir).catch(() => false), files: [] })));
+  useFolder.setState({ folders, links: await folderLinks() });
+  await Promise.all(folders.map((f) => refreshFolder(f.id)));
   // after every save of the open document in the browser: its file too
   useDoc.subscribe((s, prev) => {
     if (prev.saving && !s.saving && s.doc) void writeLinked(s.doc);
   });
 }
 
-/** Choose a folder (the system dialog). */
-export async function chooseFolder() {
-  const dir = await pickFolder();
-  if (!dir) return;
-  useFolder.setState({ dir, access: true, links: await folderLinks(), writeError: null });
-  await refreshFolder();
+/** Add a folder (the system dialog); a folder added before is just allowed again. Its id, or null if cancelled. */
+export async function addFolder(): Promise<string | null> {
+  const picked = await pickFolder();
+  if (!picked) return null;
+  const known = folderOf(picked.id);
+  if (known) setFolder(picked.id, { dir: picked.dir, access: true });
+  else useFolder.setState((s) => ({ folders: [...s.folders, { ...picked, access: true, files: [] }] }));
+  await refreshFolder(picked.id);
+  return picked.id;
 }
 
-/** Allow the remembered folder again (asks the user; from a click). */
-export async function allowFolder() {
-  const { dir } = useFolder.getState();
-  if (!dir) return;
-  useFolder.setState({ access: await folderAccess(dir, true).catch(() => false), writeError: null });
-  await refreshFolder();
-  // what the open document could not write meanwhile
+/** Allow a folder again (asks the user; from a click), then write what the open document could not meanwhile. */
+export async function allowFolder(id: string) {
+  const f = folderOf(id);
+  if (!f) return;
+  setFolder(id, { access: await folderAccess(f.dir, true).catch(() => false) });
+  useFolder.setState({ writeError: null });
+  await refreshFolder(id);
   const doc = useDoc.getState().doc;
   if (doc) await writeLinked(doc);
 }
 
-export async function leaveFolder() {
-  await forgetFolder();
-  useFolder.setState({ dir: null, access: false, files: [], links: {}, writeError: null });
-}
-
-/** Write a document to its file in the folder (if it is linked and the folder is allowed). */
-export async function writeLinked(doc: CadDocument) {
-  const { dir, access, links } = useFolder.getState();
-  const name = links[doc.id];
-  if (!dir || !name) return;
-  if (!access) return useFolder.setState({ writeError: name });
-  try {
-    await writeFolderFile(dir, name, projectText(doc));
-    if (useFolder.getState().writeError) useFolder.setState({ writeError: null });
-  } catch {
-    useFolder.setState({ writeError: name, access: await folderAccess(dir).catch(() => false) });
-  }
+/** Forget a folder: its files and their documents stay, no longer linked. */
+export async function removeFolder(id: string) {
+  await forgetFolder(id);
+  useFolder.setState((s) => ({
+    folders: s.folders.filter((f) => f.id !== id),
+    links: Object.fromEntries(Object.entries(s.links).filter(([, l]) => l.folder !== id)),
+  }));
 }
 
 /**
- * Open a project file of the folder as a document: the same document again when it is linked to this file (the
+ * Write a document to its file (if it is linked and its folder is allowed). A document renamed since its file got
+ * its name renames the file too.
+ */
+export async function writeLinked(doc: CadDocument) {
+  const l = useFolder.getState().links[doc.id];
+  const f = l && folderOf(l.folder);
+  if (!l || !f) return;
+  if (!f.access) return useFolder.setState({ writeError: doc.id });
+  try {
+    let name = l.name;
+    if (l.title !== doc.name) {
+      if (l.title !== undefined) name = await renameFolderFile(f.dir, l.name, freeFileName(doc.name, f.files.map((x) => x.name).filter((n) => n !== l.name)));
+      await link(doc.id, { ...l, name, title: doc.name });
+    }
+    await writeFolderFile(f.dir, name, projectText(doc));
+    if (name !== l.name) await refreshFolder(f.id);
+    if (useFolder.getState().writeError) useFolder.setState({ writeError: null });
+  } catch {
+    useFolder.setState({ writeError: doc.id });
+    setFolder(f.id, { access: await folderAccess(f.dir).catch(() => false) });
+  }
+}
+
+/** Write a document of the browser to its file, if it has one (after it changed outside the editor). */
+export async function syncLinked(docId: string) {
+  if (!useFolder.getState().links[docId]) return;
+  const doc = await db.loadDocument(docId);
+  if (doc) await writeLinked(doc);
+}
+
+async function link(docId: string, l: FileLink) {
+  await linkFile(docId, l);
+  useFolder.setState((s) => ({ links: { ...s.links, [docId]: l } }));
+}
+
+/**
+ * Rename a project file of a folder: the file and the document in it get the new name (its document in the
+ * browser too). Its content comes from the newer of the file and the browser's copy.
+ */
+export async function renameFolderDoc(folderId: string, name: string, title: string) {
+  const f = folderOf(folderId);
+  title = title.trim();
+  if (!f?.access || !title) return;
+  const { links } = useFolder.getState();
+  const docId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
+  const fromFile = parseProject(await readFolderFile(f.dir, name), title);
+  const local = docId ? await db.loadDocument(docId) : undefined;
+  const file = f.files.find((x) => x.name === name);
+  const doc = { ...(local && file && local.modified > file.modified ? local : fromFile), name: title };
+  const to = await renameFolderFile(f.dir, name, freeFileName(title, f.files.map((x) => x.name).filter((n) => n !== name)));
+  await writeFolderFile(f.dir, to, projectText(doc));
+  if (docId) {
+    await link(docId, { folder: folderId, name: to, title });
+    await useDoc.getState().renameDocument(docId, title);
+  }
+  await refreshFolder(folderId);
+}
+
+/**
+ * Open a project file of a folder as a document: the same document again when it is linked to this file (the
  * newer of the file and the browser's copy wins); a new one otherwise. Returns its id.
  */
-export async function openFolderFile(name: string): Promise<string> {
-  const { dir, links } = useFolder.getState();
-  if (!dir) throw new Error('No folder');
-  const file = useFolder.getState().files.find((f) => f.name === name);
-  const fromFile = parseProject(await readFolderFile(dir, name), name.replace(/\.webcad\.json$/i, ''));
-  const linkedId = Object.keys(links).find((id) => links[id] === name);
+export async function openFolderFile(folderId: string, name: string): Promise<string> {
+  const f = folderOf(folderId);
+  if (!f) throw new Error('No folder');
+  const { links } = useFolder.getState();
+  const file = f.files.find((x) => x.name === name);
+  const fromFile = parseProject(await readFolderFile(f.dir, name), name.replace(/\.webcad\.json$/i, ''));
+  const linkedId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
   const local = linkedId ? await db.loadDocument(linkedId) : undefined;
   let doc: CadDocument;
   if (local && file && local.modified > file.modified + 1000) {
     // changed here while the folder could not be written: the browser's copy goes to the file
     doc = local;
-    await writeFolderFile(dir, name, projectText(doc));
+    await writeFolderFile(f.dir, name, projectText(doc));
   } else {
     // the file is the main copy. Not linked yet: a document with its id that is already in the browser (of another
     // file, or the browser's own) is not overwritten — this one gets a new id
     const taken = !linkedId && (!!(await db.loadDocument(fromFile.id)) || links[fromFile.id] !== undefined);
-    doc = { ...fromFile, id: linkedId ?? (taken ? uid('doc') : fromFile.id) };
+    doc = { ...fromFile, id: linkedId ?? (taken ? docId() : fromFile.id) };
     await db.saveDocument(doc);
   }
-  // a document of the folder is never in the browser's trash
+  // a document of a folder is never in the browser's trash
   if (useDoc.getState().docs.find((d) => d.id === doc.id)?.trashed) await db.setTrashed(doc.id, null);
-  await linkFile(doc.id, name);
-  useFolder.setState((s) => ({ links: { ...s.links, [doc.id]: name } }));
+  // the file keeps its name (it may differ from the document's) until the document is renamed
+  await link(doc.id, { folder: folderId, name, title: doc.name });
   await useDoc.getState().loadList();
   return doc.id;
 }
 
-/** Save a browser document into the folder as a new file and link them. */
-export async function saveToFolder(docId: string): Promise<string | null> {
-  const { dir, access, files } = useFolder.getState();
+/** Save a browser document into a folder as a new file and link them. The file name, or null. */
+export async function saveToFolder(docId: string, folderId: string): Promise<string | null> {
+  const f = folderOf(folderId);
   const doc = await db.loadDocument(docId);
-  if (!dir || !access || !doc) return null;
-  const name = freeFileName(doc.name, files.map((f) => f.name));
-  await writeFolderFile(dir, name, projectText(doc));
-  await linkFile(doc.id, name);
-  useFolder.setState((s) => ({ links: { ...s.links, [doc.id]: name } }));
-  await refreshFolder();
+  if (!f?.access || !doc) return null;
+  const name = freeFileName(doc.name, f.files.map((x) => x.name));
+  await writeFolderFile(f.dir, name, projectText(doc));
+  await link(doc.id, { folder: folderId, name, title: doc.name });
+  await refreshFolder(folderId);
   return name;
 }
 
-/** A new document as a file of the folder. Returns its id. */
-export async function createInFolder(name: string): Promise<string | null> {
+/** A new document as a file of a folder. Returns its id. */
+export async function createInFolder(folderId: string, name: string): Promise<string | null> {
   const id = await useDoc.getState().createDocument(name);
-  return (await saveToFolder(id)) ? id : null;
+  return (await saveToFolder(id, folderId)) ? id : null;
 }

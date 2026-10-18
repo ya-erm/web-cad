@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
 import type { AssemblyTab, CadDocument, DocumentSummary, DrawingTab, Feature, PartStudioTab } from '../core/types';
-import { uid } from '../core/ids';
+import { docId, uid } from '../core/ids';
 import * as db from './persistence';
 
 const MAX_HISTORY = 200;
@@ -56,7 +56,7 @@ export function newDocument(name: string): CadDocument {
   const ps = newPartStudio();
   const now = Date.now();
   return {
-    id: uid('doc'),
+    id: docId(),
     name,
     created: now,
     modified: now,
@@ -150,13 +150,13 @@ export const useDoc = create<DocState>()((set, get) => {
       const doc = await db.loadDocument(id);
       if (!doc) return;
       const now = Date.now();
-      await db.saveDocument({ ...doc, id: uid('doc'), name: `${doc.name} (copy)`, created: now, modified: now });
+      await db.saveDocument({ ...doc, id: docId(), name: `${doc.name} (copy)`, created: now, modified: now });
       await get().loadList();
     },
 
     async importDocument(doc) {
       const now = Date.now();
-      const copy: CadDocument = { ...doc, id: uid('doc'), modified: now };
+      const copy: CadDocument = { ...doc, id: docId(), modified: now };
       await db.saveDocument(copy);
       await get().loadList();
       return copy.id;
