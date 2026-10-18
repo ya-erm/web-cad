@@ -1041,6 +1041,15 @@ const ICONS = {
       <path d="M12 7.5 V12 L15 14" stroke={BLUE} strokeWidth={1.75} />
     </>
   ),
+  /** Compare two versions: two sheets with the arrows between them. */
+  compare: (
+    <>
+      <rect x={3} y={4} width={7} height={16} rx={1} fill={GREY_TOP} />
+      <rect x={14} y={4} width={7} height={16} rx={1} />
+      <path d="M8 9 H16 M14 7 L16 9 L14 11" stroke={BLUE} strokeWidth={1.75} />
+      <path d="M16 15 H8 M10 13 L8 15 L10 17" stroke={BLUE} strokeWidth={1.75} />
+    </>
+  ),
   lock: (
     <>
       <path d="M8 10.5 V7.5 A4 4 0 0 1 16 7.5 V10.5" />

@@ -837,3 +837,11 @@ export interface DocumentVersion {
   /** Of the snapshot's content (units and tabs): the same content is not saved twice in a row. */
   hash: string;
 }
+
+/** A version as the project file (.webcad.json) keeps it — its name and content (the history stays in the browser). */
+export interface ProjectVersion extends Pick<CadDocument, 'units' | 'tabs' | 'activeTab'> {
+  id: string;
+  name: string;
+  description?: string;
+  created: number;
+}

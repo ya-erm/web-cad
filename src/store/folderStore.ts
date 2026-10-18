@@ -3,10 +3,11 @@
 // the folder, the newer of the file and the copy in the browser wins. Several folders can be added.
 
 import { create } from 'zustand';
-import type { CadDocument } from '../core/types';
+import type { CadDocument, ProjectVersion } from '../core/types';
 import { docId } from '../core/ids';
 import * as db from './persistence';
 import { useDoc } from './docStore';
+import { fileVersions, importVersions, useVersions } from './versions';
 import {
   folderAccess,
   folderLinks,
@@ -45,16 +46,25 @@ export const useFolder = create<FolderState>(() => ({ folders: [], links: {}, wr
 const folderOf = (id: string) => useFolder.getState().folders.find((f) => f.id === id);
 const setFolder = (id: string, patch: Partial<Folder>) => useFolder.setState((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, ...patch } : f)) }));
 
-/** The text of a project file: the document as JSON (indented, so that it reads and compares well). */
-export const projectText = (doc: CadDocument) => JSON.stringify(doc, null, 1);
+/**
+ * The text of a project file: the document as JSON (indented, so that it reads and compares well), with its
+ * versions (`versions`, oldest first; the history stays in the browser).
+ */
+export const projectText = (doc: CadDocument, versions: ProjectVersion[] = []) => JSON.stringify(versions.length ? { ...doc, versions } : doc, null, 1);
 
-/** A document from the text of a project file; throws on anything else. */
-export function parseProject(text: string, title: string): CadDocument {
-  const doc = JSON.parse(text) as CadDocument;
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.tabs) || !doc.units) throw new Error('Invalid project file');
+/** A document and its versions from a project file (already parsed JSON); throws on anything else. */
+export function readProject(raw: unknown, title: string): { doc: CadDocument; versions: ProjectVersion[] } {
+  const { versions, ...doc } = (raw ?? {}) as CadDocument & { versions?: ProjectVersion[] };
+  if (!raw || typeof raw !== 'object' || !Array.isArray(doc.tabs) || !doc.units) throw new Error('Invalid project file');
   const now = Date.now();
-  return { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : docId(), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 };
+  return {
+    doc: { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : docId(), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 },
+    versions: Array.isArray(versions) ? versions : [],
+  };
 }
+
+/** A document from the text of a project file (without its versions); throws on anything else. */
+export const parseProject = (text: string, title: string): CadDocument => readProject(JSON.parse(text), title).doc;
 
 /** Read a folder's file list again. */
 export async function refreshFolder(id: string) {
@@ -82,6 +92,11 @@ export async function startFolder() {
   // after every save of the open document in the browser: its file too
   useDoc.subscribe((s, prev) => {
     if (prev.saving && !s.saving && s.doc) void writeLinked(s.doc);
+  });
+  // a version made or deleted: the file keeps the versions too
+  const named = (s: { versions: { id: string; kind: string }[] }) => s.versions.flatMap((v) => (v.kind === 'version' ? [v.id] : [])).join();
+  useVersions.subscribe((s, prev) => {
+    if (s.docId && s.docId === prev.docId && prev.loaded && named(s) !== named(prev)) void syncLinked(s.docId);
   });
 }
 
@@ -131,7 +146,7 @@ export async function writeLinked(doc: CadDocument) {
       if (l.title !== undefined) name = await renameFolderFile(f.dir, l.name, freeFileName(doc.name, f.files.map((x) => x.name).filter((n) => n !== l.name)));
       await link(doc.id, { ...l, name, title: doc.name });
     }
-    await writeFolderFile(f.dir, name, projectText(doc));
+    await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
     if (name !== l.name) await refreshFolder(f.id);
     if (useFolder.getState().writeError) useFolder.setState({ writeError: null });
   } catch {
@@ -162,12 +177,14 @@ export async function renameFolderDoc(folderId: string, name: string, title: str
   if (!f?.access || !title) return;
   const { links } = useFolder.getState();
   const docId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
-  const fromFile = parseProject(await readFolderFile(f.dir, name), title);
+  const { doc: fromFile, versions } = readProject(JSON.parse(await readFolderFile(f.dir, name)), title);
   const local = docId ? await db.loadDocument(docId) : undefined;
   const file = f.files.find((x) => x.name === name);
   const doc = { ...(local && file && local.modified > file.modified ? local : fromFile), name: title };
   const to = await renameFolderFile(f.dir, name, freeFileName(title, f.files.map((x) => x.name).filter((n) => n !== name)));
-  await writeFolderFile(f.dir, to, projectText(doc));
+  // its versions: the browser's (with the file's), or the file's own when it is not open here
+  if (docId) await importVersions(docId, versions, true);
+  await writeFolderFile(f.dir, to, projectText(doc, docId ? await fileVersions(docId) : versions));
   if (docId) {
     await link(docId, { folder: folderId, name: to, title });
     await useDoc.getState().renameDocument(docId, title);
@@ -184,20 +201,23 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   if (!f) throw new Error('No folder');
   const { links } = useFolder.getState();
   const file = f.files.find((x) => x.name === name);
-  const fromFile = parseProject(await readFolderFile(f.dir, name), name.replace(/\.webcad\.json$/i, ''));
+  const { doc: fromFile, versions } = readProject(JSON.parse(await readFolderFile(f.dir, name)), name.replace(/\.webcad\.json$/i, ''));
   const linkedId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
   const local = linkedId ? await db.loadDocument(linkedId) : undefined;
   let doc: CadDocument;
   if (local && file && local.modified > file.modified + 1000) {
-    // changed here while the folder could not be written: the browser's copy goes to the file
+    // changed here while the folder could not be written: the browser's copy goes to the file (versions of both)
     doc = local;
-    await writeFolderFile(f.dir, name, projectText(doc));
+    await importVersions(doc.id, versions, true);
+    await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
   } else {
     // the file is the main copy. Not linked yet: a document with its id that is already in the browser (of another
     // file, or the browser's own) is not overwritten — this one gets a new id
     const taken = !linkedId && (!!(await db.loadDocument(fromFile.id)) || links[fromFile.id] !== undefined);
     doc = { ...fromFile, id: linkedId ?? (taken ? docId() : fromFile.id) };
     await db.saveDocument(doc);
+    // its versions: the file's own document keeps their ids, a new one gets copies
+    await importVersions(doc.id, versions, doc.id === fromFile.id || doc.id === linkedId);
   }
   // a document of a folder is never in the browser's trash
   if (useDoc.getState().docs.find((d) => d.id === doc.id)?.trashed) await db.setTrashed(doc.id, null);
@@ -213,7 +233,7 @@ export async function saveToFolder(docId: string, folderId: string): Promise<str
   const doc = await db.loadDocument(docId);
   if (!f?.access || !doc) return null;
   const name = freeFileName(doc.name, f.files.map((x) => x.name));
-  await writeFolderFile(f.dir, name, projectText(doc));
+  await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
   await link(doc.id, { folder: folderId, name, title: doc.name });
   await refreshFolder(folderId);
   return name;

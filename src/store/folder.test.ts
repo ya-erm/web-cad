@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { freeFileName, listFolder, readFolderFile, writeFolderFile } from './localFolder';
-import { parseProject, projectText } from './folderStore';
+import { parseProject, projectText, readProject } from './folderStore';
 import type { CadDocument } from '../core/types';
 import { docId } from '../core/ids';
 
@@ -69,6 +69,19 @@ describe('a folder on the computer', () => {
     // a second write replaces the file
     await writeFolderFile(dir, 'Bracket.webcad.json', projectText({ ...doc, name: 'Bracket 2' }));
     expect(parseProject(disk['Bracket.webcad.json'].text, 'x').name).toBe('Bracket 2');
+  });
+
+  it('keeps the versions of a document in its project file, apart from the document', () => {
+    const v1 = { id: 'vr1', name: 'V1', description: 'First', created: 5, units: doc.units, tabs: [], activeTab: '' };
+    const text = projectText(doc, [v1]);
+    expect(JSON.parse(text).versions).toEqual([v1]);
+    const { doc: read, versions } = readProject(JSON.parse(text), 'x');
+    expect(read).toEqual(doc);
+    expect('versions' in read).toBe(false);
+    expect(versions).toEqual([v1]);
+    // none: the plain document, as before
+    expect(JSON.parse(projectText(doc))).toEqual(doc);
+    expect(readProject(JSON.parse(projectText(doc)), 'x').versions).toEqual([]);
   });
 
   it('takes a project file without id or name, and refuses other JSON', () => {

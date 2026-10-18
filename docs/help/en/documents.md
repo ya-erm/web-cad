@@ -52,7 +52,7 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 ## Project files {#project-files}
 
-You can save the whole document (all tabs, feature history, settings) to a file and open it in another browser or on another computer:
+You can save the whole document (all tabs, feature history, settings, [versions](versions#file)) to a file and open it in another browser or on another computer:
 
 1. In the open document, click **Export** at the top right and choose the **WebCAD project (.webcad.json)** format. A `<name>.webcad.json` file downloads.
 2. On the **Documents** page, click **Import project** and select that file.

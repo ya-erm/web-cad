@@ -9,6 +9,8 @@ import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
 import { useEditor, type ViewCommand } from '../store/editorStore';
 import * as db from '../store/persistence';
+import { projectText } from '../store/folderStore';
+import { fileVersions } from '../store/versions';
 import { getEngine } from '../viewport/engineRef';
 import { buildStudio } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
@@ -243,7 +245,8 @@ export const webcadApi = {
     if (!open) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
     const safe = open.name.replace(/[^\p{L}\p{N}._ -]+/gu, '_');
     if (format === 'webcad') {
-      const bytes = new TextEncoder().encode(JSON.stringify(open));
+      // the project file with the document's versions
+      const bytes = new TextEncoder().encode(projectText(open, await fileVersions(open.id)));
       return { fileName: `${safe}.webcad.json`, mime: 'application/json', base64: toBase64(bytes) };
     }
     if (format !== 'stl' && format !== 'step') throw new AgentError('format: stl | step | webcad');

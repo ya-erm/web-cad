@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CadDocument } from '../core/types';
 import { useDoc } from '../store/docStore';
-import { addFolder, allowFolder, createInFolder, openFolderFile, refreshFolder, removeFolder, renameFolderDoc, saveToFolder, syncLinked, useFolder } from '../store/folderStore';
+import { addFolder, allowFolder, createInFolder, openFolderFile, readProject, refreshFolder, removeFolder, renameFolderDoc, saveToFolder, syncLinked, useFolder } from '../store/folderStore';
+import { importVersions } from '../store/versions';
 import { folderSupported } from '../store/localFolder';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
 import { Icon } from './icons';
@@ -442,9 +442,10 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               const f = e.target.files?.[0];
               if (!f) return;
               try {
-                const doc = JSON.parse(await f.text()) as CadDocument;
-                if (!doc.tabs || !doc.units) throw new Error('bad file');
+                const { doc, versions } = readProject(JSON.parse(await f.text()), f.name.replace(/(\.webcad)?\.json$/i, ''));
                 const id = await importDocument(doc);
+                // a copy: its versions come as copies too
+                await importVersions(id, versions, false);
                 onOpen(id);
               } catch {
                 alert('Invalid project file');

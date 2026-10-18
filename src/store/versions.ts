@@ -3,9 +3,9 @@
 
 import { create } from 'zustand';
 import type { Draft } from 'immer';
-import type { CadDocument, DocumentVersion } from '../core/types';
+import type { CadDocument, DocumentVersion, ProjectVersion } from '../core/types';
 import { uid } from '../core/ids';
-import { contentHash, historyDue, historyOverflow, isEmptyDocument, nextVersionName, withVersionContent } from '../core/versions';
+import { compareDocuments, contentHash, historyDue, historyOverflow, isEmptyDocument, nextVersionName, withVersionContent, type DocumentDiff } from '../core/versions';
 import * as db from './persistence';
 import { useDoc } from './docStore';
 
@@ -14,15 +14,17 @@ interface VersionsState {
   docId: string | null;
   /** Its versions and history, newest first. */
   versions: DocumentVersion[];
+  /** The list has been read for this document. */
+  loaded: boolean;
   /** The version open for viewing, and the workspace to come back to. */
   viewing: { version: DocumentVersion; workspace: { doc: CadDocument; past: CadDocument[]; future: CadDocument[] } } | null;
 }
 
-export const useVersions = create<VersionsState>(() => ({ docId: null, versions: [], viewing: null }));
+export const useVersions = create<VersionsState>(() => ({ docId: null, versions: [], loaded: false, viewing: null }));
 
 async function refresh(docId: string) {
   const versions = await db.listVersions(docId);
-  if (useVersions.getState().docId === docId) useVersions.setState({ versions });
+  if (useVersions.getState().docId === docId) useVersions.setState({ versions, loaded: true });
 }
 
 async function snapshot(doc: CadDocument, v: Pick<DocumentVersion, 'kind' | 'name' | 'description' | 'reason'>) {
@@ -92,10 +94,56 @@ export async function restoreVersion(id: string) {
   });
 }
 
+/** What changed from a version to the workspace (the one to come back to, while a version is viewed). */
+export async function compareWithWorkspace(id: string): Promise<DocumentDiff | null> {
+  const snap = await db.loadVersion(id);
+  const work = useVersions.getState().viewing?.workspace.doc ?? useDoc.getState().doc;
+  return snap && work ? compareDocuments(snap, work) : null;
+}
+
 export async function deleteVersion(id: string) {
   await db.deleteVersions([id]);
   const docId = useVersions.getState().docId;
   if (docId) await refresh(docId);
+}
+
+/** Versions as project files have them, by id (a version does not change). */
+const fileCache = new Map<string, ProjectVersion>();
+
+/** The versions of a document (not its history) as its project file keeps them, oldest first. */
+export async function fileVersions(docId: string): Promise<ProjectVersion[]> {
+  const out: ProjectVersion[] = [];
+  for (const v of (await db.listVersions(docId)).filter((x) => x.kind === 'version').reverse()) {
+    let pv = fileCache.get(v.id);
+    if (!pv) {
+      const snap = await db.loadVersion(v.id);
+      if (!snap) continue;
+      pv = { id: v.id, name: v.name, ...(v.description ? { description: v.description } : {}), created: v.created, units: snap.units, tabs: snap.tabs, activeTab: snap.activeTab };
+      fileCache.set(v.id, pv);
+    }
+    out.push(pv);
+  }
+  return out;
+}
+
+/**
+ * Versions of a project file into the browser, for document `docId`. `sameDocument`: the file is this document's
+ * own (a file of a folder) — the versions it has already are skipped; otherwise (an imported copy) all are added
+ * anew. The number added.
+ */
+export async function importVersions(docId: string, versions: ProjectVersion[] | undefined, sameDocument: boolean): Promise<number> {
+  if (!versions?.length) return 0;
+  const have = new Set((await db.listVersions(docId)).map((v) => v.id));
+  let added = 0;
+  for (const pv of versions) {
+    if (!pv || !Array.isArray(pv.tabs) || !pv.units || (sameDocument && have.has(pv.id))) continue;
+    const id = sameDocument && typeof pv.id === 'string' ? pv.id : uid('vr');
+    const snap: CadDocument = { id: docId, name: '', created: pv.created, modified: pv.created, units: pv.units, tabs: pv.tabs, activeTab: pv.activeTab, version: 1 };
+    await db.saveVersion({ id, docId, kind: 'version', name: pv.name || 'V', ...(pv.description ? { description: pv.description } : {}), created: pv.created || Date.now(), hash: contentHash(pv) }, snap);
+    added++;
+  }
+  if (added && useVersions.getState().docId === docId) await refresh(docId);
+  return added;
 }
 
 let started = false;
@@ -107,7 +155,7 @@ export function startVersions() {
   useDoc.subscribe((s, prev) => {
     const id = s.doc?.id ?? null;
     if (id !== useVersions.getState().docId) {
-      useVersions.setState({ docId: id, versions: [], viewing: null });
+      useVersions.setState({ docId: id, versions: [], loaded: false, viewing: null });
       if (s.doc) {
         const doc = s.doc;
         void refresh(doc.id).then(() => remember(doc, 'open'));
