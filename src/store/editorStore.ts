@@ -1,0 +1,530 @@
+// Transient editor state: build results, feature editing, selection, sketch session.
+
+import { create } from 'zustand';
+import { produce, type Draft } from 'immer';
+import type { Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec3 } from '../core/types';
+import type { BuildResult, MeasureResult } from '../kernel/protocol';
+import { defaultParams, nextFeatureName } from '../core/features';
+import { uid } from '../core/ids';
+import { activeStudio, effectiveRollback, featureIndex, useDoc, withStudio } from './docStore';
+
+export type SketchTool =
+  | 'select'
+  | 'line'
+  | 'rectCorner'
+  | 'rectCenter'
+  | 'circleCenter'
+  | 'circle3pt'
+  | 'arc3pt'
+  | 'arcTangent'
+  | 'arcCenter'
+  | 'spline'
+  | 'point'
+  | 'slot'
+  /** circumscribed polygon: the construction circle passes through the vertices */
+  | 'polygon'
+  /** inscribed polygon: the construction circle touches the sides */
+  | 'polygonInscribed'
+  | 'ellipse'
+  | 'fillet'
+  | 'trim'
+  | 'extend'
+  | 'offset'
+  | 'use'
+  /** picking a new sketch plane from the sketch dialog */
+  | 'plane'
+  | 'dimension';
+
+export interface SolveInfo {
+  ok: boolean;
+  dof: number;
+  status: Record<string, 'under' | 'full' | 'over'>;
+  conflicting: string[];
+  redundant: string[];
+}
+
+export interface SketchSession {
+  tool: SketchTool;
+  /** Selected entity / constraint ids. */
+  selection: string[];
+  hover: string | null;
+  construction: boolean;
+  past: SketchData[];
+  future: SketchData[];
+  solve: SolveInfo | null;
+  /** Message shown in the status bar while a tool is active. */
+  hint?: string;
+}
+
+/** A sketch pattern being created / edited (the pattern itself lives in the sketch data). */
+export interface SketchPatternState {
+  patternId: string;
+  isNew: boolean;
+  /** Sketch before the edit: restored on cancel, pushed to undo on accept. */
+  base: SketchData;
+}
+
+export interface Editing {
+  featureId: string;
+  isNew: boolean;
+  /** Position of the feature in the list (insertion point for new features). */
+  index: number;
+  draft: Feature;
+}
+
+export interface SectionState {
+  /** What the plane came from, for the panel ('top' | 'front' | 'right' | 'face'). */
+  source: 'top' | 'front' | 'right' | 'face';
+  normal: Vec3;
+  origin: Vec3;
+  /** Offset along the normal, mm. */
+  offset: number;
+  /** Keep the other side. */
+  flip: boolean;
+}
+
+export type ViewCommand =
+  | { kind: 'std'; view: 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso' | 'dimetric' | 'trimetric' }
+  | { kind: 'fit' }
+  | { kind: 'normal'; normal: Vec3; up: Vec3; center: Vec3 }
+  | { kind: 'rotate'; axis: 'h' | 'v' | 'roll'; deg: number }
+  | { kind: 'zoom'; factor: number };
+
+export interface ContextMenuItem {
+  label: string;
+  /** Icon name from ui/icons (kept as string to avoid importing UI code into the store). */
+  icon?: string;
+  shortcut?: string;
+  action?: () => void;
+  disabled?: boolean;
+  separator?: boolean;
+  danger?: boolean;
+}
+
+export interface ContextMenuState {
+  x: number;
+  y: number;
+  items: ContextMenuItem[];
+  palette?: { colors: string[]; onPick: (color: string) => void };
+}
+
+export interface EditorState {
+  build: BuildResult | null;
+  building: boolean;
+  kernelReady: boolean;
+  editing: Editing | null;
+  activeField: string | null;
+  selection: SelRef[];
+  hover: SelRef | null;
+  sketch: SketchSession | null;
+  sketchPattern: SketchPatternState | null;
+  showPlanes: boolean;
+  showSketches: boolean;
+  viewCmd: { id: number; cmd: ViewCommand } | null;
+  measure: MeasureResult | null;
+  contextMenu: ContextMenuState | null;
+  exportOpen: { partIds: string[] } | null;
+  toast: { id: number; text: string; kind: 'info' | 'error' } | null;
+  perspective: boolean;
+  rotationMode: 'free' | 'turntable';
+  /** Section view: parts are clipped by a plane (world normal / origin, offset along the normal in mm). */
+  section: SectionState | null;
+  /** Constraint glyphs in sketch mode: all, or only for the selected/hovered entities. */
+  showConstraints: boolean;
+  /** Dimension labels show their expression ("#w / 2") instead of the value. */
+  showExpressions: boolean;
+
+  startFeature(type: FeatureType): void;
+  editFeature(id: string): void;
+  updateDraft(fn: (f: Draft<Feature>) => void): void;
+  commitEditing(keepOpen?: boolean): void;
+  cancelEditing(): void;
+  setActiveField(key: string | null): void;
+
+  startSketch(plane: PlaneRef): void;
+  setSketchTool(tool: SketchTool): void;
+  updateSketch(fn: (s: Draft<SketchData>) => void, undoable?: boolean): void;
+  sketchUndo(): void;
+  sketchRedo(): void;
+  setSketchSelection(ids: string[]): void;
+  setSketchHover(id: string | null): void;
+  setSolve(info: SolveInfo | null): void;
+
+  select(ref: SelRef, additive?: boolean): void;
+  setSelection(refs: SelRef[]): void;
+  clearSelection(): void;
+  setHover(ref: SelRef | null): void;
+
+  view(cmd: ViewCommand): void;
+  showToast(text: string, kind?: 'info' | 'error'): void;
+}
+
+export function refKey(r: SelRef): string {
+  switch (r.kind) {
+    case 'face':
+    case 'edge':
+    case 'vertex':
+      return `${r.kind}:${r.partId}:${r.index}`;
+    case 'part':
+      return `part:${r.partId}`;
+    case 'region':
+      return `region:${r.sketchId}:${r.key.ents.join(',')}:${r.key.pt[0].toFixed(4)},${r.key.pt[1].toFixed(4)}`;
+    case 'sketchEntity':
+      return `ske:${r.sketchId}:${r.entityId}`;
+    case 'plane':
+      return `plane:${r.planeId}`;
+    case 'origin':
+      return 'origin';
+  }
+}
+
+export const sameRef = (a: SelRef, b: SelRef) => refKey(a) === refKey(b);
+
+/** Which fields of a fresh feature should receive the current selection. */
+function prefill(f: Draft<Feature>, sel: SelRef[]) {
+  if (!sel.length) return;
+  const regionsOrFaces = sel.filter((r) => r.kind === 'region' || r.kind === 'face');
+  const edgesOrFaces = sel.filter((r) => r.kind === 'edge' || r.kind === 'face');
+  const parts = sel.filter((r) => r.kind === 'part');
+  switch (f.type) {
+    case 'extrude':
+    case 'revolve':
+    case 'sweep':
+    case 'loft':
+      f.params.profiles = regionsOrFaces as SelRef[];
+      break;
+    case 'thicken':
+      f.params.faces = regionsOrFaces as SelRef[];
+      break;
+    case 'fillet':
+    case 'chamfer':
+      f.params.edges = edgesOrFaces as SelRef[];
+      break;
+    case 'shell':
+      f.params.faces = sel.filter((r) => r.kind === 'face') as SelRef[];
+      break;
+    case 'hole':
+      f.params.points = sel.filter((r) => r.kind === 'sketchEntity') as SelRef[];
+      break;
+    case 'deletePart':
+    case 'split':
+    case 'transform':
+      f.params.parts = parts as SelRef[];
+      break;
+    case 'linearPattern':
+    case 'circularPattern':
+    case 'mirror':
+      f.params.parts = parts as SelRef[];
+      break;
+    case 'boolean':
+      f.params.tools = parts as SelRef[];
+      break;
+    case 'plane':
+      f.params.refs = sel.filter((r) => r.kind !== 'part') as SelRef[];
+      break;
+    case 'mateConnector': {
+      const loc = sel.find((r) => r.kind !== 'part' && r.kind !== 'region');
+      if (loc) f.params.location = [loc as Draft<SelRef>];
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/** First selection field of each feature dialog (receives clicks by default). */
+export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
+  extrude: 'profiles',
+  revolve: 'profiles',
+  sweep: 'profiles',
+  loft: 'profiles',
+  thicken: 'faces',
+  fillet: 'edges',
+  chamfer: 'edges',
+  shell: 'faces',
+  draft: 'neutral',
+  hole: 'points',
+  linearPattern: 'parts',
+  circularPattern: 'parts',
+  mirror: 'parts',
+  boolean: 'tools',
+  split: 'parts',
+  transform: 'parts',
+  deletePart: 'parts',
+  plane: 'refs',
+  helix: 'axis',
+  mateConnector: 'location',
+};
+
+let viewCounter = 0;
+let toastCounter = 0;
+
+export const useEditor = create<EditorState>()((set, get) => ({
+  build: null,
+  building: false,
+  kernelReady: false,
+  editing: null,
+  activeField: null,
+  selection: [],
+  hover: null,
+  sketch: null,
+  sketchPattern: null,
+  showPlanes: true,
+  showSketches: true,
+  viewCmd: null,
+  measure: null,
+  contextMenu: null,
+  exportOpen: null,
+  toast: null,
+  perspective: false,
+  showExpressions: (() => {
+    try {
+      return localStorage.getItem('webcad.showExpressions') === '1';
+    } catch {
+      return false;
+    }
+  })(),
+  showConstraints: (() => {
+    try {
+      return localStorage.getItem('webcad.showConstraints') !== '0';
+    } catch {
+      return true;
+    }
+  })(),
+  rotationMode: ((): 'free' | 'turntable' => {
+    try {
+      return localStorage.getItem('webcad.rotation') === 'turntable' ? 'turntable' : 'free';
+    } catch {
+      return 'free';
+    }
+  })(),
+  section: null,
+
+  startFeature(type) {
+    const doc = useDoc.getState().doc;
+    const studio = activeStudio(doc);
+    if (!studio || get().editing) return;
+    if (type === 'sketch') {
+      const sel = get().selection[0];
+      let plane: PlaneRef = { kind: 'std', name: 'top' };
+      if (sel?.kind === 'plane') {
+        plane =
+          sel.planeId === 'top' || sel.planeId === 'front' || sel.planeId === 'right'
+            ? { kind: 'std', name: sel.planeId }
+            : { kind: 'feature', featureId: sel.planeId };
+      } else if (sel?.kind === 'face' && sel.sig.type === 'PLANE') {
+        plane = { kind: 'face', ref: sel };
+      } else if (sel) {
+        get().showToast('Select a plane or planar face', 'error');
+        return;
+      }
+      get().startSketch(plane);
+      return;
+    }
+    const draft = produce(
+      {
+        id: uid('f'),
+        type,
+        name: nextFeatureName(studio.features, type),
+        params: defaultParams(type),
+      } as Feature,
+      (f) => prefill(f, get().selection),
+    );
+    set({
+      editing: { featureId: draft.id, isNew: true, index: effectiveRollback(studio), draft },
+      activeField: FIRST_FIELD[type] ?? null,
+      selection: [],
+      measure: null,
+    });
+  },
+
+  editFeature(id) {
+    const studio = activeStudio(useDoc.getState().doc);
+    if (!studio || get().editing) return;
+    const idx = featureIndex(studio, id);
+    if (idx < 0) return;
+    const f = studio.features[idx];
+    set({
+      hover: null,
+      editing: { featureId: id, isNew: false, index: idx, draft: f },
+      activeField: f.type === 'sketch' ? null : (FIRST_FIELD[f.type] ?? null),
+      selection: [],
+      measure: null,
+      sketch:
+        f.type === 'sketch'
+          ? { tool: 'select', selection: [], hover: null, construction: false, past: [], future: [], solve: null }
+          : null,
+    });
+  },
+
+  updateDraft(fn) {
+    const e = get().editing;
+    if (!e) return;
+    set({ editing: { ...e, draft: produce(e.draft, fn) } });
+  },
+
+  commitEditing(keepOpen = false) {
+    const e = get().editing;
+    if (!e) return;
+    const { update } = useDoc.getState();
+    update((d) => {
+      withStudio(d, (s) => {
+        if (e.isNew) {
+          s.features.splice(e.index, 0, e.draft as Draft<Feature>);
+          if (s.rollback !== null) s.rollback = Math.min(s.rollback + 1, s.features.length);
+          if (s.rollback === s.features.length) s.rollback = null;
+        } else {
+          const i = s.features.findIndex((f) => f.id === e.featureId);
+          if (i >= 0) s.features[i] = e.draft as Draft<Feature>;
+        }
+      });
+    });
+    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, selection: [], hover: null });
+    if (keepOpen && e.draft.type !== 'sketch') get().startFeature(e.draft.type);
+  },
+
+  cancelEditing() {
+    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, hover: null });
+  },
+
+  setActiveField(key) {
+    set({ activeField: key });
+  },
+
+  startSketch(plane) {
+    const studio = activeStudio(useDoc.getState().doc);
+    if (!studio) return;
+    const draft: Feature = {
+      id: uid('f'),
+      type: 'sketch',
+      name: nextFeatureName(studio.features, 'sketch'),
+      params: { plane, entities: [], constraints: [] },
+    };
+    set({
+      editing: { featureId: draft.id, isNew: true, index: effectiveRollback(studio), draft },
+      activeField: null,
+      selection: [],
+      measure: null,
+      sketch: { tool: 'line', selection: [], hover: null, construction: false, past: [], future: [], solve: null },
+      hover: null,
+    });
+  },
+
+  setSketchTool(tool) {
+    const s = get().sketch;
+    if (!s) return;
+    set({ sketch: { ...s, tool, hint: undefined } });
+  },
+
+  updateSketch(fn, undoable = true) {
+    const e = get().editing;
+    const s = get().sketch;
+    if (!e || e.draft.type !== 'sketch' || !s) return;
+    const prev = e.draft.params;
+    const next = produce(prev, fn);
+    if (next === prev) return;
+    set({
+      editing: { ...e, draft: { ...e.draft, params: next } },
+      sketch: undoable ? { ...s, past: [...s.past, prev].slice(-200), future: [] } : s,
+    });
+  },
+
+  sketchUndo() {
+    const e = get().editing;
+    const s = get().sketch;
+    if (!e || e.draft.type !== 'sketch' || !s || !s.past.length) return;
+    const prev = s.past[s.past.length - 1];
+    set({
+      editing: { ...e, draft: { ...e.draft, params: prev } },
+      sketch: { ...s, past: s.past.slice(0, -1), future: [e.draft.params, ...s.future], selection: [] },
+    });
+  },
+
+  sketchRedo() {
+    const e = get().editing;
+    const s = get().sketch;
+    if (!e || e.draft.type !== 'sketch' || !s || !s.future.length) return;
+    const next = s.future[0];
+    set({
+      editing: { ...e, draft: { ...e.draft, params: next } },
+      sketch: { ...s, past: [...s.past, e.draft.params], future: s.future.slice(1), selection: [] },
+    });
+  },
+
+  setSketchSelection(ids) {
+    const s = get().sketch;
+    if (s) set({ sketch: { ...s, selection: ids } });
+  },
+
+  setSketchHover(id) {
+    const s = get().sketch;
+    if (s && s.hover !== id) set({ sketch: { ...s, hover: id } });
+  },
+
+  setSolve(info) {
+    const s = get().sketch;
+    if (s) set({ sketch: { ...s, solve: info } });
+  },
+
+  select(ref, additive = true) {
+    const sel = get().selection;
+    const exists = sel.some((r) => sameRef(r, ref));
+    if (exists) set({ selection: sel.filter((r) => !sameRef(r, ref)) });
+    else set({ selection: additive ? [...sel, ref] : [ref] });
+  },
+
+  setSelection(refs) {
+    set({ selection: refs });
+  },
+
+  clearSelection() {
+    set({ selection: [], measure: null });
+  },
+
+  setHover(ref) {
+    const h = get().hover;
+    if (h === ref || (h && ref && sameRef(h, ref))) return;
+    set({ hover: ref });
+  },
+
+  view(cmd) {
+    set({ viewCmd: { id: ++viewCounter, cmd } });
+  },
+
+  showToast(text, kind = 'info') {
+    const id = ++toastCounter;
+    set({ toast: { id, text, kind } });
+    setTimeout(() => {
+      if (get().toast?.id === id) set({ toast: null });
+    }, 3500);
+  },
+}));
+
+export function setRotationMode(mode: 'free' | 'turntable') {
+  useEditor.setState({ rotationMode: mode });
+  try {
+    localStorage.setItem('webcad.rotation', mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function toggleShowConstraints() {
+  const v = !useEditor.getState().showConstraints;
+  useEditor.setState({ showConstraints: v });
+  try {
+    localStorage.setItem('webcad.showConstraints', v ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
+export function toggleShowExpressions() {
+  const v = !useEditor.getState().showExpressions;
+  useEditor.setState({ showExpressions: v });
+  try {
+    localStorage.setItem('webcad.showExpressions', v ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}

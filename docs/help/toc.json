@@ -1,0 +1,130 @@
+{
+  "start": "getting-started",
+  "languages": { "ru": "Русский", "en": "English" },
+  "fallback": ["en", "ru"],
+  "sections": [
+    {
+      "id": "start",
+      "title": { "ru": "Начало работы", "en": "Getting started" },
+      "pages": [
+        { "id": "getting-started", "icon": "home", "title": { "ru": "Начало работы", "en": "Getting started" } },
+        { "id": "interface", "icon": "partStudio", "title": { "ru": "Интерфейс", "en": "User interface" } },
+        { "id": "documents", "icon": "document", "title": { "ru": "Документы и вкладки", "en": "Documents and tabs" } },
+        { "id": "view-controls", "icon": "isoView", "title": { "ru": "Управление видом", "en": "View controls" } },
+        { "id": "keyboard-shortcuts", "title": { "ru": "Горячие клавиши", "en": "Keyboard shortcuts" } }
+      ]
+    },
+    {
+      "id": "part-studio",
+      "title": { "ru": "Part Studio", "en": "Part Studio" },
+      "pages": [
+        { "id": "feature-list", "icon": "rollback", "title": { "ru": "Список фич", "en": "Feature list" } },
+        { "id": "feature-dialogs", "icon": "edit", "title": { "ru": "Диалоги фич", "en": "Feature dialogs" } },
+        { "id": "parts", "icon": "parts", "title": { "ru": "Детали и внешний вид", "en": "Parts and appearance" } },
+        { "id": "variables", "icon": "variable", "title": { "ru": "Переменные и выражения", "en": "Variables and expressions" } },
+        { "id": "measure", "icon": "measure", "title": { "ru": "Измерения", "en": "Measure" } },
+        { "id": "section-view", "icon": "sectionView", "title": { "ru": "Сечение", "en": "Section view" } },
+        { "id": "import-export", "icon": "export", "title": { "ru": "Импорт и экспорт", "en": "Import and export" } }
+      ]
+    },
+    {
+      "id": "sketch",
+      "title": { "ru": "Эскиз", "en": "Sketch" },
+      "pages": [
+        { "id": "sketch", "icon": "sketch", "title": { "ru": "Обзор эскиза", "en": "Sketch overview" } },
+        { "id": "sketch-line", "icon": "line", "title": { "ru": "Линия", "en": "Line" } },
+        { "id": "sketch-rectangle", "icon": "rectCorner", "title": { "ru": "Прямоугольник", "en": "Rectangle" } },
+        { "id": "sketch-circle", "icon": "circleCenter", "title": { "ru": "Окружность", "en": "Circle" } },
+        { "id": "sketch-arc", "icon": "arc3pt", "title": { "ru": "Дуга", "en": "Arc" } },
+        { "id": "sketch-spline", "icon": "spline", "title": { "ru": "Сплайн", "en": "Spline" } },
+        { "id": "sketch-point", "icon": "point", "title": { "ru": "Точка", "en": "Point" } },
+        { "id": "sketch-slot", "icon": "slot", "title": { "ru": "Паз", "en": "Slot" } },
+        { "id": "sketch-polygon", "icon": "polygon", "title": { "ru": "Многоугольник", "en": "Polygon" } },
+        { "id": "sketch-ellipse", "icon": "ellipse", "title": { "ru": "Эллипс", "en": "Ellipse" } },
+        { "id": "sketch-fillet", "icon": "sketchFillet", "title": { "ru": "Скругление в эскизе", "en": "Sketch fillet" } },
+        { "id": "sketch-trim", "icon": "trim", "title": { "ru": "Обрезка", "en": "Trim" } },
+        { "id": "sketch-extend", "icon": "extend", "title": { "ru": "Удлинение", "en": "Extend" } },
+        { "id": "sketch-offset", "icon": "offset", "title": { "ru": "Смещение", "en": "Offset" } },
+        { "id": "sketch-use", "icon": "use", "title": { "ru": "Проецирование (Use)", "en": "Use (project)" } },
+        { "id": "sketch-mirror", "icon": "sketchMirror", "title": { "ru": "Зеркало в эскизе", "en": "Sketch mirror" } },
+        { "id": "sketch-pattern", "icon": "sketchLinearPattern", "title": { "ru": "Массивы в эскизе", "en": "Sketch patterns" } },
+        {
+          "id": "sketch-constraints",
+          "icon": "coincident",
+          "title": { "ru": "Ограничения", "en": "Constraints" },
+          "children": [
+            { "id": "constraint-coincident", "icon": "coincident", "title": { "ru": "Совпадение", "en": "Coincident" } },
+            { "id": "constraint-concentric", "icon": "concentric", "title": { "ru": "Концентричность", "en": "Concentric" } },
+            { "id": "constraint-parallel", "icon": "parallel", "title": { "ru": "Параллельность", "en": "Parallel" } },
+            { "id": "constraint-tangent", "icon": "tangent", "title": { "ru": "Касание", "en": "Tangent" } },
+            { "id": "constraint-horizontal", "icon": "horizontal", "title": { "ru": "Горизонтальность", "en": "Horizontal" } },
+            { "id": "constraint-vertical", "icon": "vertical", "title": { "ru": "Вертикальность", "en": "Vertical" } },
+            { "id": "constraint-perpendicular", "icon": "perpendicular", "title": { "ru": "Перпендикулярность", "en": "Perpendicular" } },
+            { "id": "constraint-equal", "icon": "equal", "title": { "ru": "Равенство", "en": "Equal" } },
+            { "id": "constraint-midpoint", "icon": "midpoint", "title": { "ru": "Середина", "en": "Midpoint" } },
+            { "id": "constraint-symmetric", "icon": "symmetric", "title": { "ru": "Симметрия", "en": "Symmetric" } },
+            { "id": "constraint-fix", "icon": "fix", "title": { "ru": "Фиксация", "en": "Fix" } }
+          ]
+        },
+        {
+          "id": "sketch-dimensions",
+          "icon": "dimension",
+          "title": { "ru": "Размеры", "en": "Dimensions" },
+          "children": [
+            { "id": "dimension-distance", "icon": "dimension", "title": { "ru": "Длина и расстояние", "en": "Length and distance" } },
+            { "id": "dimension-radius", "icon": "circleCenter", "title": { "ru": "Радиус и диаметр", "en": "Radius and diameter" } },
+            { "id": "dimension-angle", "icon": "dimension", "title": { "ru": "Угол", "en": "Angle" } },
+            { "id": "dimension-offset", "icon": "offset", "title": { "ru": "Размер смещения", "en": "Offset dimension" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "title": { "ru": "Фичи", "en": "Features" },
+      "pages": [
+        { "id": "extrude", "icon": "extrude", "title": { "ru": "Выдавливание", "en": "Extrude" } },
+        { "id": "revolve", "icon": "revolve", "title": { "ru": "Вращение", "en": "Revolve" } },
+        { "id": "sweep", "icon": "sweep", "title": { "ru": "Сдвиг по траектории", "en": "Sweep" } },
+        { "id": "loft", "icon": "loft", "title": { "ru": "Лофт", "en": "Loft" } },
+        { "id": "thicken", "icon": "thicken", "title": { "ru": "Утолщение", "en": "Thicken" } },
+        { "id": "fillet", "icon": "fillet", "title": { "ru": "Скругление", "en": "Fillet" } },
+        { "id": "chamfer", "icon": "chamfer", "title": { "ru": "Фаска", "en": "Chamfer" } },
+        { "id": "shell", "icon": "shell", "title": { "ru": "Оболочка", "en": "Shell" } },
+        { "id": "draft", "icon": "draft", "title": { "ru": "Уклон", "en": "Draft" } },
+        { "id": "hole", "icon": "hole", "title": { "ru": "Отверстие", "en": "Hole" } },
+        { "id": "linear-pattern", "icon": "linearPattern", "title": { "ru": "Линейный массив", "en": "Linear pattern" } },
+        { "id": "circular-pattern", "icon": "circularPattern", "title": { "ru": "Круговой массив", "en": "Circular pattern" } },
+        { "id": "mirror", "icon": "mirror", "title": { "ru": "Зеркало", "en": "Mirror" } },
+        { "id": "boolean", "icon": "boolean", "title": { "ru": "Булева операция", "en": "Boolean" } },
+        { "id": "split", "icon": "split", "title": { "ru": "Разделение", "en": "Split" } },
+        { "id": "transform", "icon": "transform", "title": { "ru": "Перемещение", "en": "Transform" } },
+        { "id": "delete-part", "icon": "deletePart", "title": { "ru": "Удалить деталь", "en": "Delete part" } },
+        { "id": "plane", "icon": "plane", "title": { "ru": "Плоскость", "en": "Plane" } },
+        { "id": "helix", "icon": "helix", "title": { "ru": "Спираль", "en": "Helix" } },
+        { "id": "mate-connector", "icon": "mateConnector", "title": { "ru": "Соединитель (mate connector)", "en": "Mate connector" } },
+        { "id": "variable", "icon": "variable", "title": { "ru": "Переменная", "en": "Variable" } },
+        { "id": "import", "icon": "import", "title": { "ru": "Импорт", "en": "Import" } }
+      ]
+    },
+    {
+      "id": "assemblies",
+      "title": { "ru": "Сборки", "en": "Assemblies" },
+      "pages": [{ "id": "assembly", "icon": "assembly", "title": { "ru": "Сборка", "en": "Assembly" } }]
+    },
+    {
+      "id": "drawings",
+      "title": { "ru": "Чертежи", "en": "Drawings" },
+      "pages": [{ "id": "drawings", "icon": "drawing", "title": { "ru": "Чертежи", "en": "Drawings" } }]
+    },
+    {
+      "id": "more",
+      "title": { "ru": "Дополнительно", "en": "More" },
+      "pages": [
+        { "id": "offline", "icon": "download", "title": { "ru": "Офлайн-работа и хранение", "en": "Offline use and storage" } },
+        { "id": "agent-api", "title": { "ru": "Agent API", "en": "Agent API" } },
+        { "id": "help-authoring", "icon": "edit", "title": { "ru": "Как устроена справка", "en": "About this help" } }
+      ]
+    }
+  ]
+}
