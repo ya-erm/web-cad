@@ -72,8 +72,15 @@ As you draw, the cursor snaps to existing geometry, the target is highlighted, a
 | To the midpoint of a line | Midpoint | [Midpoint](constraint-midpoint) |
 | To the origin | Coincident | Point fixed at the origin |
 | Horizontal / vertical from the previous point | Horizontal / vertical | The line becomes [horizontal](constraint-horizontal) / [vertical](constraint-vertical) |
+| A line parallel / perpendicular to the line it starts from, or to an acquired line | Parallel / perpendicular | [Parallel](constraint-parallel) / [perpendicular](constraint-perpendicular) to that line |
+| A line started at the end of an arc (or on a circle) goes along its tangent | Tangent | [Tangent](constraint-tangent) to the arc |
+| On the extension of an acquired line | Coincident | Point on the line (on its extension) |
 
-**Acquiring points.** Hover over a sketch point for about ¼ second — the point is "acquired" and gets an orange halo (the last two acquired points are remembered). If you then move the cursor away from it exactly horizontally or vertically, an orange dotted guide and the horizontal or vertical icon appear. Clicking places the new point in line with the acquired one and adds a horizontal or vertical constraint between them. Use this to align rectangle corners, circle centers and line endpoints.
+**Acquiring points and lines.** Hover over a sketch point or line for about ¼ second — it is "acquired": a point gets an orange halo, a line is highlighted orange (the last three are remembered). If you then move the cursor away from an acquired point exactly horizontally or vertically, an orange dotted guide and the horizontal or vertical icon appear. Clicking places the new point in line with the acquired one and adds a horizontal or vertical constraint between them. Use this to align rectangle corners, circle centers and line endpoints.
+
+**Line direction.** While a line is drawn, its direction snaps to parallel and perpendicular of the line it starts from (say, the previous line of a chain) and of an acquired line, and — for a line started at the end of an arc — to the tangent. A dotted guide continues the inferred direction past the cursor, the constraint icon is shown at the cursor, and a click adds it. Horizontal and vertical win: when the direction is one of them, a horizontal or vertical constraint is made.
+
+**Line extension.** Bring the cursor to the extension of an acquired line beyond its end — the point goes onto the extension (a dotted guide from the line's end), and a click adds a point-on-line constraint. Together with the horizontal or vertical from the previous point, the end of the new line goes exactly where they cross.
 
 ```figure
 image: ../images/sketch-inference.png

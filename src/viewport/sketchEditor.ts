@@ -12,6 +12,7 @@ import { configuredOf } from '../core/config';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { sampleEntity } from '../sketch/curves';
 import { arcAngles, closestPointOnEntity, entityMap, naturalHandles, pointOf, type EntityMap } from '../sketch/curves';
+import { extensionPoint, inferDirection, type DirectionInference } from '../sketch/inference';
 import { computeRegions } from '../sketch/regions';
 import { solveSketch, frozenValues, initialVariant, measureConstraint, symmetryFit } from '../sketch/solver';
 import {
@@ -154,6 +155,8 @@ export class SketchEditor {
   private cursor: Vec2 = [0, 0];
   private snap: Snap | null = null;
   private hvSnap: 'h' | 'v' | null = null;
+  /** The direction of the line being drawn inferred from geometry (parallel / perpendicular / tangent). */
+  private dirSnap: DirectionInference | null = null;
   private drag: DragState | null = null;
   private pressed: { x: number; y: number; hit: string | null } | null = null;
   private box: { x0: number; y0: number; x1: number; y1: number; el: HTMLDivElement } | null = null;
@@ -463,8 +466,27 @@ export class SketchEditor {
     return owner ? { id: owner.id, type: owner.type, dist: hit.dist } : null;
   }
 
+  /** The lines / arcs the line being drawn starts on: the previous line of the chain, the curve of its start point. */
+  private startRefs(): string[] {
+    if (this.tool.k !== 'line') return [];
+    const map = this.map();
+    const st = this.tool.start.snap;
+    const at = this.tool.chainPoint ?? (st.kind === 'point' ? st.id : undefined);
+    const pt = at ? map.get(at) : undefined;
+    const out = pt?.type === 'point' && pt.owner ? [pt.owner] : [];
+    if (st.kind === 'curve' || st.kind === 'extension') out.push(st.id);
+    return out;
+  }
+
+  /** Acquired lines (hovered a moment while drawing): parallel / perpendicular and their extensions. */
+  private acquiredLines(): string[] {
+    const map = this.map();
+    return this.acquired.filter((id) => map.get(id)?.type === 'line');
+  }
+
   private computeSnap(x: number, y: number, p: Vec2, exclude?: Set<string>, anchor?: Vec2): Snap {
     this.hvSnap = null;
+    this.dirSnap = null;
     const map = this.map();
     const rawHit = this.hitEntity(x, y, exclude);
     const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' ? rawHit : null;
@@ -532,7 +554,15 @@ export class SketchEditor {
     }
     this.hvSnap = anchorH ? 'h' : anchorV ? 'v' : null;
     if (hId || vId) return { kind: 'align', pos: [ax, ay], h: hId, v: vId };
+    // on the extension of an acquired line: alone, or where the horizontal / vertical guide crosses it
+    const ext = extensionPoint(map, this.acquiredLines().filter((id) => !exclude?.has(id)), p, this.px, anchorH ? { y: ay } : anchorV ? { x: ax } : undefined);
+    if (ext) return { kind: 'extension', id: ext.id, pos: ext.pos };
     if (anchorH || anchorV) return { kind: 'none', pos: [ax, ay] };
+    // the line being drawn: parallel / perpendicular to a line, tangent to the arc it starts on
+    if (this.tool.k === 'line' && anchor) {
+      this.dirSnap = inferDirection(map, anchor, p, this.acquiredLines(), this.startRefs(), this.px);
+      if (this.dirSnap) return { kind: 'none', pos: this.dirSnap.pos };
+    }
     return { kind: 'none', pos: p };
   }
 
@@ -550,13 +580,16 @@ export class SketchEditor {
     this.engine.setCursor(c);
   }
 
-  /** Points acquired for inference by hovering them for a moment while drawing (last two). */
+  /** Points and lines acquired for inference by hovering them for a moment while drawing (last three). */
   private acquired: string[] = [];
   private acquireTimer: ReturnType<typeof setTimeout> | null = null;
   private acquireCandidate: string | null = null;
 
   private trackAcquire() {
-    const id = this.snap?.kind === 'point' && DRAW_TOOLS.has(this.toolName) ? this.snap.id : null;
+    // a point (alignment) or a line (parallel, perpendicular, extension)
+    const s = this.snap;
+    const line = s?.kind === 'curve' && this.map().get(s.id)?.type === 'line';
+    const id = (s?.kind === 'point' || line) && DRAW_TOOLS.has(this.toolName) ? s.id : null;
     if (id === this.acquireCandidate) return;
     this.acquireCandidate = id;
     if (this.acquireTimer) clearTimeout(this.acquireTimer);
@@ -565,7 +598,7 @@ export class SketchEditor {
     this.acquireTimer = setTimeout(() => {
       this.acquireTimer = null;
       if (this.acquireCandidate !== id || !this.active) return;
-      this.acquired = [...this.acquired.filter((x) => x !== id), id].slice(-2);
+      this.acquired = [...this.acquired.filter((x) => x !== id), id].slice(-3);
       this.updatePreview();
     }, 250);
   }
@@ -573,11 +606,12 @@ export class SketchEditor {
   private showInference(x: number, y: number) {
     const s = this.snap;
     // the constraint that a click / drop will create, shown with its glyph (Onshape)
-    const kinds: ('coincident' | 'midpoint' | 'horizontal' | 'vertical')[] = [];
-    if (s?.kind === 'point' || s?.kind === 'curve' || s?.kind === 'origin') kinds.push('coincident');
+    const kinds: ('coincident' | 'midpoint' | 'horizontal' | 'vertical' | 'parallel' | 'perpendicular' | 'tangent')[] = [];
+    if (s?.kind === 'point' || s?.kind === 'curve' || s?.kind === 'origin' || s?.kind === 'extension') kinds.push('coincident');
     else if (s?.kind === 'midpoint') kinds.push('midpoint');
     if (this.hvSnap === 'h' || (s?.kind === 'align' && s.h)) kinds.push('horizontal');
     if (this.hvSnap === 'v' || (s?.kind === 'align' && s.v)) kinds.push('vertical');
+    if (this.dirSnap) kinds.push(this.dirSnap.kind);
     if (!kinds.length || (this.toolName === 'select' && !this.drag)) {
       this.inferLabel.style.display = 'none';
       return;
@@ -1000,6 +1034,7 @@ export class SketchEditor {
         let lineId = '';
         let first = st.firstPoint;
         const hv = this.hvSnap;
+        const dir = this.dirSnap;
         this.change((d) => {
           const l = addLine(d, st.start.pos, pos, cons);
           lineId = l.id;
@@ -1008,6 +1043,8 @@ export class SketchEditor {
           applySnap(d, l.p2, snap);
           if (hv === 'h') addConstraint(d, 'horizontal', [l.id]);
           else if (hv === 'v') addConstraint(d, 'vertical', [l.id]);
+          // inferred from geometry (Onshape): parallel / perpendicular to a line, tangent to the arc it starts on
+          else if (dir) addConstraint(d, dir.kind, dir.kind === 'tangent' ? [dir.ref, l.id] : [l.id, dir.ref]);
           else {
             const dx = Math.abs(pos[0] - st.start.pos[0]);
             const dy = Math.abs(pos[1] - st.start.pos[1]);
@@ -3015,21 +3052,53 @@ export class SketchEditor {
         o.renderOrder = 33;
         this.preview.add(o);
       }
+      // acquired lines: drawn over in the inference colour
+      const lines: number[] = [];
+      for (const id of this.acquiredLines()) {
+        const e = map.get(id);
+        if (e?.type !== 'line') continue;
+        const a = pointOf(map, e.p1);
+        const b = pointOf(map, e.p2);
+        lines.push(a[0], a[1], 0, b[0], b[1], 0);
+      }
+      if (lines.length) {
+        const l = fatSegments(lines, lineMaterial(COLORS.inference, 2.5, { depthTest: false }));
+        l.renderOrder = 32;
+        this.preview.add(l);
+      }
       const s = this.snap;
+      const guides: number[] = [];
       if (s?.kind === 'align') {
-        const guides: number[] = [];
         for (const id of [s.h, s.v]) {
           const e = id ? map.get(id) : undefined;
           if (e && e.type === 'point') guides.push(e.x, e.y, 0, s.pos[0], s.pos[1], 0);
         }
-        if (guides.length) {
-          const m = lineMaterial(COLORS.inference, 1.5, { dashed: true, depthTest: false });
-          m.dashSize = 3 * this.px;
-          m.gapSize = 3 * this.px;
-          const l = fatSegments(guides, m);
-          l.renderOrder = 33;
-          this.preview.add(l);
+      }
+      // the extension of a line: from its nearer end to the point
+      if (s?.kind === 'extension') {
+        const e = map.get(s.id);
+        if (e?.type === 'line') {
+          const a = pointOf(map, e.p1);
+          const b = pointOf(map, e.p2);
+          const end = Math.hypot(a[0] - s.pos[0], a[1] - s.pos[1]) < Math.hypot(b[0] - s.pos[0], b[1] - s.pos[1]) ? a : b;
+          guides.push(end[0], end[1], 0, s.pos[0], s.pos[1], 0);
         }
+      }
+      // the inferred direction of the line being drawn: on past the cursor
+      const anchor = this.anchorPoint();
+      if (this.dirSnap && anchor && s) {
+        const d = this.dirSnap.dir;
+        const t = (s.pos[0] - anchor[0]) * d[0] + (s.pos[1] - anchor[1]) * d[1];
+        const k = t + Math.sign(t) * 40 * this.px;
+        guides.push(anchor[0], anchor[1], 0, anchor[0] + d[0] * k, anchor[1] + d[1] * k, 0);
+      }
+      if (guides.length) {
+        const m = lineMaterial(COLORS.inference, 1.5, { dashed: true, depthTest: false });
+        m.dashSize = 3 * this.px;
+        m.gapSize = 3 * this.px;
+        const l = fatSegments(guides, m);
+        l.renderOrder = 33;
+        this.preview.add(l);
       }
     }
     this.engine.requestRender();

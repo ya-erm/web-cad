@@ -12,6 +12,8 @@ export type Snap =
   | { kind: 'origin'; pos: Vec2 }
   /** Inference from acquired points: same y as point `h` (horizontal), same x as point `v` (vertical). */
   | { kind: 'align'; pos: Vec2; h?: string; v?: string }
+  /** On the extension of line `id` beyond its ends (the point goes on the line, Onshape inference). */
+  | { kind: 'extension'; id: string; pos: Vec2 }
   | { kind: 'none'; pos: Vec2 };
 
 export function addPoint(d: SketchData, p: Vec2, owner?: string, construction?: boolean): string {
@@ -37,6 +39,7 @@ export function applySnap(d: SketchData, pointId: string, snap: Snap | null | un
       if (snap.id !== pointId) addConstraint(d, 'coincident', [snap.id, pointId]);
       break;
     case 'curve':
+    case 'extension':
       addConstraint(d, 'coincident', [pointId, snap.id]);
       break;
     case 'midpoint':
