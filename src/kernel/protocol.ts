@@ -57,6 +57,8 @@ export interface PartMesh {
   hidden: boolean;
   /** Brought from another Part Studio (Derived): its colour is the source's, not a palette colour. */
   derived?: boolean;
+  /** A surface body (faces with no solid): no volume, listed under Surfaces. */
+  surface?: boolean;
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;

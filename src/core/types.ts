@@ -286,9 +286,19 @@ export interface ChamferParams {
   tangentPropagation: boolean;
 }
 
-/** Onshape Delete face (with Heal): the gap closes from the faces around. */
+/** Onshape Delete face: with Heal the gap closes from the faces around; without, the part becomes a surface. */
 export interface DeleteFaceParams {
   faces: SelRef[];
+  /** None — on (heal). */
+  heal?: boolean;
+}
+
+/** Onshape Offset surface: a surface body offset from faces (0 — a copy of them). */
+export interface OffsetSurfaceParams {
+  faces: SelRef[];
+  distance: string;
+  /** The other way (into the material). */
+  flip: boolean;
 }
 
 /** Onshape Move face: the faces move, the faces around them extend or shrink to follow. */
@@ -326,7 +336,8 @@ export interface DraftParams {
 
 export interface HoleParams {
   points: SelRef[];
-  style: 'simple' | 'counterbore' | 'countersink';
+  /** Counterdrill (Onshape): a counterbore with a countersink at its mouth. */
+  style: 'simple' | 'counterbore' | 'countersink' | 'counterdrill';
   endType: 'blind' | 'throughAll';
   diameter: string;
   depth: string;
@@ -591,6 +602,7 @@ export interface FeatureParamsMap {
   deleteFace: DeleteFaceParams;
   moveFace: MoveFaceParams;
   replaceFace: ReplaceFaceParams;
+  offsetSurface: OffsetSurfaceParams;
   hole: HoleParams;
   linearPattern: LinearPatternParams;
   circularPattern: CircularPatternParams;

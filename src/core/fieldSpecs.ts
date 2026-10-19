@@ -70,9 +70,10 @@ export const FIELD_SPECS: FieldSpecs = {
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
   thicken: {
-    faces: { label: 'Faces and sketch regions', accepts: ['region', 'face'] },
+    faces: { label: 'Faces, surfaces and sketch regions', accepts: ['region', 'face', 'part'] },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
+  offsetSurface: { faces: { label: 'Faces to offset', accepts: ['face'] } },
   fillet: {
     edges: { label: 'Edges and faces to fillet', accepts: ['edge', 'face'] },
     vertices: { label: 'Vertices with their own radius', accepts: ['vertex'], parallel: 'vertexRadii' },

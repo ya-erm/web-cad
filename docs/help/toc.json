@@ -102,6 +102,7 @@
         { "id": "move-face", "icon": "moveFace", "title": { "ru": "Переместить грань", "en": "Move face" } },
         { "id": "replace-face", "icon": "replaceFace", "title": { "ru": "Заменить грань", "en": "Replace face" } },
         { "id": "delete-face", "icon": "deleteFace", "title": { "ru": "Удалить грань", "en": "Delete face" } },
+        { "id": "offset-surface", "icon": "offsetSurface", "title": { "ru": "Смещение поверхности", "en": "Offset surface" } },
         { "id": "hole", "icon": "hole", "title": { "ru": "Отверстие", "en": "Hole" } },
         { "id": "linear-pattern", "icon": "linearPattern", "title": { "ru": "Линейный массив", "en": "Linear pattern" } },
         { "id": "circular-pattern", "icon": "circularPattern", "title": { "ru": "Круговой массив", "en": "Circular pattern" } },

@@ -26,7 +26,9 @@ The boundary of the selected faces must close in loops over the faces around it 
 | **The faces around the selected ones cannot close the gap** | Only part of a feature is selected (say, one wall of a pocket) or the faces around are not planar. Select the whole hole, pocket or boss. |
 | **These faces cannot be healed** | For one, a single planar face of a block is selected: there is nothing to extend. To move such a face, use [Move face](move-face). |
 
-> **Limitation.** Deleting without healing (turning the part into a surface) is not supported: WebCAD has no surface bodies yet.
+## Without healing {#no-heal}
+
+Clear **Heal** and the selected faces simply go: the part becomes a [surface](offset-surface#surfaces) of the faces left (as Delete face without Heal in Onshape). That opens a part up, say, to build on its faces and [thicken](thicken) the shell afterwards.
 
 ## See also {#see-also}
 

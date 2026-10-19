@@ -706,6 +706,35 @@ textarea {
   margin-left: auto;
   position: relative;
 }
+/* tool buttons that keep to the room they have: the rest behind » */
+.tb-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* buttons keep their size (they are measured, not squeezed) */
+.tb-row > * {
+  flex: none;
+}
+.tb-more {
+  flex: none;
+  font-size: 16px;
+  font-weight: 600;
+}
+.tb-more-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 300px;
+  padding: 6px;
+  z-index: 50;
+}
+.tb-more-panel .tb-sep {
+  display: none;
+}
 .tool-search input {
   width: 180px;
   height: 28px;

@@ -75,6 +75,8 @@ export interface BuildState {
   vars: VariableTable;
   /** Every part id ever created, in creation order (default "Part N" names). */
   partOrder: string[];
+  /** The ids of those made as surfaces, in creation order (default "Surface N" names; not counted as parts). */
+  surfaceOrder: string[];
   /** Parts brought from another Part Studio (Derived): their names and colours there. */
   derived: Map<string, { name: string; color?: string }>;
   /** Cosmetic threads of tapped holes (and their copies). */
@@ -91,6 +93,7 @@ export function emptyState(): BuildState {
     tools: new Map(),
     vars: {},
     partOrder: [],
+    surfaceOrder: [],
     derived: new Map(),
     threads: new Map(),
   };
@@ -106,6 +109,7 @@ export function cloneState(s: BuildState): BuildState {
     tools: new Map(s.tools),
     vars: { ...s.vars },
     partOrder: s.partOrder,
+    surfaceOrder: s.surfaceOrder,
     derived: new Map(s.derived),
     threads: new Map(s.threads),
   };
@@ -114,6 +118,12 @@ export function cloneState(s: BuildState): BuildState {
 export function setPart(st: BuildState, id: string, shape: Shape3D) {
   if (!st.partOrder.includes(id)) st.partOrder = [...st.partOrder, id];
   st.parts.set(id, { id, shape });
+}
+
+/** A new surface body (named "Surface N"). */
+export function setSurface(st: BuildState, id: string, shape: Shape3D) {
+  if (!st.surfaceOrder.includes(id)) st.surfaceOrder = [...st.surfaceOrder, id];
+  setPart(st, id, shape);
 }
 
 export function removePart(st: BuildState, id: string) {

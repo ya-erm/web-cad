@@ -309,6 +309,14 @@ const ICONS = {
       <path d="M12 8 V20" {...THIN} {...DASH} />
     </>
   ),
+  // A grey block's top face and, above it, its offset copy — a blue sheet with no thickness.
+  offsetSurface: (
+    <>
+      {obox(3, 13, 12, 8, 4.5, 4.5, GREY_SHADE)}
+      <polygon points="3,7.5 7.5,3 19.5,3 15,7.5" fill={BLUE_FILL} stroke={BLUE} />
+      <path d="M9 12 V8.5 M7.5 10 L9 8.5 L10.5 10" stroke={BLUE} {...THIN} />
+    </>
+  ),
   // A grey block whose top face (blue) is taken away: the remove badge.
   deleteFace: (
     <>

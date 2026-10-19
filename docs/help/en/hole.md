@@ -8,7 +8,7 @@ Creates drilled holes — simple, counterbored or countersunk — at sketch poin
 
 1. Draw a sketch on a part face and place [points](sketch-point) at the centers of the future holes.
 2. Click **Hole**.
-3. Choose the type: **Simple**, **Counterbore** or **Countersink**.
+3. Choose the **Hole style**: **Simple**, **Counterbore**, **Countersink** or **Counterbore and countersink**.
 4. Select sketch points (or circular edges — then the hole is placed at their center).
 5. Choose the **Termination** and set the **Diameter** and the other dimensions — or choose **Standard: ISO** and the fastener size, see [below](#standard). Click ✓ (`Enter`).
 
@@ -26,14 +26,14 @@ width: 480
 
 | Field | Description |
 |---|---|
-| **Simple** / **Counterbore** / **Countersink** | Hole type. |
+| **Hole style** | **Simple**, **Counterbore**, **Countersink** or **Counterbore and countersink** (like Onshape's Counterdrill): a counterbore with a countersink at its mouth — so a screw head does not catch a sharp edge, say. |
 | **Sketch points to place holes** | Sketch points or circular edges. |
 | **Termination** | **Blind** or **Through all**. |
 | **Diameter** | Hole diameter (default 5 mm). |
 | **Depth** | For **Blind** (default 10 mm). |
 | **Tip angle** | The cone at the bottom of a blind hole (default 118°, like a drill bit). |
-| **Counterbore diameter**, **Counterbore depth** | For **Counterbore** (default 9 and 4 mm). The counterbore diameter must be larger than the hole diameter. |
-| **Countersink diameter**, **Countersink angle** | For **Countersink** (default 10 mm and 90°). |
+| **Counterbore diameter**, **Counterbore depth** | For **Counterbore** and **Counterbore and countersink** (default 9 and 4 mm). The counterbore diameter must be larger than the hole diameter. |
+| **Countersink diameter**, **Countersink angle** | For **Countersink** and **Counterbore and countersink** (default 10 mm and 90°). With both, the countersink is wider than the counterbore and ends above its floor. |
 | **Standard** | **Custom** — the sizes from the fields above; **ISO** — from the standards' tables, see [below](#standard). |
 | **Tapped depth** | For a **Blind** tapped hole: how deep the thread goes (no deeper than the hole). |
 | **Merge with all** / **Merge scope** | The parts to cut the holes from: all parts or only the selected ones. |
@@ -44,7 +44,7 @@ With **Standard: ISO** the sizes come from the tables for metric fasteners M1.6�
 
 - **Type: Clearance** — a hole for a screw to pass, ISO 273. **Fit**: **Close**, **Normal** or **Loose** (fine / medium / coarse), e.g. for M6 — 6.4 / 6.6 / 7 mm.
 - **Type: Tapped** — a hole for a tap (the drill by ISO 2306, for M6 — 5 mm) with a [cosmetic thread](#thread). **Pitch**: coarse (the default) or one of the fine ones of ISO 261; a fine pitch drills the major diameter minus the pitch and is designated M8×1.
-- **Counterbore** — a counterbore for an ISO 4762 socket head cap screw (by DIN 974-1), **Countersink** — a 90° countersink for an ISO 10642 countersunk screw.
+- **Counterbore** — a counterbore for an ISO 4762 socket head cap screw (by DIN 974-1), **Countersink** — a 90° countersink for an ISO 10642 countersunk screw, **Counterbore and countersink** — that counterbore with a 0.5 mm × 45° chamfer at its mouth.
 - Choosing a size sets the depths as Onshape does: the thread 2 diameters deep, the hole 3 pitches deeper. You can change them.
 
 ## Cosmetic thread {#thread}

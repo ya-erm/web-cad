@@ -20,6 +20,7 @@ export const FEATURE_HELP: Record<FeatureType, string> = {
   deleteFace: 'delete-face',
   moveFace: 'move-face',
   replaceFace: 'replace-face',
+  offsetSurface: 'offset-surface',
   hole: 'hole',
   linearPattern: 'linear-pattern',
   circularPattern: 'circular-pattern',

@@ -31,6 +31,8 @@ import {
   prism,
   rotated,
   scaled,
+  isSurface,
+  sewFaces,
   shapesTouch,
   simplified,
   solidsOf,
@@ -57,7 +59,7 @@ import {
   worldGeometryForRef,
   type ProfileFace,
 } from './refs';
-import { adoptThreads, removePart, setPart, type BuildState, type PartState, type ThreadState } from './state';
+import { adoptThreads, removePart, setPart, setSurface, type BuildState, type PartState, type ThreadState } from './state';
 import { isoHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
 import { wrapRegion } from './wrap';
@@ -159,8 +161,9 @@ function addNewParts(st: BuildState, shape: Shape3D, fid: string) {
   solidsOf(shape).forEach((s, i) => setPart(st, newPartId(st, `${fid}.${i}`), s));
 }
 
+/** The parts a feature merges with: solids only (surfaces stay as they are). */
 function scopeParts(st: BuildState, scope: MergeScope): PartState[] {
-  return scope.mergeAll ? [...st.parts.values()] : resolveParts(st, scope.parts);
+  return (scope.mergeAll ? [...st.parts.values()] : resolveParts(st, scope.parts)).filter((p) => !isSurface(p.shape));
 }
 
 /** Apply a tool body with a boolean operation (Onshape New/Add/Remove/Intersect semantics). */
@@ -555,6 +558,48 @@ function buildLoft(ctx: Ctx, f: FeatureOf<'loft'>): FeatureOutput {
   return { tool, op: p.op };
 }
 
+/** Faces or a surface thickened `t` along their normals into a solid (turned the right way round if it came inside out). */
+function thickOf(s: R.AnyShape, t: number): Shape3D {
+  const oc = R.getOC();
+  const b = new oc.BRepOffsetAPI_MakeThickSolid();
+  b.MakeThickSolidBySimple(s.wrapped, t);
+  b.Build(new oc.Message_ProgressRange());
+  if (!b.IsDone()) fail('Thicken failed: the thickness may be too large for the curvature');
+  let out = R.cast(b.Shape()) as Shape3D;
+  b.delete();
+  const props = R.measureShapeVolumeProperties(out);
+  if (props.volume < 0) out = R.cast(out.wrapped.Reversed()) as Shape3D;
+  props.delete();
+  return out;
+}
+
+/**
+ * A surface's planar faces thickened by `t` each: at a straight edge where two of them turn away from each other
+ * (the way they are thickened) the slabs leave a wedge between them — filled up to where the offset planes meet.
+ */
+function cornerFills(shape: Shape3D, t: number): Shape3D[] {
+  const topo = topologyOf(shape);
+  const out: Shape3D[] = [];
+  topo.edgeInfo.forEach((e, ei) => {
+    if (e.type !== 'LINE' || e.seam) return;
+    const two = topo.faceInfo.map((f, i) => ({ f, i })).filter(({ f }) => f.edges?.includes(ei));
+    if (two.length !== 2 || two.some(({ f }) => f.type !== 'PLANE' || !f.normal)) return;
+    const [a, b] = two.map(({ f }) => f);
+    const n1 = a.normal!;
+    const n2 = b.normal!;
+    const c = v3.dot(n1, n2);
+    if (c > 1 - 1e-9 || c < -1 + 1e-6) return;
+    // b lies behind a's plane (seen the way the slabs grow): the slabs part there
+    if (v3.dot(v3.sub(b.center, e.start), n1) * Math.sign(t) >= 0) return;
+    const P = e.start;
+    const corner = v3.scale(v3.add(n1, n2), t / (1 + c));
+    const section = R.makePolygon([P, v3.add(P, v3.scale(n1, t)), v3.add(P, corner), v3.add(P, v3.scale(n2, t))]);
+    const along = v3.sub(e.end, e.start);
+    out.push(prism(section, v3.norm(along), 0, v3.len(along)));
+  });
+  return out;
+}
+
 function buildThicken(ctx: Ctx, f: FeatureOf<'thicken'>): FeatureOutput {
   const p = f.params;
   const st = ctx.st;
@@ -567,14 +612,20 @@ function buildThicken(ctx: Ctx, f: FeatureOf<'thicken'>): FeatureOutput {
     } else if (r.kind === 'face') {
       const { face, info } = resolveFace(st, r);
       if (info.type === 'PLANE' && info.normal) tools.push(prism(face, info.normal, 0, t));
-      else {
-        const oc = R.getOC();
-        const b = new oc.BRepOffsetAPI_MakeThickSolid();
-        b.MakeThickSolidBySimple(face.wrapped, t);
-        b.Build(new oc.Message_ProgressRange());
-        tools.push(R.cast(b.Shape()) as Shape3D);
-        b.delete();
-      }
+      else tools.push(thickOf(face, t));
+    } else if (r.kind === 'part') {
+      // a whole surface body: one face at once, or its faces each (OpenCascade's simple offset wants smooth shells)
+      const part = st.parts.get(r.partId);
+      if (!part) fail('The surface no longer exists');
+      if (!isSurface(part.shape)) fail('Select surfaces, faces or sketch regions to thicken (not solid parts)');
+      const faces = topologyOf(part.shape).faces;
+      const each = faces.map((fc, i) => {
+        const info = topologyOf(part.shape).faceInfo[i];
+        return info.type === 'PLANE' && info.normal ? prism(fc, info.normal, 0, t) : thickOf(fc, t);
+      });
+      // where two planar faces turn away from each other the slabs part: the corner between them, filled
+      each.push(...cornerFills(part.shape, t));
+      tools.push(each.length === 1 ? each[0] : fuseAll(each));
     }
   }
   if (!tools.length) fail('Select faces or sketch regions to thicken');
@@ -891,7 +942,39 @@ function facesByPart(st: BuildState, refs: SelRef[]): Map<string, { part: PartSt
 function buildDeleteFace(ctx: Ctx, f: FeatureOf<'deleteFace'>): FeatureOutput {
   const groups = facesByPart(ctx.st, f.params.faces);
   if (!groups.size) fail('Select faces to delete');
-  for (const { part, faces } of groups.values()) replacePart(ctx.st, part.id, deleteFaces(part.shape, faces), ctx.fid);
+  for (const { part, faces } of groups.values()) {
+    if (f.params.heal === false) {
+      // no healing: the other faces stay, the part becomes a surface (Onshape: Heal off)
+      const all = topologyOf(part.shape).faces;
+      const rest = all.filter((_, i) => !faces.includes(i));
+      if (!rest.length) fail('Every face of the part is selected: delete the part instead');
+      setPart(ctx.st, part.id, sewFaces(rest));
+    } else replacePart(ctx.st, part.id, deleteFaces(part.shape, faces), ctx.fid);
+  }
+  return {};
+}
+
+/** Offset surface (Onshape): a surface body from faces, offset along their normals (0 — a copy of them). */
+function buildOffsetSurface(ctx: Ctx, f: FeatureOf<'offsetSurface'>): FeatureOutput {
+  const p = f.params;
+  const groups = facesByPart(ctx.st, p.faces);
+  if (!groups.size) fail('Select faces to offset');
+  const d = len(ctx, p.distance, 'Distance') * (p.flip ? -1 : 1);
+  let n = 0;
+  for (const { part, faces } of groups.values()) {
+    const all = topologyOf(part.shape).faces;
+    const sheet = sewFaces(faces.map((i) => all[i]));
+    let out = sheet;
+    if (Math.abs(d) > 1e-9) {
+      const oc = R.getOC();
+      const b = new oc.BRepOffsetAPI_MakeOffsetShape();
+      b.PerformByJoin(sheet.wrapped, d, 1e-6, oc.BRepOffset_Mode.BRepOffset_Skin, false, false, oc.GeomAbs_JoinType.GeomAbs_Arc, false, new oc.Message_ProgressRange());
+      if (!b.IsDone()) fail('The faces could not be offset: the distance may be too large for their curvature');
+      out = R.cast(b.Shape()) as Shape3D;
+      b.delete();
+    }
+    setSurface(ctx.st, newPartId(ctx.st, `${ctx.fid}.${n++}`), out);
+  }
   return {};
 }
 
@@ -1026,14 +1109,22 @@ function holeDims(ctx: Ctx, f: FeatureOf<'hole'>, big: number): HoleDims {
   const through = p.endType === 'throughAll';
   const depth = through ? big : len(ctx, p.depth, 'Depth');
   const d: HoleDims = { R0, through, depth, tip: ang(ctx, p.tipAngle, 'Tip angle') };
-  if (p.style === 'counterbore') {
+  if (p.style === 'counterbore' || p.style === 'counterdrill') {
     const R = (std ? std.cboreDiameter : len(ctx, p.cboreDiameter, 'Counterbore diameter')) / 2;
     if (R <= R0) fail('Counterbore diameter must exceed the hole diameter');
     d.cbore = { R, depth: std ? std.cboreDepth : len(ctx, p.cboreDepth, 'Counterbore depth') };
-  } else if (p.style === 'countersink') {
+  }
+  if (p.style === 'countersink') {
     const R = (std ? std.csinkDiameter : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
     if (R <= R0) fail('Countersink diameter must exceed the hole diameter');
     d.csink = { R, angle: std ? std.csinkAngle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle') };
+  } else if (p.style === 'counterdrill' && d.cbore) {
+    // a countersink at the counterbore's mouth (Onshape Counterdrill); ISO: a 0.5 mm × 45° chamfer of it
+    const R = (std ? std.cboreDiameter + 1 : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
+    if (R <= d.cbore.R) fail('Countersink diameter must exceed the counterbore diameter');
+    const angle = std ? Math.PI / 2 : ang(ctx, p.csinkAngle, 'Countersink angle');
+    if ((R - d.cbore.R) / Math.tan(angle / 2) >= d.cbore.depth) fail('The countersink must end above the counterbore floor: a smaller countersink or a deeper counterbore');
+    d.csink = { R, angle };
   }
   if (std?.thread) {
     // a blind hole is threaded as deep as asked (no deeper than the hole), a through one all the way
@@ -1049,7 +1140,11 @@ function holeTool(d: HoleDims, p0: Vec3, drill: Vec3): Shape3D {
   const eps = Math.max(R0 * 0.02, 0.01);
   // profile in (r, z) with z along -drill (z <= 0 is inside material)
   const pts: Vec2[] = [[0, eps]];
-  if (d.cbore) {
+  if (d.cbore && d.csink) {
+    // counterdrill: the countersink down to the counterbore, the counterbore down to the hole
+    const h = (d.csink.R - d.cbore.R) / Math.tan(d.csink.angle / 2);
+    pts.push([d.csink.R + eps * Math.tan(d.csink.angle / 2), eps], [d.cbore.R, -h], [d.cbore.R, -d.cbore.depth], [R0, -d.cbore.depth]);
+  } else if (d.cbore) {
     pts.push([d.cbore.R, eps], [d.cbore.R, -d.cbore.depth], [R0, -d.cbore.depth]);
   } else if (d.csink) {
     const h = (d.csink.R - R0) / Math.tan(d.csink.angle / 2);
@@ -1775,6 +1870,8 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildMoveFace(ctx, feature);
     case 'replaceFace':
       return buildReplaceFace(ctx, feature);
+    case 'offsetSurface':
+      return buildOffsetSurface(ctx, feature);
     case 'hole':
       return buildHole(ctx, feature);
     case 'linearPattern':

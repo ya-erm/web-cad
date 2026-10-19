@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
-import type { Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
+import type { ConstraintType, Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, MeasureResult } from '../kernel/protocol';
 import { defaultParams, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
@@ -63,6 +63,11 @@ export interface SketchSession {
   hint?: string;
   /** A new sketch still waiting for its plane (Onshape): only plane picking works until one is chosen. */
   planePending?: boolean;
+  /**
+   * A constraint tool waiting for its entities (Onshape: the tool first, then the picks): it is added as soon as
+   * the picks make it, and the tool stays on for the next one.
+   */
+  constraint?: ConstraintType;
 }
 
 /** A sketch pattern being created / edited (the pattern itself lives in the sketch data). */
@@ -271,6 +276,7 @@ export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
   deleteFace: 'faces',
   moveFace: 'faces',
   replaceFace: 'faces',
+  offsetSurface: 'faces',
   hole: 'points',
   linearPattern: 'parts',
   circularPattern: 'parts',
@@ -466,7 +472,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       get().showToast('Select a plane or a planar face for the sketch.', 'error');
       return;
     }
-    set({ sketch: { ...s, tool, hint: undefined } });
+    set({ sketch: { ...s, tool, hint: undefined, constraint: undefined } });
   },
 
   updateSketch(fn, undoable = true) {

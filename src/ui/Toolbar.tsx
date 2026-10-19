@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { Children, isValidElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ConstraintType, FeatureType } from '../core/types';
-import { toggleShowConstraints, useEditor, type SketchTool } from '../store/editorStore';
+import { useEditor, type SketchTool } from '../store/editorStore';
 import { useDoc } from '../store/docStore';
 import { getEngine } from '../viewport/engineRef';
 import { Icon, type IconName } from './icons';
@@ -34,6 +34,7 @@ export const FEATURE_TOOLS: (ToolDef | '|')[] = [
   { id: 'moveFace', icon: 'moveFace', label: 'Move face' },
   { id: 'replaceFace', icon: 'replaceFace', label: 'Replace face' },
   { id: 'deleteFace', icon: 'deleteFace', label: 'Delete face' },
+  { id: 'offsetSurface', icon: 'offsetSurface', label: 'Offset surface' },
   '|',
   { id: 'linearPattern', icon: 'linearPattern', label: 'Linear pattern' },
   { id: 'circularPattern', icon: 'circularPattern', label: 'Circular pattern' },
@@ -107,6 +108,84 @@ export const CONSTRAINT_TOOLS: { id: ConstraintType; icon: IconName; label: stri
 
 const tip = (label: string, sc?: string) => (sc ? `${t(label)} (${sc})` : t(label));
 
+/** The » button's width with its gap. */
+const MORE_W = 34;
+
+/**
+ * Tool buttons in a row that keeps to the room it has: those that do not fit go into a panel behind » at its end,
+ * as in Onshape. The buttons' widths are measured once (all shown), then the row shows as many as fit.
+ */
+function OverflowRow({ children }: { children: React.ReactNode }) {
+  const items = Children.toArray(children);
+  const row = useRef<HTMLDivElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
+  const widths = useRef<number[] | null>(null);
+  const [fit, setFit] = useState(items.length);
+  const [open, setOpen] = useState(false);
+  // another set of tools: measured anew
+  const shape = items.map((c) => (isValidElement(c) ? String(c.key) : '')).join('|');
+  useLayoutEffect(() => {
+    widths.current = null;
+    setFit(items.length);
+  }, [shape]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const layout = () => {
+      if (!widths.current) {
+        if (fit < items.length) return;
+        const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+        // with their margins (separators have them)
+        widths.current = [...el.children].slice(0, items.length).map((c) => {
+          const cs = getComputedStyle(c);
+          return c.getBoundingClientRect().width + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0) + gap;
+        });
+      }
+      const w = widths.current;
+      const room = el.clientWidth;
+      const total = w.reduce((a, b) => a + b, 0);
+      let n = w.length;
+      if (total > room) {
+        let used = MORE_W;
+        n = 0;
+        while (n < w.length && used + w[n] <= room) used += w[n++];
+      }
+      if (n !== fit) setFit(n);
+    };
+    layout();
+    const ro = new ResizeObserver(layout);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  // a click outside closes the panel
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest?.('.tb-more-panel, .tb-more')) setOpen(false);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+  const rest = items.slice(fit).filter((c) => !(isValidElement(c) && (c.props as { className?: string }).className === 'tb-sep'));
+  const box = open ? more.current?.getBoundingClientRect() : undefined;
+  return (
+    <div className="tb-row" ref={row}>
+      {items.slice(0, fit)}
+      {rest.length > 0 && (
+        <button ref={more} className={'icon-btn tb-more' + (open ? ' active' : '')} title={t('More tools')} onClick={() => setOpen(!open)}>
+          »
+        </button>
+      )}
+      {box && rest.length > 0 && (
+        // placed in the window: the toolbar clips what sticks out of it
+        <div className="dropdown tb-more-panel" style={{ position: 'fixed', top: box.bottom + 4, right: Math.max(8, window.innerWidth - box.right) }} onClickCapture={() => setTimeout(() => setOpen(false))}>
+          {rest}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Feature tools whose name — in the interface language or in English — has the query in it: names that start with
  * it first, then those with a word that does, then the rest.
@@ -156,21 +235,23 @@ function FeatureToolbar() {
         <Icon name="redo" />
       </button>
       <div className="tb-sep" />
-      {FEATURE_TOOLS.map((tool, i) =>
-        tool === '|' ? (
-          <div key={i} className="tb-sep" />
-        ) : (
-          <button
-            key={tool.id}
-            className={'icon-btn' + (editing?.draft.type === tool.id ? ' active' : '')}
-            title={tip(tool.label, tool.shortcut)}
-            disabled={!!editing}
-            onClick={() => start(tool.id)}
-          >
-            <Icon name={tool.icon} />
-          </button>
-        ),
-      )}
+      <OverflowRow>
+        {FEATURE_TOOLS.map((tool, i) =>
+          tool === '|' ? (
+            <div key={i} className="tb-sep" />
+          ) : (
+            <button
+              key={tool.id}
+              className={'icon-btn' + (editing?.draft.type === tool.id ? ' active' : '')}
+              title={tip(tool.label, tool.shortcut)}
+              disabled={!!editing}
+              onClick={() => start(tool.id)}
+            >
+              <Icon name={tool.icon} />
+            </button>
+          ),
+        )}
+      </OverflowRow>
       <div className="tool-search">
         <span className="search-icon">
           <Icon name="search" size={16} />
@@ -225,7 +306,6 @@ function FeatureToolbar() {
 
 function SketchToolbar() {
   const sketch = useEditor((s) => s.sketch);
-  const showConstraints = useEditor((s) => s.showConstraints);
   const setTool = useEditor((s) => s.setSketchTool);
   const commit = useEditor((s) => s.commitEditing);
   const undo = useEditor((s) => s.sketchUndo);
@@ -246,55 +326,57 @@ function SketchToolbar() {
         <Icon name="redo" />
       </button>
       <div className="tb-sep" />
-      {SKETCH_TOOLS.map((tool, i) =>
-        tool === '|' ? (
-          <div key={i} className="tb-sep" />
-        ) : (
-          <button
-            key={tool.id}
-            className={'icon-btn' + (sketch.tool === tool.id ? ' active' : '')}
-            title={tip(tool.label, tool.shortcut)}
-            disabled={off}
-            onClick={() => setTool(tool.id)}
-          >
-            <Icon name={tool.icon} />
-          </button>
-        ),
-      )}
-      <button className="icon-btn" title={tip('Sketch transform')} disabled={off} onClick={() => getEngine()?.sketchEditor.startTransform()}>
-        <Icon name="sketchTransform" />
-      </button>
-      <button className="icon-btn" title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
-        <Icon name="sketchMirror" />
-      </button>
-      <button className="icon-btn" title={tip('Sketch linear pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('linear')}>
-        <Icon name="sketchLinearPattern" />
-      </button>
-      <button className="icon-btn" title={tip('Sketch circular pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('circular')}>
-        <Icon name="sketchCircularPattern" />
-      </button>
-      <div className="tb-sep" />
-      <button
-        className={'icon-btn' + (sketch.construction ? ' active' : '')}
-        title={tip('Construction', 'Q')}
-        disabled={off}
-        onClick={() => getEngine()?.sketchEditor.toggleConstruction()}
-      >
-        <Icon name="construction" />
-      </button>
-      <div className="tb-sep" />
-      <button
-        className={'icon-btn' + (showConstraints ? ' active' : '')}
-        title={tip(showConstraints ? 'Hide constraints' : 'Show constraints', 'Shift+C')}
-        onClick={toggleShowConstraints}
-      >
-        <Icon name={showConstraints ? 'eye' : 'eyeOff'} />
-      </button>
-      {CONSTRAINT_TOOLS.map((c) => (
-        <button key={c.id} className="icon-btn" title={tip(c.label, c.shortcut)} disabled={off} onClick={() => getEngine()?.sketchEditor.applyConstraint(c.id)}>
-          <Icon name={c.icon} />
+      <OverflowRow>
+        {SKETCH_TOOLS.map((tool, i) =>
+          tool === '|' ? (
+            <div key={i} className="tb-sep" />
+          ) : (
+            <button
+              key={tool.id}
+              className={'icon-btn' + (sketch.tool === tool.id && !sketch.constraint ? ' active' : '')}
+              title={tip(tool.label, tool.shortcut)}
+              disabled={off}
+              onClick={() => setTool(tool.id)}
+            >
+              <Icon name={tool.icon} />
+            </button>
+          ),
+        )}
+        <button className="icon-btn" title={tip('Sketch transform')} disabled={off} onClick={() => getEngine()?.sketchEditor.startTransform()}>
+          <Icon name="sketchTransform" />
         </button>
-      ))}
+        <button className="icon-btn" title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
+          <Icon name="sketchMirror" />
+        </button>
+        <button className="icon-btn" title={tip('Sketch linear pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('linear')}>
+          <Icon name="sketchLinearPattern" />
+        </button>
+        <button className="icon-btn" title={tip('Sketch circular pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('circular')}>
+          <Icon name="sketchCircularPattern" />
+        </button>
+        <div className="tb-sep" />
+        <button
+          className={'icon-btn' + (sketch.construction ? ' active' : '')}
+          title={tip('Construction', 'Q')}
+          disabled={off}
+          onClick={() => getEngine()?.sketchEditor.toggleConstruction()}
+        >
+          <Icon name="construction" />
+        </button>
+        <div className="tb-sep" />
+        {CONSTRAINT_TOOLS.map((c) => (
+          <button
+            key={c.id}
+            className={'icon-btn' + (sketch.constraint === c.id ? ' active' : '')}
+            title={tip(c.label, c.shortcut)}
+            disabled={off}
+            // on again: off (as Esc)
+            onClick={() => (sketch.constraint === c.id ? setTool('select') : getEngine()?.sketchEditor.applyConstraint(c.id))}
+          >
+            <Icon name={c.icon} />
+          </button>
+        ))}
+      </OverflowRow>
     </div>
   );
 }

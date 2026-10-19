@@ -48,7 +48,7 @@ export class ViewCube {
   /** Right click on the cube: its menu (window coordinates). */
   onMenu: (x: number, y: number) => void = () => {};
   /** A press on the cube: a click picks a view, a drag (past a few pixels) turns the camera. */
-  private press: { x: number; y: number; dragged: boolean } | null = null;
+  private press: { x: number; y: number; dragged: boolean; right: boolean } | null = null;
 
   constructor(size = 110) {
     this.canvas = document.createElement('canvas');
@@ -100,16 +100,16 @@ export class ViewCube {
     this.canvas.addEventListener('pointercancel', () => (this.press = null));
     this.canvas.addEventListener('pointerleave', () => !this.press && this.setHover(-1, null));
     this.canvas.addEventListener('contextmenu', (e) => {
-      // the cube's own menu, not the browser's ("Save image as…")
+      // not the browser's menu ("Save image as…"): the cube's own opens on a right click that was not a drag
       e.preventDefault();
       e.stopPropagation();
-      this.onMenu(e.clientX, e.clientY);
     });
   }
 
   private onDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    this.press = { x: e.clientX, y: e.clientY, dragged: false };
+    // the left or the right button turns the view by dragging (the right one: the menu when it was not dragged)
+    if (e.button !== 0 && e.button !== 2) return;
+    this.press = { x: e.clientX, y: e.clientY, dragged: false, right: e.button === 2 };
     this.canvas.setPointerCapture(e.pointerId);
   }
 
@@ -119,6 +119,7 @@ export class ViewCube {
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     if (!p) return;
     if (p.dragged) this.onMove(e);
+    else if (p.right) this.onMenu(e.clientX, e.clientY);
     else this.onClick(e);
   }
 

@@ -145,6 +145,9 @@ const GLYPH: Partial<Record<ConstraintType, string>> = {
   coincident: '●',
 };
 
+/** How many picks a constraint tool takes at most before it starts again (the tool first, then the picks). */
+const constraintPicks = (t: ConstraintType) => (t === 'symmetric' ? 3 : t === 'fix' ? 1 : 2);
+
 const SNAP_PX = 9;
 const USE_ACCEPTS: SelToken[] = ['edge', 'vertex', 'face', 'sketchCurve', 'sketchPoint', 'origin'];
 const PLANE_ACCEPTS: SelToken[] = ['plane', 'planarFace'];
@@ -372,7 +375,8 @@ export class SketchEditor {
       dimension: 'Click entities, then click to place the dimension. A circle with Shift: to the circle itself; three points: an angle.',
       select: 'Select entities, drag to move. Use the constraint tools to constrain.',
     };
-    useEditor.setState({ sketch: { ...s, hint: text ?? hints[this.toolName] } });
+    // a constraint tool waiting for picks keeps its own hint (what to pick)
+    useEditor.setState({ sketch: { ...s, hint: text ?? (s.constraint ? s.hint : hints[this.toolName]) } });
   }
 
   // -------------------------------------------------------------------------
@@ -935,8 +939,13 @@ export class SketchEditor {
       }
     }
     if (e.key === 'Escape') {
+      const s = useEditor.getState().sketch;
       if (this.tool.k !== 'idle') this.endTool();
-      else if ((useEditor.getState().sketch?.selection.length ?? 0) > 0) useEditor.getState().setSketchSelection([]);
+      // a constraint tool waiting for picks: off (with what was picked for it)
+      else if (s?.constraint) {
+        useEditor.setState({ sketch: { ...s, constraint: undefined, selection: [] } });
+        this.setHint();
+      } else if ((s?.selection.length ?? 0) > 0) useEditor.getState().setSketchSelection([]);
       else if (useEditor.getState().sketch?.planePending) useEditor.getState().cancelEditing();
       else useEditor.getState().setSketchTool('select');
       return true;
@@ -1058,6 +1067,9 @@ export class SketchEditor {
           return;
         }
         ed.setSketchSelection(sel.includes(hit.id) ? sel.filter((s) => s !== hit.id) : [...sel, hit.id]);
+        // a constraint tool waiting for its picks: try it with this one
+        const pending = useEditor.getState().sketch?.constraint;
+        if (pending) this.applyConstraint(pending, true);
         return;
       }
       case 'point': {
@@ -1870,8 +1882,11 @@ export class SketchEditor {
     this.change((d) => toggleConstruction(d, sel));
   }
 
-  /** Apply a geometric constraint to the current selection. */
-  applyConstraint(type: ConstraintType) {
+  /**
+   * Apply a geometric constraint to the current selection. Without the entities it needs (Onshape: the tool first,
+   * then the picks) the tool stays on with a hint of what to pick, and each pick tries again (`pick`).
+   */
+  applyConstraint(type: ConstraintType, pick = false) {
     const ed = useEditor.getState();
     const sel = ed.sketch?.selection ?? [];
     const map = this.map();
@@ -1881,7 +1896,15 @@ export class SketchEditor {
     const lines = ents.filter((e) => e.type === 'line');
     const points = ents.filter((e) => e.type === 'point');
     const toAdd: Omit<SkConstraint, 'id'>[] = [];
-    const fail = (msg: string) => ed.showToast(msg, 'error');
+    const fail = (msg: string) => {
+      const s = useEditor.getState().sketch;
+      if (!s) return;
+      // more picks than it takes and still no constraint: start again from the last one
+      const max = constraintPicks(type);
+      const keep = sel.length >= max ? sel.slice(-1) : sel;
+      useEditor.setState({ sketch: { ...s, tool: 'select', constraint: type, hint: msg, selection: pick ? keep : sel.length < max ? sel : [] } });
+      if (!pick) ed.showToast(msg, 'info');
+    };
     const d0 = this.data();
     if (!d0) return;
     /** A spline tangent handle the constraint needs (created with it, one undo step). */
@@ -1981,6 +2004,7 @@ export class SketchEditor {
       },
       { checkConflict: true },
     );
+    // picked with the tool on: it stays on for the next one (Esc or another tool ends it)
     if (ok) ed.setSketchSelection([]);
   }
 

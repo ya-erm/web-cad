@@ -9,7 +9,8 @@ export type Row = { when?: (p: P) => boolean } & (
   | { kind: 'select'; key: string; label: string; options: [string, string][] }
   | { kind: 'sel'; key: string }
   | { kind: 'expr'; key: string; label: string; unit: 'length' | 'angle' | 'number'; flipKey?: string; unitKey?: string }
-  | { kind: 'check'; key: string; label: string }
+  /** `unsetOn` — checked while the parameter is not set (on by default). */
+  | { kind: 'check'; key: string; label: string; unsetOn?: boolean }
   | { kind: 'flip'; key: string; label: string }
   | { kind: 'text'; key: string; label: string }
   | { kind: 'features'; key: string; label: string }
@@ -35,6 +36,9 @@ const OPS: [string, string][] = [
 const isOp = (p: P) => p.op !== 'new';
 /** A hole of a standard: its diameters come from the tables. */
 const isIso = (p: P) => p.standard === 'iso';
+/** A hole with a counterbore / a countersink (both: counterdrill). */
+const hasCbore = (p: P) => p.style === 'counterbore' || p.style === 'counterdrill';
+const hasCsink = (p: P) => p.style === 'countersink' || p.style === 'counterdrill';
 
 /** Kind of a mate connector location, for its "which point" choices. */
 function locationKind(p: P, key = 'location'): 'line' | 'circle' | 'axis' | null {
@@ -165,7 +169,15 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'sel', key: 'faces' },
     { kind: 'expr', key: 'angle', label: 'Draft angle', unit: 'angle', flipKey: 'flip' },
   ],
-  deleteFace: [{ kind: 'sel', key: 'faces' }],
+  deleteFace: [
+    { kind: 'sel', key: 'faces' },
+    // off: the faces go, the part becomes a surface (Onshape: Heal)
+    { kind: 'check', key: 'heal', label: 'Heal', unsetOn: true },
+  ],
+  offsetSurface: [
+    { kind: 'sel', key: 'faces' },
+    { kind: 'expr', key: 'distance', label: 'Distance', unit: 'length', flipKey: 'flip' },
+  ],
   moveFace: [
     {
       kind: 'segmented',
@@ -189,12 +201,14 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
   ],
   hole: [
     {
-      kind: 'segmented',
+      kind: 'select',
       key: 'style',
+      label: 'Hole style',
       options: [
         ['simple', 'Simple'],
         ['counterbore', 'Counterbore'],
         ['countersink', 'Countersink'],
+        ['counterdrill', 'Counterbore and countersink'],
       ],
     },
     { kind: 'sel', key: 'points' },
@@ -213,10 +227,10 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'expr', key: 'depth', label: 'Depth', unit: 'length', when: (p) => p.endType === 'blind' },
     { kind: 'expr', key: 'tapDepth', label: 'Tapped depth', unit: 'length', when: (p) => isIso(p) && p.holeType === 'tapped' && p.endType === 'blind' },
     { kind: 'expr', key: 'tipAngle', label: 'Tip angle', unit: 'angle', when: (p) => p.endType === 'blind' },
-    { kind: 'expr', key: 'cboreDiameter', label: 'Counterbore diameter', unit: 'length', when: (p) => p.style === 'counterbore' && !isIso(p) },
-    { kind: 'expr', key: 'cboreDepth', label: 'Counterbore depth', unit: 'length', when: (p) => p.style === 'counterbore' && !isIso(p) },
-    { kind: 'expr', key: 'csinkDiameter', label: 'Countersink diameter', unit: 'length', when: (p) => p.style === 'countersink' && !isIso(p) },
-    { kind: 'expr', key: 'csinkAngle', label: 'Countersink angle', unit: 'angle', when: (p) => p.style === 'countersink' && !isIso(p) },
+    { kind: 'expr', key: 'cboreDiameter', label: 'Counterbore diameter', unit: 'length', when: (p) => hasCbore(p) && !isIso(p) },
+    { kind: 'expr', key: 'cboreDepth', label: 'Counterbore depth', unit: 'length', when: (p) => hasCbore(p) && !isIso(p) },
+    { kind: 'expr', key: 'csinkDiameter', label: 'Countersink diameter', unit: 'length', when: (p) => hasCsink(p) && !isIso(p) },
+    { kind: 'expr', key: 'csinkAngle', label: 'Countersink angle', unit: 'angle', when: (p) => hasCsink(p) && !isIso(p) },
     { kind: 'check', key: 'scopeAll', label: 'Merge with all' },
     { kind: 'sel', key: 'scope', when: (p) => !p.scopeAll },
   ],

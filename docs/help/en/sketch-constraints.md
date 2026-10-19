@@ -7,7 +7,9 @@ Constraints define geometric relationships between sketch entities: coincident p
 1. In select mode, select entities (by clicking or with a selection box).
 2. Click a constraint button on the sketch toolbar or press its shortcut.
 
-When the constraint is applied, the selection is cleared. If the selection does not fit, a hint tells you what to select.
+When the constraint is applied, the selection is cleared.
+
+It works the other way round too, as in Onshape: click the constraint button first, then click the entities. The button stays pressed, a hint at the bottom says what to pick, and the constraint goes on by itself as soon as enough is picked — then the tool waits for the next entities. `Esc`, another click on the button or another tool turns it off.
 
 ```figure
 image: ../images/constraint-horizontal.svg
@@ -53,7 +55,7 @@ To control what moves, define the "main" entity first — attach it to the origi
 
 ## Constraint icons {#glyphs}
 
-- Constraint icons are shown next to the geometry. **Show constraints** (`Shift+C`) turns on all icons; when it is off, only the constraints of selected entities and of the entity under the cursor are visible.
+- Constraint icons are shown next to the geometry. The **Show constraints** checkbox in the sketch dialog (`Shift+C`) turns on all icons; when it is off, only the constraints of selected entities and of the entity under the cursor are visible.
 - Hover over an icon to highlight the entities it relates.
 - Click an icon to select the constraint; `Del` deletes it.
 - Coincidence of two points (a shared vertex) is not marked with an icon.

@@ -32,6 +32,7 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   deleteFace: 'deleteFace',
   moveFace: 'moveFace',
   replaceFace: 'replaceFace',
+  offsetSurface: 'offsetSurface',
   hole: 'hole',
   linearPattern: 'linearPattern',
   circularPattern: 'circularPattern',
@@ -605,8 +606,9 @@ function HoleStandardField() {
             // the sizes the standard gives
             <div className="fd-hint">
               {tapped ? `${std.thread?.designation} · ${t('tap drill')} ⌀${mm(std.diameter)}` : `⌀${mm(std.diameter)}`}
-              {p.style === 'counterbore' && ` · ${t('counterbore')} ⌀${mm(std.cboreDiameter)} ↧${mm(std.cboreDepth)}`}
+              {(p.style === 'counterbore' || p.style === 'counterdrill') && ` · ${t('counterbore')} ⌀${mm(std.cboreDiameter)} ↧${mm(std.cboreDepth)}`}
               {p.style === 'countersink' && ` · ${t('countersink')} ⌀${mm(std.csinkDiameter)} × 90°`}
+              {p.style === 'counterdrill' && ` · ${t('countersink')} ⌀${mm(std.cboreDiameter + 1)} × 90°`}
             </div>
           )}
         </>
@@ -776,7 +778,7 @@ export function FeatureDialog() {
       case 'check':
         return (
           <label key={i} className="fd-check">
-            <input type="checkbox" checked={!!p[row.key]} onChange={(e) => set(row.key, e.target.checked)} />
+            <input type="checkbox" checked={p[row.key] === undefined ? !!row.unsetOn : !!p[row.key]} onChange={(e) => set(row.key, e.target.checked)} />
             {t(row.label)}
             {configMark(row.key)}
           </label>

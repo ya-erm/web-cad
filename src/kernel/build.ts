@@ -5,7 +5,7 @@ import * as R from 'replicad';
 import type { EvalContext } from '../core/expr';
 import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
 import { perpendicular as perpendicularTo, v3 } from '../core/math';
-import { FeatureError, compoundOf, type Shape3D } from './geom';
+import { FeatureError, compoundOf, isSurface, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
 import { exportMesh, meshPart } from './meshing';
@@ -71,7 +71,11 @@ export class StudioBuilder {
     if (m?.name) return m.name;
     const d = st.derived.get(id);
     if (d) return d.name;
-    return `Part ${st.partOrder.indexOf(id) + 1}`;
+    // surfaces are counted apart (Onshape: "Surface 1"), parts without them
+    const s = st.surfaceOrder.indexOf(id);
+    if (s >= 0) return `Surface ${s + 1}`;
+    if (!st.surfaceOrder.length) return `Part ${st.partOrder.indexOf(id) + 1}`;
+    return `Part ${st.partOrder.filter((x) => !st.surfaceOrder.includes(x)).indexOf(id) + 1}`;
   }
 
   /** A part's own colour, if it has one (given here, or its colour in the source). */
@@ -92,6 +96,7 @@ export class StudioBuilder {
   private meshOf(st: BuildState, id: string, shape: Shape3D, quality: number): PartMesh {
     const m = meshPart(id, shape, { name: this.partName(st, id), color: this.ownColor(st, id) || DEFAULT_PART_COLOR, hidden: !!this.meta[id]?.hidden }, quality);
     if (st.derived.has(id)) m.derived = true;
+    if (isSurface(shape)) m.surface = true;
     return m;
   }
 
@@ -251,7 +256,13 @@ export class StudioBuilder {
         const p = st.parts.get(r.partId);
         if (!p) continue;
         shapes.push(p.shape);
-        if (refs.length === 1) {
+        if (refs.length === 1 && isSurface(p.shape)) {
+          // a surface: its area (no volume, no mass)
+          const surf = R.measureShapeSurfaceProperties(p.shape);
+          items.push({ label: 'Surface area', value: surf.area, kind: 'area' });
+          centerOfMass = surf.centerOfMass;
+          surf.delete();
+        } else if (refs.length === 1) {
           const props = R.measureShapeVolumeProperties(p.shape);
           const surf = R.measureShapeSurfaceProperties(p.shape);
           const density = 1; // g/cm³ placeholder; UI scales with the part's material

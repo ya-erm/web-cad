@@ -772,7 +772,26 @@ class Runner {
       case 'deleteFace': {
         const p = defaultParams('deleteFace');
         p.faces = await this.faces(op.faces);
+        if (op.heal === false) p.heal = false;
         this.add('deleteFace', op.name, p);
+        return;
+      }
+      case 'offsetSurface': {
+        const p = defaultParams('offsetSurface');
+        p.faces = await this.faces(op.faces);
+        p.distance = this.expr(op.distance, 'length', p.distance);
+        if (op.flip) p.flip = true;
+        this.add('offsetSurface', op.name, p);
+        return;
+      }
+      case 'thicken': {
+        const p = defaultParams('thicken');
+        p.faces = [...(op.surfaces !== undefined ? await this.parts(op.surfaces) : []), ...(op.faces !== undefined ? await this.faces(op.faces) : [])];
+        if (!p.faces.length) throw new AgentError('thicken needs "surfaces" or "faces"');
+        p.thickness = this.expr(op.thickness, 'length', p.thickness);
+        if (op.flip) p.flip = true;
+        if (op.boolean) p.op = op.boolean;
+        this.add('thicken', op.name, p);
         return;
       }
       case 'moveFace': {
@@ -822,6 +841,7 @@ class Runner {
         p.cboreDiameter = this.expr(op.cboreDiameter, 'length', p.cboreDiameter);
         p.cboreDepth = this.expr(op.cboreDepth, 'length', p.cboreDepth);
         p.csinkDiameter = this.expr(op.csinkDiameter, 'length', p.csinkDiameter);
+        p.csinkAngle = this.expr(op.csinkAngle, 'angle', p.csinkAngle);
         this.add('hole', op.name, p);
         return;
       }
@@ -1199,6 +1219,7 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       ...(area !== undefined ? { area: round(area / k ** 2) } : {}),
       faces: p.faces.length,
       edges: p.edges.filter((e) => !e.seam).length,
+      ...(p.surface ? { surface: true as const } : {}),
     });
   }
   const vars = collectVariables(configured, rollback, units);

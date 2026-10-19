@@ -41,6 +41,23 @@ export function solidsOf(s: R.AnyShape): R.Solid[] {
   return [...R.iterTopo(s.wrapped, 'solid')].map((x) => R.cast(x) as R.Solid);
 }
 
+/** A surface body (Onshape surfaces): faces with no solid — open shells, sheets. */
+export function isSurface(s: R.AnyShape): boolean {
+  return solidsOf(s).length === 0 && [...R.iterTopo(s.wrapped, 'face')].length > 0;
+}
+
+/** Faces sewn together into one shell (or the face itself) — a surface body. */
+export function sewFaces(faces: R.Face[]): Shape3D {
+  if (faces.length === 1) return faces[0].clone() as unknown as Shape3D;
+  const oc = R.getOC();
+  const sew = new oc.BRepBuilderAPI_Sewing(1e-6, true, true, true, false);
+  for (const f of faces) sew.Add(f.wrapped);
+  sew.Perform(new oc.Message_ProgressRange());
+  const out = R.cast(sew.SewedShape()) as Shape3D;
+  sew.delete();
+  return out;
+}
+
 export function compoundOf(shapes: R.AnyShape[]): Shape3D {
   if (shapes.length === 1) return shapes[0] as Shape3D;
   // makeCompound deletes its inputs' wrappers, so pass clones.

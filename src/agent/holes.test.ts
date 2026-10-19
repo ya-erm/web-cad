@@ -46,6 +46,35 @@ describe('Cosmetic threads in drawings', () => {
   });
 });
 
+describe('Counterbore and countersink together (counterdrill)', () => {
+  it('cuts a countersink at the counterbore mouth, custom and ISO', async () => {
+    const s = await openHeadless(emptyDocument('Counterdrill'), wasm);
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 60, h: 40 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'sketch', name: 'P', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [-15, 0] }] },
+      { op: 'hole', sketch: 'P', diameter: 6, through: true, style: 'counterdrill', cboreDiameter: 11, cboreDepth: 6, csinkDiameter: 13, csinkAngle: 90 },
+    ]);
+    expect(r.failed).toEqual([]);
+    // a 1 mm tall 90° cone from ⌀13 to ⌀11, the counterbore on to 6 mm, the ⌀6 hole through the rest
+    const cone = (Math.PI / 3) * (6.5 ** 2 + 6.5 * 5.5 + 5.5 ** 2);
+    const removed = cone + Math.PI * 5.5 ** 2 * 5 + Math.PI * 9 * 4;
+    expect(r.model!.parts[0].volume!).toBeCloseTo(60 * 40 * 10 - removed, 2);
+    // ISO M6: the counterbore of ISO 4762 with a 0.5 mm × 45° chamfer at its mouth
+    const iso = await s.run([
+      { op: 'sketch', name: 'Q', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [15, 0] }] },
+      { op: 'hole', sketch: 'Q', through: true, style: 'counterdrill', iso: { size: 'M6' } },
+    ]);
+    expect(iso.failed).toEqual([]);
+    const isoCone = (Math.PI / 3) * 0.5 * (6 ** 2 + 6 * 5.5 + 5.5 ** 2);
+    const isoRemoved = isoCone + Math.PI * 5.5 ** 2 * 6.1 + Math.PI * 3.3 ** 2 * 3.4;
+    expect(r.model!.parts[0].volume! - iso.model!.parts[0].volume!).toBeCloseTo(isoRemoved, 2);
+    // the countersink too big for the counterbore: an error
+    const bad = await s.run([{ op: 'hole', sketch: 'Q', through: true, style: 'counterdrill', cboreDiameter: 11, cboreDepth: 1, csinkDiameter: 16 }]);
+    expect(bad.failed[0]?.error).toMatch(/countersink must end above the counterbore floor/);
+  }, 60000);
+});
+
 describe('Standard holes', () => {
   it('drills tapped and clearance holes by ISO, with cosmetic threads that follow patterns and moves', async () => {
     const s = await openHeadless(emptyDocument('ISO holes'), wasm);

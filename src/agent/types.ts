@@ -136,7 +136,11 @@ export type AgentOp =
     })
   | (Named & { op: 'shell'; faces: Faces; thickness: Num; outward?: boolean })
   /** Onshape Delete face (healed): a whole hole / pocket / boss, or a fillet / chamfer between planar faces. */
-  | (Named & { op: 'deleteFace'; faces: Faces })
+  | (Named & { op: 'deleteFace'; faces: Faces; heal?: boolean })
+  /** Onshape Offset surface: a surface body offset from faces along their normals (0 — a copy; + out of the material). */
+  | (Named & { op: 'offsetSurface'; faces: Faces; distance?: Num; flip?: boolean })
+  /** Thicken surfaces (by name) or faces into solids, `thickness` along their normals (`flip` — the other way). */
+  | (Named & { op: 'thicken'; surfaces?: Parts; faces?: Faces; thickness: Num; flip?: boolean; boolean?: BoolOp })
   /**
    * Onshape Move face — one of: `offset` (planar faces along their normals; + out of the material), `translate`,
    * `rotate` (a whole hole / pocket / boss moves as one; planar faces each to its moved plane).
@@ -151,7 +155,9 @@ export type AgentOp =
       diameter?: Num;
       depth?: Num;
       through?: boolean;
-      style?: 'simple' | 'counterbore' | 'countersink';
+      /** counterdrill — a counterbore with a countersink at its mouth (cbore… and csink… sizes). */
+      style?: 'simple' | 'counterbore' | 'countersink' | 'counterdrill';
+      csinkAngle?: Num;
       cboreDiameter?: Num;
       cboreDepth?: Num;
       csinkDiameter?: Num;
@@ -356,6 +362,8 @@ export interface PartSummary {
   area?: number;
   faces: number;
   edges: number;
+  /** A surface body (no volume). */
+  surface?: true;
 }
 
 export interface SketchSummary {

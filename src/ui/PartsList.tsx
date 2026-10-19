@@ -96,16 +96,26 @@ export function PartsList() {
     });
   };
 
+  // surfaces apart, after the parts (Onshape: Parts / Surfaces)
+  const solids = parts.filter((p) => !p.surface);
+  const surfaces = parts.filter((p) => p.surface);
   return (
     <div className="panel-section parts">
       <div className="panel-header">
-        {t('Parts')} <span className="count">({parts.length})</span>
+        {t('Parts')} <span className="count">({solids.length})</span>
       </div>
       <div className="panel-body">
-        {parts.map((p) => {
+        {[...solids, ...surfaces].map((p, i) => {
           const ref = { kind: 'part' as const, partId: p.id };
           const sel = selection.some((r) => sameRef(r, ref));
-          return (
+          const head =
+            p.surface && i === solids.length ? (
+              <div key="surfaces" className="tree-group">
+                {t('Surfaces')} <span className="count">({surfaces.length})</span>
+              </div>
+            ) : null;
+          return [
+            head,
             <div
               key={p.id}
               className={'tree-item' + (sel ? ' selected' : '')}
@@ -118,7 +128,7 @@ export function PartsList() {
               }}
               onContextMenu={(e) => menu(e, p.id, p.hidden)}
             >
-              <span className="color-swatch" style={{ background: p.color }} />
+              {p.surface ? <Icon name="offsetSurface" size={14} /> : <span className="color-swatch" style={{ background: p.color }} />}
               {renaming === p.id ? (
                 <input
                   className="tree-rename"
@@ -153,8 +163,8 @@ export function PartsList() {
               >
                 <Icon name={p.hidden ? 'eyeOff' : 'eye'} size={14} />
               </span>
-            </div>
-          );
+            </div>,
+          ];
         })}
       </div>
     </div>
