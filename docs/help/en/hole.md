@@ -35,7 +35,7 @@ width: 480
 | **Counterbore diameter**, **Counterbore depth** | For **Counterbore** and **Counterbore and countersink** (default 9 and 4 mm). The counterbore diameter must be larger than the hole diameter. |
 | **Countersink diameter**, **Countersink angle** | For **Countersink** and **Counterbore and countersink** (default 10 mm and 90°). With both, the countersink is wider than the counterbore and ends above its floor. |
 | **Recess depth** | For **Countersink**: a cylindrical recess of the countersink's diameter above its cone — the countersink sunk that deep (default 0 — no recess). A seat for a countersunk head set below the surface. |
-| **Standard** | **Custom** — the sizes from the fields above; **ISO** — from the standards' tables, see [below](#standard). |
+| **Standard** | **Custom** — the sizes from the fields above; **ISO** (metric) or **ANSI** (inch) — from the standards' tables, see [below](#standard) and [ANSI](#ansi). |
 | **Tapped depth** | For a **Blind** tapped hole: how deep the thread goes (no deeper than the hole). |
 | **Merge with all** / **Merge scope** | The parts to cut the holes from: all parts or only the selected ones. |
 
@@ -47,6 +47,17 @@ With **Standard: ISO** the sizes come from the tables for metric fasteners M1.6�
 - **Type: Tapped** — a hole for a tap (the drill by ISO 2306, for M6 — 5 mm) with a [cosmetic thread](#thread). **Pitch**: coarse (the default) or one of the fine ones of ISO 261; a fine pitch drills the major diameter minus the pitch and is designated M8×1.
 - **Counterbore** — a counterbore for an ISO 4762 socket head cap screw (by DIN 974-1), **Countersink** — a 90° countersink for an ISO 10642 countersunk screw, **Counterbore and countersink** — that counterbore with a 0.5 mm × 45° chamfer at its mouth.
 - Choosing a size sets the depths as Onshape does: the thread 2 diameters deep, the hole 3 pitches deeper. You can change them.
+
+### ANSI inch holes {#ansi}
+
+**Standard: ANSI** covers inch fasteners #0–#12 and 1/4–1″. The sizes come from the inch tables and are converted to millimetres and the document's units.
+
+- **Clearance** — holes by ASME B18.2.8 with the fits **Close**, **Normal**, **Loose**: for #10 — 0.206 / 0.221 / 0.238″, for 1/4 — 0.266 / 0.281 / 0.297″.
+- **Tapped** — Unified threads (ASME B1.1) with the 75 % tap drill. The **Pitch** is set in threads per inch: the coarse UNC series (the default) or the fine UNF one. For example, 1/4-20 UNC uses a 0.201″ drill and 1/4-28 UNF a 0.213″ one.
+- **Counterbore** — for a socket head cap screw (ASME B18.3): for #10 — 3/8″. It is as deep as the normal fit is wide, so the head sits a little below the surface.
+- **Countersink** — 82° for a flat socket head cap screw (ASME B18.3), as wide as the head for it to sit flush: for 1/4 — 0.531″. **Counterbore and countersink** — the counterbore with a 1/64″ × 45° chamfer.
+
+The tables the sizes were checked against do not give everything. #12 and 9/16 have only tapped holes. Countersinks exist for #4–#10, 1/4, 5/16, 3/8 and 1/2. For the rest the dialog says so — switch to **Standard: Custom**.
 
 ```figure
 image: ../images/iso-hole-dialog.jpg
@@ -87,7 +98,7 @@ A tapped hole's thread is not modelled (the hole has the drill's diameter) but s
 
 The thread starts below a counterbore or countersink. In a blind hole it goes as deep as **Tapped depth**, in a through hole — to where the hole leaves the material. The thread follows its part when [transformed](transform), is copied by patterns and [mirrors](mirror) of the hole or the part, and comes with the part into [Derived](derived).
 
-> **Limitation.** Only the ISO metric standard (no ANSI / inch). Drawings do not get thread callouts (M8 ↧16) yet.
+> **Limitation.** Drawings do not get thread callouts (M8 ↧16) yet.
 
 ## See also {#see-also}
 

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { emptyDocument, openHeadless } from './headless';
-import { isoHole } from '../core/holes';
+import { ansiHole, isoHole } from '../core/holes';
 import { threadLines, VIEW_AXES } from '../kernel/build';
 import type { ModelSummary } from './types';
 
@@ -20,6 +20,42 @@ describe('ISO hole sizes', () => {
     expect(isoHole({ holeType: 'tapped', size: 'M6', pitch: '0.5' })).toBe('M6 has no 0.5 mm pitch');
     expect(isoHole({ holeType: 'tapped', size: 'M7' })).toBe('Unknown ISO size "M7"');
   });
+});
+
+describe('ANSI (inch) hole sizes', () => {
+  it('gives UNC / UNF tap drills, ASME B18.2.8 clearance holes, counterbores and 82° countersinks — in mm', () => {
+    // 1/4-20 UNC: #7 drill 0.201"; 1/4-28 UNF: #3 0.213"
+    expect(ansiHole({ holeType: 'tapped', size: '1/4' })).toMatchObject({ diameter: 5.105, thread: { designation: '1/4-20 UNC', major: 6.35, pitch: 1.27 } });
+    expect(ansiHole({ holeType: 'tapped', size: '1/4', pitch: '28' })).toMatchObject({ diameter: 5.41, thread: { designation: '1/4-28 UNF' } });
+    // #10: close 0.206", normal 0.221", loose 0.238"; counterbore 3/8" as deep as the normal hole; countersink 0.411"
+    expect(ansiHole({ holeType: 'clearance', size: '#10', fit: 'close' })).toMatchObject({ diameter: 5.232 });
+    expect(ansiHole({ holeType: 'clearance', size: '#10' })).toMatchObject({ diameter: 5.613, cboreDiameter: 9.525, cboreDepth: 5.613, csinkDiameter: 10.439, csinkAngle: 82 });
+    expect(ansiHole({ holeType: 'clearance', size: '#10', fit: 'loose' })).toMatchObject({ diameter: 6.045 });
+    // #0 has only the fine thread
+    expect(ansiHole({ holeType: 'tapped', size: '#0' })).toMatchObject({ thread: { designation: '#0-80 UNF' } });
+    expect(ansiHole({ holeType: 'tapped', size: '1/4', pitch: '32' })).toBe('1/4 has no 32 threads per inch');
+    // sizes the tables do not give: said so, not guessed
+    expect(ansiHole({ holeType: 'clearance', size: '#12' })).toMatch(/No clearance hole size for #12/);
+    expect(ansiHole({ holeType: 'clearance', size: '#5', style: 'countersink' })).toMatch(/No countersink size for #5/);
+    expect(ansiHole({ holeType: 'tapped', size: 'M6' })).toBe('Unknown ANSI size "M6"');
+  });
+
+  it('drills a tapped inch hole with its thread through the agent', async () => {
+    const s = await openHeadless(emptyDocument('ANSI holes'), wasm);
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 40 }] },
+      { op: 'extrude', depth: 20 },
+      { op: 'sketch', name: 'Pts', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [0, 0] }] },
+      { op: 'hole', sketch: 'Pts', ansi: { size: '1/4', type: 'tapped' } },
+    ] as never);
+    expect(r.failed).toEqual([]);
+    const m = r.model as ModelSummary;
+    // a blind tap drill hole: 2 d of thread (12.7 mm), drilled 3 pitches deeper; a cone at its tip
+    expect(m.threads?.[0]).toMatchObject({ designation: '1/4-20 UNC' });
+    expect(m.parts[0].volume!).toBeLessThan(40 * 40 * 20 - Math.PI * (5.105 / 2) ** 2 * 12.7);
+    const bad = await s.run([{ op: 'hole', sketch: 'Pts', ansi: { size: '#12' } }] as never);
+    expect(bad.error).toMatch(/No clearance hole size for #12/);
+  }, 60000);
 });
 
 describe('Cosmetic threads in drawings', () => {

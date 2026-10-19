@@ -147,7 +147,9 @@ export type AgentOp =
       tangentPropagation?: boolean;
       /** A variable fillet: radii at vertices of the edges (the nearest model vertex to `at`); elsewhere — `radius`. */
       vertices?: { at: Pt3; radius: Num }[];
-      /** Variable: the radius changes smoothly (level at the vertices), not linearly. */
+      /** Variable: radii at points inside edges — the edge (one), the position along it (0 start … 1 end), the radius. */
+      points?: { edge: EdgeQuery; at: number; radius: Num }[];
+      /** Variable: the radius changes smoothly (level at the vertices and points), not linearly. */
       smooth?: boolean;
     })
   | (Named & {
@@ -194,6 +196,8 @@ export type AgentOp =
       csinkDiameter?: Num;
       /** ISO standard holes: "M6" — a clearance hole (fit: close / normal / loose), or tapped (the pitch: coarse by default). */
       iso?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose'; pitch?: number; tapDepth?: Num };
+      /** ANSI inch holes: "#10", "1/4" — clearance (ASME B18.2.8 fits) or tapped (UNC by default; `tpi` 28 — UNF). */
+      ansi?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose'; tpi?: number; tapDepth?: Num };
     })
   | (Named & {
       op: 'linearPattern';
@@ -225,7 +229,8 @@ export type AgentOp =
       boolean?: 'new' | 'add';
     })
   /** Ribs from the curves of a sketch (lines, arcs) out to the parts: within its plane, or along its normal (`normal`). */
-  | (Named & { op: 'rib'; sketch?: string; thickness: Num; normal?: boolean; flip?: boolean; extend?: boolean })
+  /** `extend` (on by default) runs lines on along themselves and arcs along their tangents up to the parts; `draft` — an angle the sides taper by from the sketch (wider towards the part; `draftFlip` — narrower). */
+  | (Named & { op: 'rib'; sketch?: string; thickness: Num; normal?: boolean; flip?: boolean; extend?: boolean; draft?: Num; draftFlip?: boolean })
   /**
    * Sketch regions rolled onto a cylindrical face (`onto`): `boolean` `add` (default) raises them `depth` out of it,
    * `remove` sinks them into it. The sketch plane runs along the cylinder's axis (tangent to it, usually).

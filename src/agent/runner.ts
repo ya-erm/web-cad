@@ -25,7 +25,7 @@ import {
   variantStudio,
 } from '../core/config';
 import { derivesFrom, sourceStudio, versionSnapshot, versionStudioId } from '../core/derived';
-import { ISO_SIZES, ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
+import { ANSI_SIZE_NAMES, ansiDefaultDepths, ansiHole, ansiThreads, ISO_SIZES, ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
@@ -776,14 +776,25 @@ class Runner {
         p.edges = await this.edges(op.edges);
         p.radius = this.expr(op.radius, 'length', '2 mm');
         if (op.tangentPropagation === false) p.tangentPropagation = false;
-        if (op.vertices?.length) {
-          // a variable fillet: radii at vertices (the nearest vertex of the model to each point)
+        if (op.vertices?.length || op.points?.length) {
+          // a variable fillet: radii at vertices (the nearest vertex of the model to each point) and inside edges
           p.filletType = 'variable';
           p.vertices = [];
           p.vertexRadii = [];
-          for (const v of op.vertices) {
+          for (const v of op.vertices ?? []) {
             p.vertices.push(await this.vertexNear(v.at));
             p.vertexRadii.push(this.expr(v.radius, 'length', p.radius));
+          }
+          p.pointEdges = [];
+          p.pointPositions = [];
+          p.pointRadii = [];
+          for (const q of op.points ?? []) {
+            const found = await this.edges(q.edge);
+            if (found.length !== 1) throw new AgentError(`A fillet point's edge query must match one edge, got ${found.length}`);
+            if (!(q.at > 0 && q.at < 1)) throw new AgentError('A fillet point lies inside its edge: "at" between 0 and 1');
+            p.pointEdges.push(found[0]);
+            p.pointPositions.push(String(q.at));
+            p.pointRadii.push(this.expr(q.radius, 'length', p.radius));
           }
           if (op.smooth) p.smooth = true;
         }
@@ -884,6 +895,20 @@ class Runner {
           p.depth = `${d.depth} mm`;
           p.tapDepth = this.expr(op.iso.tapDepth, 'length', `${d.tapDepth} mm`);
         }
+        if (op.ansi) {
+          // the inch tables (ANSI): the same way, the pitch as threads per inch
+          const size = ANSI_SIZE_NAMES.find((s) => s === op.ansi!.size || s === `#${op.ansi!.size}`);
+          if (!size) throw new AgentError(`No ANSI size "${op.ansi.size}". Sizes: ${ANSI_SIZE_NAMES.join(', ')}`);
+          const tapped = op.ansi.type === 'tapped';
+          Object.assign(p, { standard: 'ansi', size, holeType: tapped ? 'tapped' : 'clearance' });
+          if (op.ansi.fit) p.fit = op.ansi.fit;
+          if (op.ansi.tpi !== undefined && op.ansi.tpi !== ansiThreads(size)[0].tpi) p.pitch = String(op.ansi.tpi);
+          const bad = ansiHole({ ...p, style: op.style ?? p.style });
+          if (typeof bad === 'string') throw new AgentError(`${bad}. Threads per inch: ${ansiThreads(size).map((x) => `${x.tpi} ${x.series}`).join(', ')}`);
+          const d = ansiDefaultDepths(size, tapped);
+          p.depth = `${d.depth} mm`;
+          p.tapDepth = this.expr(op.ansi.tapDepth, 'length', `${d.tapDepth} mm`);
+        }
         p.depth = this.expr(op.depth, 'length', p.depth);
         if (op.style) p.style = op.style;
         p.cboreDiameter = this.expr(op.cboreDiameter, 'length', p.cboreDiameter);
@@ -949,6 +974,11 @@ class Runner {
         if (op.normal) p.direction = 'normal';
         if (op.flip) p.flip = true;
         if (op.extend === false) p.extend = false;
+        if (op.draft !== undefined) {
+          p.draft = true;
+          p.draftAngle = this.expr(op.draft, 'angle', '1 deg');
+          if (op.draftFlip) p.draftFlip = true;
+        }
         this.add('rib', op.name, p);
         return;
       }

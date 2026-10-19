@@ -1,9 +1,13 @@
-Fonts of the sketch Text tool (WOFF, as published by Fontsource):
+Fonts of the sketch Text tool (WOFF, sourced from Fontsource):
 
 - Inter-Regular.woff, Inter-SemiBold.woff — Inter 3.012
   Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
 - JetBrainsMono-Regular.woff — JetBrains Mono 2.211
   Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+
+The bundled copies have overlapping glyph contours merged for CAD use, without
+changing their visible shapes. See scripts/prepare-sketch-fonts.py to repeat this
+preparation when replacing the fonts. The license and original copyrights remain.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

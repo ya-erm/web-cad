@@ -57,6 +57,23 @@ describe('Variable fillet', () => {
     expect(r.model!.parts[0].volume!).toBeCloseTo(4000 - removed, 0);
     expect(linear - r.model!.parts[0].volume!).toBeGreaterThan(0.2);
   }, 60000);
+
+  it('takes radii at points inside an edge too', async () => {
+    const s = await openHeadless(emptyDocument('Fillet points'), wasm);
+    const edge = { type: 'line', dir: 'z', near: [10, 10, 5] };
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 20, h: 20 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'fillet', edges: edge, radius: 2, points: [{ edge, at: 0.5, radius: 4 }] },
+    ] as never);
+    expect(r.failed).toEqual([]);
+    // the ends keep 2 mm, the middle swells to 4: r = 2 + 0.4 z up to the middle and back
+    const top = (await s.query({ faces: { normal: 'z', pick: '+z' } })) as { faces: { area: number }[] };
+    expect(top.faces[0].area).toBeCloseTo(400 - corner(2), 1);
+    const removed = (1 - Math.PI / 4) * 2 * ((4 ** 3 - 2 ** 3) / (3 * 0.4));
+    expect(r.model!.parts[0].volume!).toBeCloseTo(4000 - removed, 0);
+    expect((s.doc.tabs[0] as { features: { params: Record<string, unknown> }[] }).features[2].params).toMatchObject({ filletType: 'variable', pointPositions: ['0.5'], pointRadii: ['4 mm'] });
+  }, 60000);
 });
 
 describe('Chamfer types through the agent', () => {

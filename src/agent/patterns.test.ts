@@ -91,6 +91,57 @@ describe('Rib', () => {
     expect(m.parts[0].volume).toBeCloseTo(40 * 30 * 5 + 20 * 2 * 10, 2);
     expect(m.parts[0].size).toEqual([40, 30, 15]);
   }, 60000);
+
+  it('drafts the sides: wider towards the part, or narrower the other way', async () => {
+    const ops = (draftFlip: boolean) => [
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+      { op: 'extrude', depth: 5 },
+      { op: 'plane', name: 'Above', from: 'top', offset: 15 },
+      { op: 'sketch', name: 'Rib', plane: { plane: 'Above' }, shapes: [{ type: 'line', from: [-10, 0], to: [10, 0] }] },
+      { op: 'rib', sketch: 'Rib', thickness: 2, normal: true, draft: 5, draftFlip },
+    ];
+    // 2 thick at the sketch, 10 down to the plate: each side leans out by 10 · tan 5° (the ends stay square)
+    const k = 100 * Math.tan((5 * Math.PI) / 180);
+    expect((await model(ops(false))).parts[0].volume).toBeCloseTo(40 * 30 * 5 + 20 * (2 * 10 + k), 2);
+    expect((await model(ops(true))).parts[0].volume).toBeCloseTo(40 * 30 * 5 + 20 * (2 * 10 - k), 2);
+  }, 60000);
+
+  it('drafts a gusset within the sketch plane: thicker towards the corner', async () => {
+    const bracket = [
+      { op: 'sketch', shapes: [{ type: 'rect', x: -20, y: -15, w: 40, h: 30 }] },
+      { op: 'extrude', depth: 5 },
+      { op: 'sketch', shapes: [{ type: 'rect', x: -20, y: -15, w: 5, h: 30 }] },
+      { op: 'extrude', depth: 30, boolean: 'add' },
+    ];
+    const plain = await model(bracket);
+    const m = await model([...bracket, { op: 'sketch', name: 'Rib', plane: 'front', shapes: [{ type: 'line', from: [-15, 20], to: [10, 5] }] }, { op: 'rib', sketch: 'Rib', thickness: 4, draft: 3 }]);
+    // thickness 4 + 2 s tan 3° at the distance s from the line, over the triangle (base L, height H from the line)
+    const L = Math.hypot(25, 15);
+    const H = (25 * 15) / L;
+    expect(m.parts[0].volume! - plain.parts[0].volume!).toBeCloseTo(4 * 187.5 + 2 * Math.tan((3 * Math.PI) / 180) * ((L * H * H) / 6), 1);
+  }, 60000);
+
+  it('runs an arc on along its tangents up to the part', async () => {
+    // a plate with a wall at its left end; a C-shaped arc above the plate, its ends pointing at the wall
+    const base = [
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 60, h: 40 }] },
+      { op: 'extrude', depth: 5 },
+      { op: 'sketch', shapes: [{ type: 'rect', x: -30, y: -20, w: 5, h: 40 }] },
+      { op: 'extrude', depth: 20, boolean: 'add' },
+      { op: 'plane', name: 'Above', from: 'top', offset: 15 },
+      { op: 'sketch', name: 'Rib', plane: { plane: 'Above' }, shapes: [{ type: 'arc', c: [0, 0], r: 10, start: 270, end: 90 }] },
+    ];
+    const plain = (await model(base.slice(0, 4))).parts[0].volume!;
+    const short = await model([...base, { op: 'rib', sketch: 'Rib', thickness: 2, normal: true, extend: false }]);
+    const long = await model([...base, { op: 'rib', sketch: 'Rib', thickness: 2, normal: true }]);
+    // the half ring 2 wide, 10 tall; extended: two straight legs 25 long to the wall
+    expect(short.parts[0].volume! - plain).toBeCloseTo(Math.PI * 10 * 2 * 10, 1);
+    expect(long.parts[0].volume! - plain).toBeCloseTo(Math.PI * 10 * 2 * 10 + 2 * 25 * 2 * 10, 1);
+    // drafted, arc and legs together
+    const drafted = await model([...base, { op: 'rib', sketch: 'Rib', thickness: 2, normal: true, draft: 2 }]);
+    expect(drafted.parts).toHaveLength(1);
+    expect(drafted.parts[0].volume!).toBeGreaterThan(long.parts[0].volume! + 20);
+  }, 60000);
 });
 
 describe('Wrap', () => {
@@ -123,5 +174,24 @@ describe('Wrap', () => {
       { op: 'wrap', sketch: 'Label', onto: { type: 'cylinder' }, depth: 2, regions: [[4, 12]] },
     ]);
     expect(m.parts[0].volume! - SHAFT).toBeCloseTo(shell(200 - Math.PI * 9, 2), 1);
+  }, 60000);
+
+  it('wraps across the seam of the cylinder: the same band on every side', async () => {
+    for (const [from, offset] of [
+      ['right', 20],
+      ['right', -20],
+      ['front', 20],
+      ['front', -20],
+    ] as const) {
+      const m = await model([
+        { op: 'sketch', shapes: [{ type: 'circle', c: [0, 0], d: 40 }] },
+        { op: 'extrude', depth: 40 },
+        { op: 'plane', name: 'Touching', from, offset },
+        { op: 'sketch', name: 'Label', plane: { plane: 'Touching' }, shapes: [{ type: 'rect', center: true, x: 0, y: 20, w: 10, h: 20 }] },
+        { op: 'wrap', sketch: 'Label', onto: { type: 'cylinder' }, depth: 2 },
+      ]);
+      expect(m.parts, `${from} ${offset}`).toHaveLength(1);
+      expect(m.parts[0].volume! - SHAFT, `${from} ${offset}`).toBeCloseTo(shell(200, 2), 1);
+    }
   }, 60000);
 });

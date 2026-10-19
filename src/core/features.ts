@@ -149,7 +149,7 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
       op: 'new',
     }),
     mirror: () => ({ patternType: 'part', parts: [], features: [], faces: [], plane: [], op: 'new' }),
-    rib: () => ({ ...mergeDefaults, profiles: [], thickness: '3 mm', direction: 'parallel', flip: false, extend: true }),
+    rib: () => ({ ...mergeDefaults, profiles: [], thickness: '3 mm', direction: 'parallel', flip: false, extend: true, draft: false, draftAngle: '1 deg', draftFlip: false }),
     wrap: () => ({ ...mergeDefaults, profiles: [], target: [], op: 'add', depth: '1 mm' }),
     boolean: () => ({ op: 'union', tools: [], targets: [], keepTools: false }),
     split: () => ({ parts: [], tool: [], keepTools: false }),

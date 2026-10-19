@@ -62,7 +62,7 @@ import {
   type ProfileFace,
 } from './refs';
 import { adoptThreads, removePart, setPart, setSurface, type BuildState, type PartState, type ThreadState } from './state';
-import { isoHole, type ThreadSpec } from '../core/holes';
+import { standardHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
 import { wrapRegion } from './wrap';
 import { allPlanar, deleteFaces, encloses, facePlane, moveFeature, movePlanarFace, offsetCylinder, reachOf, type Motion, type Plane as FacePlane } from './faceOps';
@@ -785,11 +785,22 @@ function buildFillet(ctx: Ctx, f: FeatureOf<'fillet'>): FeatureOutput {
           return { p: resolvePoint(ctx.st, v), r: rv };
         })
       : [];
+  // and at points inside edges (a position 0…1 along the edge)
+  const inside =
+    p.filletType === 'variable'
+      ? (p.pointEdges ?? []).map((ref, i) => {
+          const u = num(ctx, p.pointPositions?.[i] || '0.5', 'Point position');
+          if (!(u > 0 && u < 1)) fail('A point on an edge lies strictly between its ends: a position between 0 and 1');
+          const rv = len(ctx, p.pointRadii?.[i] || p.radius, 'Point radius');
+          if (!(rv > 0)) fail('Radius must be positive');
+          return { edge: resolveEdge(ctx.st, ref).edge, u, r: rv };
+        })
+      : [];
   let propagated = false;
   for (const { part, edges } of groups.values()) {
     const mk = new oc.BRepFilletAPI_MakeFillet(part.shape.wrapped, oc.ChFi3d_FilletShape.ChFi3d_Rational);
     for (const e of edges) mk.Add(r, e.wrapped);
-    if (at.length) variableRadii(mk, at, r, !!p.smooth);
+    if (at.length || inside.length) variableRadii(mk, at, inside, r, !!p.smooth);
     const extra = p.tangentPropagation ? [] : contoursBeyond(mk, edges);
     try {
       mk.Build(new oc.Message_ProgressRange());
@@ -813,7 +824,13 @@ function buildFillet(ctx: Ctx, f: FeatureOf<'fillet'>): FeatureOutput {
  * A variable fillet: along each edge of each contour the radius goes from the one at its start vertex to the one at
  * its end (a vertex's own radius, or `r`) — linearly, or smoothly (level at the vertices, so no kink between edges).
  */
-function variableRadii(mk: InstanceType<ReturnType<typeof R.getOC>['BRepFilletAPI_MakeFillet']>, at: { p: Vec3; r: number }[], r: number, smooth: boolean) {
+function variableRadii(
+  mk: InstanceType<ReturnType<typeof R.getOC>['BRepFilletAPI_MakeFillet']>,
+  at: { p: Vec3; r: number }[],
+  inside: { edge: R.Edge; u: number; r: number }[],
+  r: number,
+  smooth: boolean,
+) {
   const oc = R.getOC();
   const radiusAt = (q: Vec3) => {
     let best = r;
@@ -835,23 +852,31 @@ function variableRadii(mk: InstanceType<ReturnType<typeof R.getOC>['BRepFilletAP
         q.delete();
         return out;
       });
-      if (e.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED) ends.reverse();
+      const reversed = e.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+      if (reversed) ends.reverse();
       const [r1, r2] = ends.map(radiusAt);
-      if (Math.abs(r1 - r2) < 1e-9) {
+      // the radii along the edge (contour direction): its ends and the points inside it
+      const knots: [number, number][] = [
+        [0, r1],
+        ...inside.filter((q) => q.edge.wrapped.IsSame(e)).map((q): [number, number] => [reversed ? 1 - q.u : q.u, q.r]),
+        [1, r2],
+      ].sort((x, y) => x[0] - y[0]) as [number, number][];
+      if (knots.length === 2 && (Math.abs(r1 - r2) < 1e-9 || !smooth)) {
         mk.SetRadius(r1, r2, ic, j);
         continue;
       }
-      if (!smooth) {
-        mk.SetRadius(r1, r2, ic, j);
-        continue;
-      }
-      // smoothstep: the radius levels off at both vertices
-      const n = 9;
-      const law = new oc.NCollection_Array1_gp_Pnt2d(1, n);
-      for (let i = 0; i < n; i++) {
-        const u = i / (n - 1);
-        const s = u * u * (3 - 2 * u);
-        law.SetValue(i + 1, new oc.gp_Pnt2d(u, r1 + (r2 - r1) * s));
+      // between the knots: linearly, or by smoothstep (level at each knot) — sampled for the law
+      const per = 8;
+      const law = new oc.NCollection_Array1_gp_Pnt2d(1, (knots.length - 1) * per + 1);
+      let k = 1;
+      for (let s = 0; s + 1 < knots.length; s++) {
+        const [u0, ra] = knots[s];
+        const [u1, rb] = knots[s + 1];
+        for (let i = 0; i < per + (s + 2 === knots.length ? 1 : 0); i++) {
+          const w = i / per;
+          const f = smooth ? w * w * (3 - 2 * w) : w;
+          law.SetValue(k++, new oc.gp_Pnt2d(u0 + (u1 - u0) * w, ra + (rb - ra) * f));
+        }
       }
       mk.SetRadius(law, ic, j);
       law.delete();
@@ -1251,7 +1276,7 @@ interface HoleDims {
 
 function holeDims(ctx: Ctx, f: FeatureOf<'hole'>, big: number): HoleDims {
   const p = f.params;
-  const std = p.standard === 'iso' ? isoHole(p) : null;
+  const std = p.standard === 'iso' || p.standard === 'ansi' ? standardHole(p) : null;
   if (typeof std === 'string') fail(std);
   const R0 = (std ? std.diameter : len(ctx, p.diameter, 'Diameter')) / 2;
   if (!(R0 > 0)) fail('Diameter must be positive');
@@ -1271,10 +1296,10 @@ function holeDims(ctx: Ctx, f: FeatureOf<'hole'>, big: number): HoleDims {
     if (recess < 0) fail('Recess depth must not be negative');
     d.csink = { R, angle: std ? std.csinkAngle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle'), recess };
   } else if (p.style === 'counterdrill' && d.cbore) {
-    // a countersink at the counterbore's mouth (Onshape Counterdrill); ISO: a 0.5 mm × 45° chamfer of it
-    const R = (std ? std.cboreDiameter + 1 : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
+    // a countersink at the counterbore's mouth (Onshape Counterdrill); a standard one: a small chamfer of it
+    const R = (std ? std.counterdrill.diameter : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
     if (R <= d.cbore.R) fail('Countersink diameter must exceed the counterbore diameter');
-    const angle = std ? Math.PI / 2 : ang(ctx, p.csinkAngle, 'Countersink angle');
+    const angle = std ? std.counterdrill.angle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle');
     if ((R - d.cbore.R) / Math.tan(angle / 2) >= d.cbore.depth) fail('The countersink must end above the counterbore floor: a smaller countersink or a deeper counterbore');
     d.csink = { R, angle };
   }
@@ -1550,13 +1575,15 @@ function buildRib(ctx: Ctx, f: FeatureOf<'rib'>): FeatureOutput {
   if (!targets.length) fail('There is no part for the rib to meet');
   const solid = fuseAll(targets.map((x) => x.shape));
   const big = sceneExtent(st);
+  // the sides taper from the sketch on: + wider towards the part
+  const draft = p.draft ? ang(ctx, p.draftAngle ?? '1 deg', 'Draft angle') * (p.draftFlip ? -1 : 1) : 0;
   const ribs: Shape3D[] = [];
   for (const r of p.profiles) {
     if (r.kind !== 'sketchEntity') fail('Select sketch curves for the rib');
     const n = getSketch(st, r.sketchId).frame.normal;
-    for (const e0 of resolveCurveEdges(st, r)) {
-      const e = p.extend === false ? e0 : extendToSolid(e0, solid, big);
-      const rib = ribWall(e, n, t, p.direction, p.flip, solid, big);
+    for (const e of resolveCurveEdges(st, r)) {
+      const chain = p.extend === false ? [e] : extendToSolid(e, solid, big);
+      const rib = ribWall(chain, e, n, t, p.direction, p.flip, solid, big, draft);
       if (!rib) fail('The rib does not meet a part: check its curves and direction');
       ribs.push(rib);
     }
@@ -1567,12 +1594,14 @@ function buildRib(ctx: Ctx, f: FeatureOf<'rib'>): FeatureOutput {
   return { tool, op: 'add' };
 }
 
-/** A line run on from both ends up to the solid where it points at it (Onshape: Extend profiles up to part). */
-function extendToSolid(e: R.Edge, solid: Shape3D, big: number): R.Edge {
-  if (e.geomType !== 'LINE') return e;
+/**
+ * A rib's curve run on from both ends up to the solid where it points at it (Onshape: Extend profiles up to part):
+ * a line along itself, an arc with straight lines along its tangents — the chain from start to end.
+ */
+function extendToSolid(e: R.Edge, solid: Shape3D, big: number): R.Edge[] {
+  if (e.geomType !== 'LINE' && e.geomType !== 'CIRCLE') return [e];
   const a = e.startPoint.toTuple() as Vec3;
   const b = e.endPoint.toTuple() as Vec3;
-  const d = v3.norm(v3.sub(b, a));
   // how far from p along dir the material begins (0: right there), none — it never does
   const hit = (p: Vec3, dir: Vec3): number => {
     const oc = R.getOC();
@@ -1591,10 +1620,49 @@ function extendToSolid(e: R.Edge, solid: Shape3D, big: number): R.Edge {
     common.delete();
     return Number.isFinite(best) ? Math.max(0, best) : 0;
   };
-  const ta = hit(a, v3.neg(d));
-  const tb = hit(b, d);
-  if (ta < 1e-9 && tb < 1e-9) return e;
-  return R.makeLine(v3.sub(a, v3.scale(d, ta)), v3.add(b, v3.scale(d, tb)));
+  const tangent = (u: number): Vec3 => {
+    const v = e.tangentAt(u);
+    const out = v3.norm(v.toTuple() as Vec3);
+    v.delete();
+    return out;
+  };
+  // outwards at the start (back along the curve) and at the end
+  const da = v3.neg(tangent(0));
+  const db = tangent(1);
+  const ta = hit(a, da);
+  const tb = hit(b, db);
+  if (ta < 1e-9 && tb < 1e-9) return [e];
+  const a2 = v3.add(a, v3.scale(da, ta));
+  const b2 = v3.add(b, v3.scale(db, tb));
+  if (e.geomType === 'LINE') return [R.makeLine(a2, b2)];
+  return [...(ta > 1e-9 ? [R.makeLine(a2, a)] : []), e, ...(tb > 1e-9 ? [R.makeLine(b, b2)] : [])];
+}
+
+/**
+ * Draft (Onshape Rib → Draft): the faces `pick` chooses turned by `angle` about their line on the neutral plane
+ * (through `origin`, square to `dir`) — a positive angle widens the rib along `dir`.
+ */
+function taperRib(wall: Shape3D, dir: Vec3, origin: Vec3, angle: number, pick: (f: R.Face, normal: Vec3) => boolean): Shape3D {
+  const oc = R.getOC();
+  const b = new oc.BRepOffsetAPI_DraftAngle(wall.wrapped);
+  const pln = R.makePln(origin, dir);
+  const d = R.asDir(dir);
+  let added = 0;
+  for (const face of wall.faces) {
+    const nv = face.normalAt();
+    const normal = nv.toTuple() as Vec3;
+    nv.delete();
+    if (!pick(face, normal)) continue;
+    // OCCT's positive angle closes the faces in along the pull direction: widening is the negative one
+    b.Add(face.wrapped, d, -angle, pln, true);
+    added++;
+  }
+  if (!added) return wall;
+  b.Build(new oc.Message_ProgressRange());
+  if (!b.IsDone()) fail('The rib could not be drafted: try a smaller draft angle');
+  const res = R.cast(b.Shape()) as Shape3D;
+  b.delete();
+  return res;
 }
 
 /** Wrap (Onshape): sketch regions rolled onto a cylindrical face, raised out of it or sunk into it. */
@@ -1618,26 +1686,44 @@ function buildWrap(ctx: Ctx, f: FeatureOf<'wrap'>): FeatureOutput {
   return { tool, op: p.op };
 }
 
-/** One curve's rib: the wall from it to the solid (the first way that meets it, or the other with `flip`). */
-function ribWall(e: R.Edge, n: Vec3, t: number, mode: 'parallel' | 'normal', flip: boolean, solid: Shape3D, big: number): Shape3D | null {
+/**
+ * The rib of curve `e` (`chain`: it with its extensions, start to end) out to the solid: within the sketch plane
+ * (the region the chain sweeps square to `e`'s chord, `t` thick about the plane) or along its normal (a strip `t` wide
+ * about the chain); `draft` tapers its sides from the curve on (+ wider towards the solid).
+ */
+function ribWall(
+  chain: R.Edge[],
+  e: R.Edge,
+  n: Vec3,
+  t: number,
+  mode: 'parallel' | 'normal',
+  flip: boolean,
+  solid: Shape3D,
+  big: number,
+  draft: number,
+): Shape3D | null {
   const a = e.startPoint.toTuple() as Vec3;
   const b = e.endPoint.toTuple() as Vec3;
   const mid = e.pointAt(0.5).toTuple() as Vec3;
+  const A = chain[0].startPoint.toTuple() as Vec3;
+  const B = chain[chain.length - 1].endPoint.toTuple() as Vec3;
   // within the plane: square to the curve's chord; along the normal: the normal
   const along = mode === 'parallel' ? v3.norm(v3.cross(n, v3.sub(b, a))) : n;
   for (const sign of flip ? [-1, 1] : [1, -1]) {
     const d = v3.scale(along, sign);
+    const wallOf = (len: number): Shape3D => {
+      if (mode === 'parallel') {
+        // the region the chain sweeps along d, thickened about the sketch plane
+        const moved = chain.map((x) => R.cast(R.translate(x.wrapped, v3.scale(d, len))) as R.Edge).reverse();
+        const face = R.makeFace(R.assembleWire([...chain.map((x) => x.clone()), R.makeLine(B, v3.add(B, v3.scale(d, len))), ...moved, R.makeLine(v3.add(A, v3.scale(d, len)), A)]));
+        return prism(face, n, -t / 2, t / 2);
+      }
+      const strips = chain.map((x) => prism(stripAround(x, n, t), d, 0, len));
+      return strips.length === 1 ? strips[0] : fuseAll(strips);
+    };
     let wall: Shape3D;
     try {
-      if (mode === 'parallel') {
-        // the region the curve sweeps along d, thickened about the sketch plane
-        const far = (q: Vec3) => v3.add(q, v3.scale(d, big));
-        const moved = R.cast(R.translate(e.wrapped, v3.scale(d, big))) as R.Edge;
-        const face = R.makeFace(R.assembleWire([e.clone(), R.makeLine(b, far(b)), moved, R.makeLine(far(a), a)]));
-        wall = prism(face, n, -t / 2, t / 2);
-      } else {
-        wall = prism(stripAround(e, n, t), d, 0, big);
-      }
+      wall = wallOf(big);
     } catch {
       continue;
     }
@@ -1648,7 +1734,27 @@ function ribWall(e: R.Edge, n: Vec3, t: number, mode: 'parallel' | 'normal', fli
     const [lo, hi] = bboxOf(piece);
     let reach = 0;
     for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) reach = Math.max(reach, v3.dot(v3.sub([x, y, z], mid), d));
-    if (reach < big * 0.9) return piece;
+    if (reach >= big * 0.9) continue;
+    if (Math.abs(draft) < 1e-12) return piece;
+    // drafted: the wall only as long as the rib reaches (and a little into the part: a narrowing one must not close
+    // up past it), its sides tapered from the curve on
+    const len = reach + Math.min(t, reach * 0.05);
+    const tangents = [chain[0].tangentAt(0), chain[chain.length - 1].tangentAt(1)].map((v) => {
+      const out = v3.norm(v.toTuple() as Vec3);
+      v.delete();
+      return out;
+    });
+    // the ends of the chain (planes square to it there) keep their place
+    const endCap = (f: R.Face, normal: Vec3) =>
+      f.geomType === 'PLANE' &&
+      [A, B].some((q, i) => Math.abs(v3.dot(normal, tangents[i])) > 1 - 1e-6 && Math.abs(v3.dot(v3.sub(q, f.center.toTuple() as Vec3), normal)) < 1e-6);
+    const tapered =
+      mode === 'normal'
+        ? taperRib(wallOf(len), d, mid, draft, (f, nn) => Math.abs(v3.dot(nn, d)) < 1e-6 && !endCap(f, nn))
+        : taperRib(wallOf(len), d, a, draft, (_f, nn) => Math.abs(v3.dot(nn, n)) > 1 - 1e-6);
+    const drafted = solidsOf(tapered.cut(solid)).find((s) => touches(s, probe));
+    if (!drafted) fail('The rib could not be drafted: try a smaller draft angle');
+    return drafted;
   }
   return null;
 }

@@ -300,6 +300,13 @@ export interface FilletParams {
   /** Variable: the vertices with radii of their own and those radii (the same order); elsewhere — `radius`. */
   vertices?: SelRef[];
   vertexRadii?: string[];
+  /**
+   * Variable: points inside edges with radii of their own (Onshape: points on the edge) — the edges, and for each its
+   * position along the edge (0 — start, 1 — end; none — the middle) and radius (none — `radius`), the same order.
+   */
+  pointEdges?: SelRef[];
+  pointPositions?: string[];
+  pointRadii?: string[];
   /** Variable: the radius changes smoothly (level at the vertices: no kink between edges), not linearly. */
   smooth?: boolean;
 }
@@ -386,17 +393,17 @@ export interface HoleParams {
   scopeAll: boolean;
   scope: SelRef[];
   /**
-   * Onshape Standard: ISO — the diameters come from the tables (`core/holes`) by the hole type, size, fit and pitch
-   * instead of the fields above; custom (none) — those fields.
+   * Onshape Standard: ISO (metric) or ANSI (inch) — the diameters come from the tables (`core/holes`) by the hole
+   * type, size, fit and pitch instead of the fields above; custom (none) — those fields.
    */
-  standard?: 'custom' | 'iso';
+  standard?: 'custom' | 'iso' | 'ansi';
   /** Clearance (for a screw to pass) or tapped (threaded: the tap drill, with a cosmetic thread). */
   holeType?: 'clearance' | 'tapped';
-  /** "M6". */
+  /** "M6"; ANSI: "#10", "1/4". */
   size?: string;
-  /** Clearance hole fit, ISO 273: fine, medium, coarse. */
+  /** Clearance hole fit, ISO 273 / ASME B18.2.8: close, normal, loose. */
   fit?: 'close' | 'normal' | 'loose';
-  /** Thread pitch, mm ("1.25"); none — coarse. */
+  /** Thread pitch, mm ("1.25"); ANSI: threads per inch ("28"); none — the coarse one. */
   pitch?: string;
   /** A tapped blind hole: how deep the thread goes (no deeper than the hole). */
   tapDepth?: string;
@@ -473,8 +480,12 @@ export interface RibParams extends MergeScope {
   direction: 'parallel' | 'normal';
   /** The other way (by default the way the rib meets a part). */
   flip: boolean;
-  /** Lines run on from their ends up to the parts they point at (Onshape: Extend profiles up to part). */
+  /** Curves run on from their ends up to the parts they point at (Onshape: Extend profiles up to part): lines along themselves, arcs along their tangents. */
   extend?: boolean;
+  /** The sides taper (Onshape Rib → Draft): `draftAngle` from the sketch, wider towards the part (`draftFlip` — narrower). */
+  draft?: boolean;
+  draftAngle?: string;
+  draftFlip?: boolean;
 }
 
 export interface MirrorParams {

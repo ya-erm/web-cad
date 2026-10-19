@@ -22,6 +22,7 @@ Rounds part edges with an arc of a given radius.
 | **Edges and faces to fillet** | Edges; a face means all its edges. You can select edges of different parts. |
 | **Radius** | Fillet radius (default 2 mm); for a variable one — at the vertices without a radius of their own. |
 | **Vertices with their own radius**, **Vertex 1**, **Vertex 2**… | For **Variable radius**: vertices of the selected edges and the radius at each. |
+| **Points on edges**, **Point 1: position / radius**… | For **Variable radius**: points inside edges, their position (0…1 along the edge) and radius, see [below](#points). |
 | **Smooth transition** | For **Variable radius**: the radius changes smoothly, without a kink at the vertices; otherwise linearly along each edge. |
 | **Tangent propagation** | The fillet continues onto edges that smoothly continue the selected ones (for example, around an already rounded corner). See [below](#tangent). |
 
@@ -35,6 +36,15 @@ Like Onshape's variable fillet: along an edge the radius goes from its value at 
 4. **Smooth transition** makes the radius change smoothly (it levels off at the vertices), so a chain of edges has no kinks.
 
 A vertex removed from the selection takes its radius with it. The radius at every vertex must be greater than zero.
+
+### Points inside an edge {#points}
+
+A radius of its own can sit at a point within an edge too, like Onshape's points on the edge:
+
+1. Click the **Points on edges** field and pick edges — each gets a point.
+2. In the **Point 1: position** and **Point 1: radius** rows set where it stands (the share of the edge's length from its start: 0.5 — the middle, the default) and its radius.
+
+Between the edge's ends and the point the radius changes linearly or, with **Smooth transition**, smoothly. For example, a block's vertical edge with 2 mm at its ends and 4 mm at the point 0.5: the fillet swells towards the middle. One point per edge.
 
 ```figure
 image: ../images/variable-fillet-result.png
@@ -56,7 +66,7 @@ Clear the checkbox and the fillet stays on the selected edges only, as in Onshap
 
 If the fillet cannot be cut back to the selected edges, the feature is built along the whole chain and shows a yellow warning "Edges tangent to the selected ones are included too: the blend could not be stopped at the selected edges".
 
-> **Limitation.** Points with their own radius inside an edge (not at vertices), conic cross sections and face-to-face fillets are not supported yet.
+> **Limitation.** Conic cross sections (rho) and face-to-face fillets are not supported yet.
 
 ## See also {#see-also}
 

@@ -26,8 +26,8 @@ export interface FieldSpec {
   accepts: SelToken[];
   /** Maximum number of selections (1 = single). */
   max?: number;
-  /** A parameter with a value for each selection (the same order): it loses the values of the selections removed. */
-  parallel?: string;
+  /** Parameters with a value for each selection (the same order): they lose the values of the selections removed. */
+  parallel?: string | string[];
 }
 
 export type FieldSpecs = Partial<Record<FeatureType, Record<string, FieldSpec>>>;
@@ -37,9 +37,12 @@ export function keepRefs(params: Record<string, unknown>, key: string, keep: (r:
   const refs = (params[key] as SelRef[] | undefined) ?? [];
   const kept = refs.map((r, i) => (keep(r) ? i : -1)).filter((i) => i >= 0);
   params[key] = kept.map((i) => refs[i]);
-  const values = spec?.parallel ? params[spec.parallel] : undefined;
-  // a selection with no value yet: '' (the default)
-  if (spec?.parallel && Array.isArray(values)) params[spec.parallel] = kept.map((i) => values[i] ?? '');
+  const keys = spec?.parallel === undefined ? [] : Array.isArray(spec.parallel) ? spec.parallel : [spec.parallel];
+  for (const k of keys) {
+    const values = params[k];
+    // a selection with no value yet: '' (the default)
+    if (Array.isArray(values)) params[k] = kept.map((i) => values[i] ?? '');
+  }
 }
 
 const PROFILE: SelToken[] = ['region', 'planarFace'];
@@ -81,6 +84,7 @@ export const FIELD_SPECS: FieldSpecs = {
   fillet: {
     edges: { label: 'Edges and faces to fillet', accepts: ['edge', 'face'] },
     vertices: { label: 'Vertices with their own radius', accepts: ['vertex'], parallel: 'vertexRadii' },
+    pointEdges: { label: 'Points on edges', accepts: ['edge'], parallel: ['pointPositions', 'pointRadii'] },
   },
   chamfer: { edges: { label: 'Edges and faces to chamfer', accepts: ['edge', 'face'] } },
   shell: { faces: { label: 'Faces to remove', accepts: ['face', 'part'] } },

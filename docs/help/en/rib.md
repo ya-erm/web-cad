@@ -22,12 +22,17 @@ A 40 × 30 mm base, 5 mm thick, with a 30 mm high wall. A line on **Front** runs
 | **Thickness** | The wall's thickness (default 3 mm). |
 | **Rib direction** | **Parallel to sketch plane** — the rib grows within the sketch plane, from the curve across it, its thickness split evenly about the plane (a gusset). **Normal to sketch plane** — the rib grows along the sketch's normal, its thickness split evenly about the curve (ribs dropped onto a plate). |
 | **Opposite direction** | The rib grows the other way. By default the side where it meets a part is taken. |
-| **Extend profiles up to part** | Lines run on from both ends up to the parts they point at (on by default): a gusset's line need not reach the wall and the flange exactly. |
+| **Extend profiles up to part** | Curves run on from both ends up to the parts they point at (on by default): a line along itself, an arc with straight lines along its tangents at the ends, as in Onshape. A gusset's line need not reach the wall and the flange exactly. |
+| **Draft** | The rib's sides lean by the **Draft angle**: at the sketch curve it is as thick as set, towards the part it grows wider (a moulding draft, a stronger root). The button next to the angle turns it round — the rib narrows towards the part. The rib's ends stay square. |
 | **Merge with all** / **Merge scope** | The parts the rib meets and merges with. |
 
 The rib ends where it meets a part. With no part that way, the feature says "The rib does not meet a part".
 
-> **Limitation.** Along the sketch normal a rib takes lines and arcs only. Only lines are extended (arcs are not). Ribs have no draft yet.
+## Draft {#draft}
+
+For example, a rib 2 mm thick along the sketch normal goes 10 mm down to a plate with a 5° draft. At the sketch it is 2 mm thick, at the plate 2 + 2 · 10 · tan 5° ≈ 3.75 mm. A gusset (a rib **parallel to the sketch plane**) thickens from the sketch line towards the bracket's corner. If a narrowing rib closes up before it reaches the part, the feature says "The rib could not be drafted".
+
+> **Limitation.** Along the sketch normal a rib takes lines and arcs only.
 
 ## See also {#see-also}
 

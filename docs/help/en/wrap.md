@@ -24,7 +24,7 @@ The sketch plane must run along the cylinder's axis (parallel to it). The region
 
 ## Limitations {#limits}
 
-- The region must fit on the face: no longer than the cylinder is round and not across the seam of a full cylindrical face (the line where its circle starts and ends). If it crosses the seam, move the sketch.
+- The region must fit on the face: no longer than the cylinder is round. On a full cylindrical face (a shaft, a hole) it may run across the seam too — the line where the face's circle starts and ends; on part of a cylinder it must not run past the face's edges.
 - Cylindrical faces only. Cones and freeform surfaces are not supported.
 
 ## See also {#see-also}

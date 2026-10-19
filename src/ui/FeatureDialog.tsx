@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
 import type { ConfigInput, Feature, FeatureType, HoleParams, PartStudioTab, SelRef } from '../core/types';
-import { ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
+import { standardDefaultDepths, standardDefaultSize, standardHole, standardPitches, standardSizes } from '../core/holes';
 import { FIELD_SPECS, keepRefs } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
 import { chosenLabel, configuredOf, configuredParams, inputName } from '../core/config';
@@ -489,8 +489,9 @@ function HoleStandardField() {
   const doc = useDoc((s) => s.doc);
   if (draft?.type !== 'hole' || !doc) return null;
   const p = draft.params;
-  const iso = p.standard === 'iso';
-  const size = p.size ?? 'M6';
+  const standard = p.standard === 'iso' || p.standard === 'ansi' ? p.standard : null;
+  const iso = !!standard;
+  const size = p.size ?? standardDefaultSize(standard ?? 'iso');
   const tapped = p.holeType === 'tapped';
   const unit = doc.units.length;
   const mm = (v: number) => `${formatNumber(v / LENGTH_FACTOR[unit], 4)} ${unit}`;
@@ -500,11 +501,12 @@ function HoleStandardField() {
     });
   // a new size or type: the depths it starts with
   const depthsFor = (q: Draft<HoleParams>) => {
-    const d = isoDefaultDepths(q.size ?? 'M6', q.holeType === 'tapped');
+    const s = q.standard === 'ansi' ? 'ansi' : 'iso';
+    const d = standardDefaultDepths(s, q.size ?? standardDefaultSize(s), q.holeType === 'tapped');
     q.depth = mm(d.depth);
     q.tapDepth = mm(d.tapDepth);
   };
-  const std = iso ? isoHole({ ...p, size }) : null;
+  const std = standard ? standardHole({ ...p, size }) : null;
   const row = (label: string, control: React.ReactNode) => (
     <div className="fd-row">
       <label>{t(label)}</label>
@@ -516,13 +518,18 @@ function HoleStandardField() {
       {row(
         'Standard',
         <select
-          value={iso ? 'iso' : 'custom'}
+          value={standard ?? 'custom'}
           onChange={(e) =>
             set((q) => {
-              if (e.target.value === 'iso') {
-                q.standard = 'iso';
+              const v = e.target.value;
+              if (v === 'iso' || v === 'ansi') {
+                // a size of the other standard does not carry over
+                if (q.standard !== v) {
+                  q.size = standardDefaultSize(v);
+                  delete q.pitch;
+                }
+                q.standard = v;
                 q.holeType ??= 'clearance';
-                q.size ??= 'M6';
                 depthsFor(q);
               } else delete q.standard;
             })
@@ -530,6 +537,7 @@ function HoleStandardField() {
         >
           <option value="custom">{t('Custom')}</option>
           <option value="iso">ISO</option>
+          <option value="ansi">ANSI</option>
         </select>,
       )}
       {iso && (
@@ -562,7 +570,7 @@ function HoleStandardField() {
                 })
               }
             >
-              {ISO_SIZE_NAMES.map((s) => (
+              {standardSizes(standard ?? 'iso').map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -581,9 +589,9 @@ function HoleStandardField() {
                     })
                   }
                 >
-                  {isoPitches(size).map((x, i) => (
-                    <option key={x} value={i ? String(x) : ''}>
-                      {i ? `${x} mm` : `${x} mm (${t('coarse')})`}
+                  {standardPitches(standard ?? 'iso', size).map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.coarse ? `${x.label} (${t('coarse')})` : x.label}
                     </option>
                   ))}
                 </select>,
@@ -608,8 +616,8 @@ function HoleStandardField() {
             <div className="fd-hint">
               {tapped ? `${std.thread?.designation} · ${t('tap drill')} ⌀${mm(std.diameter)}` : `⌀${mm(std.diameter)}`}
               {(p.style === 'counterbore' || p.style === 'counterdrill') && ` · ${t('counterbore')} ⌀${mm(std.cboreDiameter)} ↧${mm(std.cboreDepth)}`}
-              {p.style === 'countersink' && ` · ${t('countersink')} ⌀${mm(std.csinkDiameter)} × 90°`}
-              {p.style === 'counterdrill' && ` · ${t('countersink')} ⌀${mm(std.cboreDiameter + 1)} × 90°`}
+              {p.style === 'countersink' && ` · ${t('countersink')} ⌀${mm(std.csinkDiameter)} × ${std.csinkAngle}°`}
+              {p.style === 'counterdrill' && ` · ${t('countersink')} ⌀${mm(std.counterdrill.diameter)} × ${std.counterdrill.angle}°`}
             </div>
           )}
         </>
@@ -645,6 +653,44 @@ function VertexRadiiField() {
                 })
               }
             />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Variable fillet: for each point on an edge, its position along the edge (0…1) and radius; hovering lights the edge. */
+function EdgePointsField() {
+  const update = useEditor((s) => s.updateDraft);
+  const draft = useEditor((s) => s.editing?.draft);
+  const setHover = useEditor((s) => s.setHover);
+  if (draft?.type !== 'fillet') return null;
+  const p = draft.params;
+  const edges = p.pointEdges ?? [];
+  if (!edges.length) return <div className="fd-hint">{t('Pick edges to put a point with a radius of its own inside them')}</div>;
+  const set = (key: 'pointPositions' | 'pointRadii', i: number, val: string) =>
+    update((f) => {
+      if (f.type !== 'fillet') return;
+      const list = edges.map((_, j) => f.params[key]?.[j] ?? '');
+      list[i] = val;
+      f.params[key] = list;
+    });
+  return (
+    <>
+      {edges.map((e, i) => (
+        <div key={refKey(e)} onMouseEnter={() => setHover(e)} onMouseLeave={() => setHover(null)}>
+          <div className="fd-row">
+            <label>{`${t('Point')} ${i + 1}: ${t('position')}`}</label>
+            <div className="fd-control">
+              <ExprInput value={p.pointPositions?.[i] || '0.5'} unit="number" onChange={(val) => set('pointPositions', i, val)} />
+            </div>
+          </div>
+          <div className="fd-row">
+            <label>{`${t('Point')} ${i + 1}: ${t('radius')}`}</label>
+            <div className="fd-control">
+              <ExprInput value={p.pointRadii?.[i] || p.radius} unit="length" onChange={(val) => set('pointRadii', i, val)} />
+            </div>
           </div>
         </div>
       ))}
@@ -836,6 +882,8 @@ export function FeatureDialog() {
         return <HoleStandardField key={i} />;
       case 'vertexRadii':
         return <VertexRadiiField key={i} />;
+      case 'edgePoints':
+        return <EdgePointsField key={i} />;
       case 'section':
         return (
           <div key={i} className="sel-label">

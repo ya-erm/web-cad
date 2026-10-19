@@ -21,6 +21,54 @@ async function build(ops: unknown[]) {
 }
 
 describe('Sketch text', () => {
+  it('preserves the triangular counter of A in every font', async () => {
+    await initOpenCascade(wasm);
+    for (const font of ['sans', 'sansBold', 'mono'] as const) {
+      const d: SketchData = { plane: { kind: 'std', name: 'top' }, entities: [], constraints: [] };
+      addText(d, [0, 0], [0, 10], 'A', font);
+      const regions = computeRegions(expandTexts(d.entities));
+      expect(regions, font).toHaveLength(2);
+      expect(regions.filter((r) => isTextCounter(r, regions)), font).toHaveLength(1);
+      expect(regions.filter((r) => !isTextCounter(r, regions))[0].holes, font).toHaveLength(1);
+    }
+  }, 60000);
+
+  it('keeps Latin and Cyrillic counters after font contour preparation', async () => {
+    await initOpenCascade(wasm);
+    for (const font of ['sans', 'sansBold', 'mono'] as const) {
+      const d: SketchData = { plane: { kind: 'std', name: 'top' }, entities: [], constraints: [] };
+      addText(d, [0, 0], [0, 10], 'ABDOАВОР', font);
+      const regions = computeRegions(expandTexts(d.entities));
+      const letters = regions.filter((r) => !isTextCounter(r, regions));
+      expect(letters, font).toHaveLength(8);
+      expect(letters.reduce((n, r) => n + r.holes.length, 0), font).toBe(10);
+      expect(regions.filter((r) => isTextCounter(r, regions)), font).toHaveLength(10);
+    }
+  }, 60000);
+
+  it('extrudes A as one solid with an open counter, including when added to the help plate', async () => {
+    const letter = await build([
+      { op: 'sketch', name: 'A', shapes: [{ type: 'text', text: 'A', height: 10, font: 'sansBold' }] },
+      { op: 'extrude', depth: 1.5 },
+    ]);
+    const filled = await build([
+      { op: 'sketch', name: 'A', shapes: [{ type: 'text', text: 'A', height: 10, font: 'sansBold' }] },
+      { op: 'extrude', regions: 'all', depth: 1.5, boolean: 'add' },
+    ]);
+    expect(letter.parts).toHaveLength(1);
+    expect(filled.parts).toHaveLength(1);
+    const counterVolume = filled.parts[0].volume! - letter.parts[0].volume!;
+    expect(counterVolume).toBeGreaterThan(5);
+    const plate = await build([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 70, h: 22 }] },
+      { op: 'extrude', depth: 3 },
+      { op: 'sketch', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'text', text: 'A', height: 10, font: 'sansBold' }] },
+      { op: 'extrude', depth: 1.5, boolean: 'add' },
+    ]);
+    expect(plate.parts).toHaveLength(1);
+    expect(plate.parts[0].volume!).toBeCloseTo(70 * 22 * 3 + letter.parts[0].volume!, 4);
+  }, 60000);
+
   it('extrudes the letters: capitals as tall as the height, each letter a part', async () => {
     const model = await build([
       { op: 'sketch', name: 'Label', shapes: [{ type: 'text', text: 'HI', at: [5, 2], height: 10 }] },

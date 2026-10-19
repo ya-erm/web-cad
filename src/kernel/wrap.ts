@@ -53,8 +53,11 @@ function wrapMap(frame: PlaneFrame, t: WrapTarget, region: SketchRegion): Affine
     const a2 = U0 + s + sigma * hi;
     return Math.min(a1, a2) >= uMin - 1e-9 && Math.max(a1, a2) <= uMax + 1e-9;
   };
-  const k = [0, 2 * Math.PI, -2 * Math.PI].find(fits);
-  if (k === undefined) fail('The region does not fit on the cylindrical face (it crosses its seam or edge)');
+  // a full cylinder: the region may run across its seam (the surface goes on round) — its middle on the face
+  const full = uMax - uMin > 2 * Math.PI - 1e-6;
+  const middle = (s: number) => U0 + s + (sigma * (lo + hi)) / 2;
+  const k = [0, 2 * Math.PI, -2 * Math.PI].find(full ? (s) => middle(s) >= uMin - 1e-9 && middle(s) <= uMax + 1e-9 : fits);
+  if (k === undefined) fail('The region does not fit on the cylindrical face (it runs past its edge)');
   shift = k;
   return (q) => {
     const [u, v] = uv(q);

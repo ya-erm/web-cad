@@ -24,6 +24,8 @@ export type Row = { when?: (p: P) => boolean } & (
   | { kind: 'holeStandard' }
   /** Variable fillet: a radius for each chosen vertex. */
   | { kind: 'vertexRadii' }
+  /** Variable fillet: a position along the edge and a radius for each point on an edge. */
+  | { kind: 'edgePoints' }
   | { kind: 'section'; label: string }
 );
 
@@ -37,7 +39,7 @@ const isOp = (p: P) => p.op !== 'new';
 /** Extrude as a surface (sketch curves → a surface body). */
 const isSurfaceBody = (p: P) => p.bodyType === 'surface';
 /** A hole of a standard: its diameters come from the tables. */
-const isIso = (p: P) => p.standard === 'iso';
+const isIso = (p: P) => p.standard === 'iso' || p.standard === 'ansi';
 /** A hole with a counterbore / a countersink (both: counterdrill). */
 const hasCbore = (p: P) => p.style === 'counterbore' || p.style === 'counterdrill';
 const hasCsink = (p: P) => p.style === 'countersink' || p.style === 'counterdrill';
@@ -163,6 +165,9 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     // Variable: vertices of the edges with radii of their own
     { kind: 'sel', key: 'vertices', when: (p) => p.filletType === 'variable' },
     { kind: 'vertexRadii', when: (p) => p.filletType === 'variable' },
+    // and points inside edges: a position along the edge and a radius each
+    { kind: 'sel', key: 'pointEdges', when: (p) => p.filletType === 'variable' },
+    { kind: 'edgePoints', when: (p) => p.filletType === 'variable' },
     { kind: 'check', key: 'smooth', label: 'Smooth transition', when: (p) => p.filletType === 'variable' },
     { kind: 'check', key: 'tangentPropagation', label: 'Tangent propagation' },
   ],
@@ -359,6 +364,8 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     },
     { kind: 'flip', key: 'flip', label: 'Opposite direction' },
     { kind: 'check', key: 'extend', label: 'Extend profiles up to part' },
+    { kind: 'check', key: 'draft', label: 'Draft' },
+    { kind: 'expr', key: 'draftAngle', label: 'Draft angle', unit: 'angle', flipKey: 'draftFlip', when: (p) => !!p.draft },
     { kind: 'merge' },
   ],
   wrap: [

@@ -9,6 +9,7 @@ import type { SketchRegion } from './regions';
 import { COPY_SEP } from './patterns';
 
 export const FONT_FILES: Record<SkFont, URL> = {
+  // Overlaps must be merged before bundling: see scripts/prepare-sketch-fonts.py.
   sans: new URL('./fonts/Inter-Regular.woff', import.meta.url),
   sansBold: new URL('./fonts/Inter-SemiBold.woff', import.meta.url),
   mono: new URL('./fonts/JetBrainsMono-Regular.woff', import.meta.url),
