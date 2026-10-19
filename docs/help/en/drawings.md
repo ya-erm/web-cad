@@ -23,7 +23,7 @@ alt: The Drawing tab: standard views of a part on an A3 sheet, the sheet and vie
 2. Click **Standard views (3 + iso)** (on the empty sheet or in the **Insert view** menu). WebCAD inserts the front, side, top, and isometric views and picks a scale that fits the sheet size.
 3. To add a single view, use **Insert view** → Part Studio → **Front**, **Back**, **Top**, **Bottom**, **Left**, **Right**, or **Isometric**.
 
-Views are built from the current Part Studio model with hidden lines removed; you can show hidden lines as dashed lines.
+Views are built from the current Part Studio model with hidden lines removed; you can show hidden lines as dashed lines. Tapped [holes](hole#thread) are shown by the ISO 6410 convention: a thin three-quarter circle from the hole's mouth, thin hidden lines from the side.
 
 ## Sheet {#sheet}
 

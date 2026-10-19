@@ -26,10 +26,18 @@ export const FEATURE_TOOLS: (ToolDef | '|')[] = [
   { id: 'chamfer', icon: 'chamfer', label: 'Chamfer' },
   { id: 'draft', icon: 'draft', label: 'Draft' },
   { id: 'shell', icon: 'shell', label: 'Shell' },
+  { id: 'rib', icon: 'rib', label: 'Rib' },
+  { id: 'wrap', icon: 'wrap', label: 'Wrap' },
   { id: 'hole', icon: 'hole', label: 'Hole' },
+  '|',
+  // direct edits of faces
+  { id: 'moveFace', icon: 'moveFace', label: 'Move face' },
+  { id: 'replaceFace', icon: 'replaceFace', label: 'Replace face' },
+  { id: 'deleteFace', icon: 'deleteFace', label: 'Delete face' },
   '|',
   { id: 'linearPattern', icon: 'linearPattern', label: 'Linear pattern' },
   { id: 'circularPattern', icon: 'circularPattern', label: 'Circular pattern' },
+  { id: 'curvePattern', icon: 'curvePattern', label: 'Curve pattern' },
   { id: 'mirror', icon: 'mirror', label: 'Mirror' },
   '|',
   { id: 'boolean', icon: 'boolean', label: 'Boolean' },
@@ -65,6 +73,8 @@ export const SKETCH_TOOLS: (SketchToolDef | '|')[] = [
   { id: 'arcTangent', icon: 'arcTangent', label: 'Tangent arc', shortcut: 'Shift+A' },
   { id: 'arcCenter', icon: 'arcCenter', label: 'Center point arc' },
   { id: 'spline', icon: 'spline', label: 'Spline' },
+  { id: 'bezier', icon: 'bezier', label: 'Bezier curve' },
+  { id: 'conic', icon: 'conic', label: 'Conic' },
   { id: 'point', icon: 'point', label: 'Point' },
   { id: 'slot', icon: 'slot', label: 'Slot' },
   { id: 'polygonInscribed', icon: 'polygonInscribed', label: 'Inscribed polygon' },
@@ -74,6 +84,7 @@ export const SKETCH_TOOLS: (SketchToolDef | '|')[] = [
   { id: 'fillet', icon: 'sketchFillet', label: 'Sketch fillet', shortcut: 'Shift+F' },
   { id: 'trim', icon: 'trim', label: 'Trim', shortcut: 'M' },
   { id: 'extend', icon: 'extend', label: 'Extend' },
+  { id: 'split', icon: 'sketchSplit', label: 'Split curve' },
   { id: 'offset', icon: 'offset', label: 'Offset', shortcut: 'O' },
   { id: 'use', icon: 'use', label: 'Use', shortcut: 'U' },
   '|',
@@ -250,6 +261,9 @@ function SketchToolbar() {
           </button>
         ),
       )}
+      <button className="icon-btn" title={tip('Sketch transform')} disabled={off} onClick={() => getEngine()?.sketchEditor.startTransform()}>
+        <Icon name="sketchTransform" />
+      </button>
       <button className="icon-btn" title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
         <Icon name="sketchMirror" />
       </button>

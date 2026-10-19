@@ -61,6 +61,15 @@ export function fuseAll(shapes: Shape3D[]): Shape3D {
   return acc;
 }
 
+/** The shape with coplanar / co-surface faces merged (as it is when that fails). */
+export function simplified(s: Shape3D): Shape3D {
+  try {
+    return s.simplify();
+  } catch {
+    return s;
+  }
+}
+
 export function isEmptyShape(s: R.AnyShape | null | undefined): boolean {
   if (!s) return true;
   try {

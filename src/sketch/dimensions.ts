@@ -91,7 +91,9 @@ export function dimensionGeometry(c: SkConstraint, map: EntityMap, px: number): 
         const e0 = map.get(c.refs[0]);
         const e1 = c.refs[1] ? map.get(c.refs[1]) : undefined;
         if (!e0) return null;
-        if (e0.type === 'line' && !e1) {
+        const gap = c.type === 'distance' && c.toCurve ? curveGapEnds(c, map) : null;
+        if (gap) [a, b] = gap;
+        else if (e0.type === 'line' && !e1) {
           a = pointOf(map, e0.p1);
           b = pointOf(map, e0.p2);
         } else if (e0.type === 'point' && e1?.type === 'point') {
@@ -196,13 +198,23 @@ export function dimensionGeometry(c: SkConstraint, map: EntityMap, px: number): 
         return linear(a, b, axis, L, px);
       }
       case 'angle': {
-        const l1 = map.get(c.refs[0]);
-        const l2 = map.get(c.refs[1]);
-        if (l1?.type !== 'line' || l2?.type !== 'line') return null;
-        const a1 = pointOf(map, l1.p1);
-        const b1 = pointOf(map, l1.p2);
-        const a2 = pointOf(map, l2.p1);
-        const b2 = pointOf(map, l2.p2);
+        // two lines, or three points: the rays from the middle one (the vertex) to the others
+        let a1: Vec2, b1: Vec2, a2: Vec2, b2: Vec2;
+        if (c.refs.length === 3) {
+          const [pa, pv, pb] = c.refs.map((r) => map.get(r));
+          if (pa?.type !== 'point' || pv?.type !== 'point' || pb?.type !== 'point') return null;
+          a1 = a2 = [pv.x, pv.y];
+          b1 = [pa.x, pa.y];
+          b2 = [pb.x, pb.y];
+        } else {
+          const l1 = map.get(c.refs[0]);
+          const l2 = map.get(c.refs[1]);
+          if (l1?.type !== 'line' || l2?.type !== 'line') return null;
+          a1 = pointOf(map, l1.p1);
+          b1 = pointOf(map, l1.p2);
+          a2 = pointOf(map, l2.p1);
+          b2 = pointOf(map, l2.p2);
+        }
         const d1 = sub(b1, a1);
         const d2 = sub(b2, a2);
         const den = d1[0] * d2[1] - d1[1] * d2[0];
@@ -273,12 +285,85 @@ export function dimensionGeometry(c: SkConstraint, map: EntityMap, px: number): 
           label: L,
         };
       }
+      case 'arclength': {
+        // a dimension arc concentric with the arc, through the label, from end to end; extension lines out to it
+        const e = map.get(c.refs[0]);
+        if (e?.type !== 'arc') return null;
+        const aa = arcAngles(e, map);
+        const dir = (a: number): Vec2 => [Math.cos(a), Math.sin(a)];
+        const mid = (aa.a0 + aa.a1) / 2;
+        const L = c.labelPos ?? add(aa.c, mul(dir(mid), aa.r + off));
+        const R = Math.max(len(sub(L, aa.c)), 1e-9);
+        const segs: number[] = [];
+        const n = Math.max(8, Math.ceil((aa.a1 - aa.a0) / (Math.PI / 36)));
+        let prev: Vec2 | null = null;
+        for (let i = 0; i <= n; i++) {
+          const p = add(aa.c, mul(dir(aa.a0 + ((aa.a1 - aa.a0) * i) / n), R));
+          if (prev) segs.push(prev[0], prev[1], p[0], p[1]);
+          prev = p;
+        }
+        for (const a of [aa.a0, aa.a1]) {
+          // from the arc's end (a little off it) to past the dimension arc
+          const out = R >= aa.r ? 1 : -1;
+          const p = add(aa.c, mul(dir(a), aa.r + out * 3 * px));
+          const q = add(aa.c, mul(dir(a), R + out * 6 * px));
+          if ((R - aa.r) * out > 3 * px) segs.push(p[0], p[1], q[0], q[1]);
+        }
+        const tangent = (a: number): Vec2 => [-Math.sin(a), Math.cos(a)];
+        return {
+          segs,
+          arrows: [
+            { tip: add(aa.c, mul(dir(aa.a0), R)), dir: mul(tangent(aa.a0), -1) },
+            { tip: add(aa.c, mul(dir(aa.a1), R)), dir: tangent(aa.a1) },
+          ],
+          label: L,
+        };
+      }
       default:
         return null;
     }
   } catch {
     return null;
   }
+}
+
+/**
+ * The nearest points of a distance to a circle / arc itself (`toCurve`): from a point, a line or another circle /
+ * arc — what the dimension spans (one circle in another: across the gap inside the bigger one).
+ */
+function curveGapEnds(c: SkConstraint, map: EntityMap): [Vec2, Vec2] | null {
+  const ents = c.refs.map((r) => map.get(r));
+  const circ = (i: number) => {
+    const e = ents[i];
+    return e && (e.type === 'circle' || e.type === 'arc') ? radiusOf(e, map, e.id) : null;
+  };
+  const c0 = circ(0);
+  const c1 = circ(1);
+  const towards = (from: Vec2, to: Vec2, fallback: Vec2): Vec2 => (len(sub(to, from)) > 1e-12 ? nrm(sub(to, from)) : fallback);
+  if (c0 && c1) {
+    if ((c.variant ?? 1) < 0) {
+      // one in the other: from the bigger one's edge to the smaller one's, on the side they are nearest
+      const [big, small] = c0.r >= c1.r ? [c0, c1] : [c1, c0];
+      const u = towards(big.c, small.c, [1, 0]);
+      return [add(big.c, mul(u, big.r)), add(small.c, mul(u, small.r))];
+    }
+    const u = towards(c0.c, c1.c, [1, 0]);
+    return [add(c0.c, mul(u, c0.r)), sub(c1.c, mul(u, c1.r))];
+  }
+  const cv = c0 ?? c1;
+  const other = ents[c0 ? 1 : 0];
+  if (!cv || !other) return null;
+  if (other.type === 'point') {
+    const p: Vec2 = [other.x, other.y];
+    return [p, add(cv.c, mul(towards(cv.c, p, [1, 0]), cv.r))];
+  }
+  if (other.type === 'line') {
+    const la = pointOf(map, other.p1);
+    const u = nrm(sub(pointOf(map, other.p2), la));
+    const foot = add(la, mul(u, dot(sub(cv.c, la), u)));
+    return [foot, add(cv.c, mul(towards(cv.c, foot, perp(u)), cv.r))];
+  }
+  return null;
 }
 
 /** Arrowhead triangle vertices. */

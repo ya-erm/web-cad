@@ -17,6 +17,12 @@ export type Row = { when?: (p: P) => boolean } & (
   | { kind: 'file' }
   /** Derived: the source Part Studio and its parts. */
   | { kind: 'derivedSource' }
+  /** Derived: the source's mate connector that lands on the chosen location. */
+  | { kind: 'derivedPlaceFrom' }
+  /** Hole: its standard, type, size, fit and pitch, and the sizes they give. */
+  | { kind: 'holeStandard' }
+  /** Variable fillet: a radius for each chosen vertex. */
+  | { kind: 'vertexRadii' }
   | { kind: 'section'; label: string }
 );
 
@@ -27,6 +33,8 @@ const OPS: [string, string][] = [
   ['intersect', 'Intersect'],
 ];
 const isOp = (p: P) => p.op !== 'new';
+/** A hole of a standard: its diameters come from the tables. */
+const isIso = (p: P) => p.standard === 'iso';
 
 /** Kind of a mate connector location, for its "which point" choices. */
 function locationKind(p: P, key = 'location'): 'line' | 'circle' | 'axis' | null {
@@ -113,8 +121,20 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'merge', when: isOp },
   ],
   fillet: [
+    {
+      kind: 'segmented',
+      key: 'filletType',
+      options: [
+        ['edge', 'Constant radius'],
+        ['variable', 'Variable radius'],
+      ],
+    },
     { kind: 'sel', key: 'edges' },
     { kind: 'expr', key: 'radius', label: 'Radius', unit: 'length' },
+    // Variable: vertices of the edges with radii of their own
+    { kind: 'sel', key: 'vertices', when: (p) => p.filletType === 'variable' },
+    { kind: 'vertexRadii', when: (p) => p.filletType === 'variable' },
+    { kind: 'check', key: 'smooth', label: 'Smooth transition', when: (p) => p.filletType === 'variable' },
     { kind: 'check', key: 'tangentPropagation', label: 'Tangent propagation' },
   ],
   chamfer: [
@@ -145,6 +165,28 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'sel', key: 'faces' },
     { kind: 'expr', key: 'angle', label: 'Draft angle', unit: 'angle', flipKey: 'flip' },
   ],
+  deleteFace: [{ kind: 'sel', key: 'faces' }],
+  moveFace: [
+    {
+      kind: 'segmented',
+      key: 'moveType',
+      options: [
+        ['offset', 'Offset'],
+        ['translate', 'Translate'],
+        ['rotate', 'Rotate'],
+      ],
+    },
+    { kind: 'sel', key: 'faces' },
+    { kind: 'sel', key: 'direction', when: (p) => p.moveType === 'translate' },
+    { kind: 'sel', key: 'axis', when: (p) => p.moveType === 'rotate' },
+    { kind: 'expr', key: 'distance', label: 'Distance', unit: 'length', flipKey: 'flip', when: (p) => p.moveType !== 'rotate' },
+    { kind: 'expr', key: 'angle', label: 'Angle', unit: 'angle', flipKey: 'flip', when: (p) => p.moveType === 'rotate' },
+  ],
+  replaceFace: [
+    { kind: 'sel', key: 'faces' },
+    { kind: 'sel', key: 'target' },
+    { kind: 'expr', key: 'offset', label: 'Offset', unit: 'length', flipKey: 'flip' },
+  ],
   hole: [
     {
       kind: 'segmented',
@@ -165,13 +207,16 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
         ['throughAll', 'Through all'],
       ],
     },
-    { kind: 'expr', key: 'diameter', label: 'Diameter', unit: 'length' },
+    // Onshape: Standard (ISO) — type, size, fit / pitch; the diameters from the tables
+    { kind: 'holeStandard' },
+    { kind: 'expr', key: 'diameter', label: 'Diameter', unit: 'length', when: (p) => !isIso(p) },
     { kind: 'expr', key: 'depth', label: 'Depth', unit: 'length', when: (p) => p.endType === 'blind' },
+    { kind: 'expr', key: 'tapDepth', label: 'Tapped depth', unit: 'length', when: (p) => isIso(p) && p.holeType === 'tapped' && p.endType === 'blind' },
     { kind: 'expr', key: 'tipAngle', label: 'Tip angle', unit: 'angle', when: (p) => p.endType === 'blind' },
-    { kind: 'expr', key: 'cboreDiameter', label: 'Counterbore diameter', unit: 'length', when: (p) => p.style === 'counterbore' },
-    { kind: 'expr', key: 'cboreDepth', label: 'Counterbore depth', unit: 'length', when: (p) => p.style === 'counterbore' },
-    { kind: 'expr', key: 'csinkDiameter', label: 'Countersink diameter', unit: 'length', when: (p) => p.style === 'countersink' },
-    { kind: 'expr', key: 'csinkAngle', label: 'Countersink angle', unit: 'angle', when: (p) => p.style === 'countersink' },
+    { kind: 'expr', key: 'cboreDiameter', label: 'Counterbore diameter', unit: 'length', when: (p) => p.style === 'counterbore' && !isIso(p) },
+    { kind: 'expr', key: 'cboreDepth', label: 'Counterbore depth', unit: 'length', when: (p) => p.style === 'counterbore' && !isIso(p) },
+    { kind: 'expr', key: 'csinkDiameter', label: 'Countersink diameter', unit: 'length', when: (p) => p.style === 'countersink' && !isIso(p) },
+    { kind: 'expr', key: 'csinkAngle', label: 'Countersink angle', unit: 'angle', when: (p) => p.style === 'countersink' && !isIso(p) },
     { kind: 'check', key: 'scopeAll', label: 'Merge with all' },
     { kind: 'sel', key: 'scope', when: (p) => !p.scopeAll },
   ],
@@ -227,6 +272,63 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
       ],
       when: (p) => p.patternType === 'part',
     },
+  ],
+  curvePattern: [
+    {
+      kind: 'segmented',
+      key: 'patternType',
+      options: [
+        ['part', 'Part pattern'],
+        ['feature', 'Feature pattern'],
+      ],
+    },
+    { kind: 'sel', key: 'parts', when: (p) => p.patternType === 'part' },
+    { kind: 'features', key: 'features', label: 'Features to pattern', when: (p) => p.patternType === 'feature' },
+    { kind: 'sel', key: 'path' },
+    { kind: 'expr', key: 'count', label: 'Instance count', unit: 'number' },
+    { kind: 'check', key: 'equalSpacing', label: 'Equal spacing' },
+    { kind: 'expr', key: 'distance', label: 'Distance', unit: 'length', when: (p) => !p.equalSpacing },
+    { kind: 'flip', key: 'flip', label: 'From the other end' },
+    { kind: 'check', key: 'orient', label: 'Turn with the path' },
+    {
+      kind: 'segmented',
+      key: 'op',
+      options: [
+        ['new', 'New'],
+        ['add', 'Add'],
+      ],
+      when: (p) => p.patternType === 'part',
+    },
+  ],
+  rib: [
+    { kind: 'sel', key: 'profiles' },
+    { kind: 'expr', key: 'thickness', label: 'Thickness', unit: 'length' },
+    {
+      kind: 'select',
+      key: 'direction',
+      label: 'Rib direction',
+      options: [
+        ['parallel', 'Parallel to sketch plane'],
+        ['normal', 'Normal to sketch plane'],
+      ],
+    },
+    { kind: 'flip', key: 'flip', label: 'Opposite direction' },
+    { kind: 'check', key: 'extend', label: 'Extend profiles up to part' },
+    { kind: 'merge' },
+  ],
+  wrap: [
+    {
+      kind: 'segmented',
+      key: 'op',
+      options: [
+        ['add', 'Emboss'],
+        ['remove', 'Deboss'],
+      ],
+    },
+    { kind: 'sel', key: 'profiles' },
+    { kind: 'sel', key: 'target' },
+    { kind: 'expr', key: 'depth', label: 'Depth', unit: 'length' },
+    { kind: 'merge' },
   ],
   mirror: [
     {
@@ -330,7 +432,7 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'text', key: 'description', label: 'Description' },
   ],
   import: [{ kind: 'file' }],
-  derived: [{ kind: 'derivedSource' }],
+  derived: [{ kind: 'derivedSource' }, { kind: 'sel', key: 'placeTo' }, { kind: 'derivedPlaceFrom' }],
   helix: [
     { kind: 'sel', key: 'axis' },
     { kind: 'expr', key: 'radius', label: 'Radius', unit: 'length' },

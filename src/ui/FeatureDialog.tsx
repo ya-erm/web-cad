@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { ConfigInput, Feature, FeatureType, PartStudioTab, SelRef } from '../core/types';
-import { FIELD_SPECS } from '../core/fieldSpecs';
+import type { ConfigInput, Feature, FeatureType, HoleParams, PartStudioTab, SelRef } from '../core/types';
+import { ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
+import { FIELD_SPECS, keepRefs } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
 import { chosenLabel, configuredOf, configuredParams, inputName } from '../core/config';
-import { derivableStudios } from '../core/derived';
-import { sourcePartList } from '../store/rebuild';
+import { ConfigurationFields } from './ConfigurationFields';
+import { derivableStudios, derivedSourceKey, parseVersionStudio, sourceStudio, versionStudioId } from '../core/derived';
+import { derivableVersions, snapshotStudios, versionDocument, type VersionedDocument } from '../store/versionSources';
+import { sourceContents, type SourceContents } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
@@ -26,10 +29,16 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   chamfer: 'chamfer',
   shell: 'shell',
   draft: 'draft',
+  deleteFace: 'deleteFace',
+  moveFace: 'moveFace',
+  replaceFace: 'replaceFace',
   hole: 'hole',
   linearPattern: 'linearPattern',
   circularPattern: 'circularPattern',
+  curvePattern: 'curvePattern',
   mirror: 'mirror',
+  rib: 'rib',
+  wrap: 'wrap',
   boolean: 'boolean',
   split: 'split',
   transform: 'transform',
@@ -48,7 +57,14 @@ export function useRefLabel() {
   const studio = activeStudio(doc);
   return (r: SelRef): string => {
     const partName = (id: string) => build?.parts.find((p) => p.id === id)?.name ?? 'Part';
-    const featName = (id: string) => tName(studio?.features.find((f) => f.id === id)?.name ?? '?');
+    const featName = (id: string) => {
+      const f = studio?.features.find((x) => x.id === id);
+      if (f) return tName(f.name);
+      // a sketch brought by a Derived feature ("derivedId.sketchId"): "Derived 1 / Sketch 1"
+      const sk = build?.sketches.find((s) => s.featureId === id);
+      const owner = studio?.features.find((x) => x.id === id.split('.')[0]);
+      return sk?.name && owner ? `${tName(owner.name)} / ${tName(sk.name)}` : '?';
+    };
     switch (r.kind) {
       case 'face':
         return `${t('Face')} ${t('of')} ${partName(r.partId)}`;
@@ -64,7 +80,7 @@ export function useRefLabel() {
         const f = studio?.features.find((x) => x.id === r.sketchId);
         // a whole curve feature (helix)
         if (f && f.type !== 'sketch') return featName(r.sketchId);
-        const e = f?.type === 'sketch' ? f.params.entities.find((x) => x.id === r.entityId) : undefined;
+        const e = f?.type === 'sketch' ? f.params.entities.find((x) => x.id === r.entityId) : build?.sketches.find((s) => s.featureId === r.sketchId)?.entities.find((x) => x.id === r.entityId);
         const kind = e?.type === 'point' ? t('Sketch point') : e?.type === 'line' ? t('Sketch line') : t('Sketch curve');
         return `${kind} (${featName(r.sketchId)})`;
       }
@@ -115,10 +131,7 @@ function SelField({ fkey, type, refs }: { fkey: string; type: FeatureType; refs:
               e.stopPropagation();
               setHover(null);
               const drop = new Set(all.map(refKey));
-              update((f) => {
-                const p = f.params as unknown as Record<string, SelRef[]>;
-                p[fkey] = (p[fkey] ?? []).filter((x) => !drop.has(refKey(x)));
-              });
+              update((f) => keepRefs(f.params as unknown as Record<string, unknown>, fkey, (x) => !drop.has(refKey(x)), spec));
             }}
           >
             <Icon name="close" size={14} />
@@ -197,8 +210,50 @@ function FeaturePicker({ value, onChange, upTo }: { value: string[]; onChange: (
 }
 
 /**
- * Derived: the source — another Part Studio of the document (not one that uses this one: a cycle) — and which of
- * its parts to bring in (all by default). The parts are listed from the source's build.
+ * Derived, placed at a mate connector of this Part Studio: which point of the source lands there — its origin or
+ * one of its mate connectors (Onshape Derived location).
+ */
+function DerivedPlaceFromField() {
+  const update = useEditor((s) => s.updateDraft);
+  const draft = useEditor((s) => s.editing?.draft);
+  const doc = useDoc((s) => s.doc);
+  // a version's Part Studio is there once its snapshot is loaded (a build follows)
+  useEditor((s) => s.build);
+  if (draft?.type !== 'derived' || !draft.params.placeTo?.length) return null;
+  const source = doc && draft.params.studioId ? sourceStudio(doc, draft.params.studioId) : undefined;
+  const connectors = (source?.features ?? []).filter((f) => f.type === 'mateConnector');
+  const from = draft.params.placeFrom ?? '';
+  return (
+    <div className="fd-row">
+      <label>{t('From the source')}</label>
+      <div className="fd-control">
+        <select
+          value={from}
+          onChange={(e) =>
+            update((f) => {
+              if (f.type !== 'derived') return;
+              if (e.target.value) f.params.placeFrom = e.target.value;
+              else delete f.params.placeFrom;
+            })
+          }
+        >
+          <option value="">{t('Its origin')}</option>
+          {from && !connectors.some((c) => c.id === from) && <option value={from}>{t('(deleted)')}</option>}
+          {connectors.map((c) => (
+            <option key={c.id} value={c.id}>
+              {tName(c.name)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Derived: the source — another Part Studio of the document (not one that uses this one: a cycle), or a Part Studio
+ * of a saved version of this document or another one — and which of its parts and sketches to bring in (all parts
+ * by default). They are listed from the source's build.
  */
 function DerivedSourceField() {
   const update = useEditor((s) => s.updateDraft);
@@ -206,7 +261,12 @@ function DerivedSourceField() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const studioId = draft?.type === 'derived' ? draft.params.studioId : '';
-  const [parts, setParts] = useState<{ id: string; name: string }[] | null>(null);
+  const versionId = parseVersionStudio(studioId)?.versionId ?? '';
+  const [contents, setContents] = useState<SourceContents | null>(null);
+  // documents with versions to derive from; the chosen version's Part Studios (null: loading, []: not available)
+  const [versioned, setVersioned] = useState<VersionedDocument[]>([]);
+  const [versionStudios, setVersionStudios] = useState<PartStudioTab[] | null>(null);
+  const parts = contents?.parts ?? null;
   const options = doc && studio ? derivableStudios(doc, studio.id) : [];
   // the first possible source to start with
   useEffect(() => {
@@ -215,58 +275,144 @@ function DerivedSourceField() {
         if (f.type === 'derived') f.params.studioId = options[0].id;
       });
   }, [draft?.type, studioId, options[0]?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // the source's parts, from its build
   useEffect(() => {
     let live = true;
-    setParts(null);
-    const src = doc?.tabs.find((t): t is PartStudioTab => t.id === studioId && t.type === 'partStudio');
-    if (!doc || !src) return;
-    void sourcePartList(doc, src).then((list) => live && setParts(list), () => live && setParts([]));
+    if (doc) void derivableVersions(doc.id, doc.name).then((list) => live && setVersioned(list), () => {});
     return () => {
       live = false;
     };
-  }, [doc, studioId]);
+  }, [doc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let live = true;
+    setVersionStudios(versionId ? null : []);
+    if (versionId) void versionDocument(versionId).then((snap) => live && setVersionStudios(snap ? snapshotStudios(snap) : []));
+    return () => {
+      live = false;
+    };
+  }, [versionId]);
+  const configuration = draft?.type === 'derived' ? draft.params.configuration : undefined;
+  const loading = !!versionId && versionStudios === null;
+  const source = doc && studioId && !loading ? sourceStudio(doc, studioId) : undefined;
+  // the source's parts and sketches, from its build (in the configuration chosen for it)
+  useEffect(() => {
+    let live = true;
+    setContents(null);
+    if (!doc || !source) return;
+    void sourceContents(doc, derivedSourceKey({ studioId, configuration })).then(
+      (c) => live && setContents(c),
+      () => live && setContents({ parts: [], sketches: [] }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [doc, studioId, loading, JSON.stringify(configuration)]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!draft || draft.type !== 'derived' || !studio) return null;
   const chosen = draft.params.parts;
-  const gone = !!studioId && !doc?.tabs.some((t) => t.id === studioId);
-  const setChosen = (ids: string[]) =>
+  const noParts = !!draft.params.noParts;
+  const chosenSketches = draft.params.sketches ?? [];
+  const gone = !!studioId && !loading && !source;
+  // Part Studios of the chosen source: this document's, or the version's
+  const studioOptions = versionId ? (versionStudios ?? []).map((s) => ({ id: versionStudioId(s.id, versionId), name: s.name })) : options;
+  const chooseStudio = (id: string) =>
     update((f) => {
-      if (f.type === 'derived') f.params.parts = ids;
+      if (f.type !== 'derived') return;
+      f.params.studioId = id;
+      f.params.parts = [];
+      delete f.params.noParts;
+      delete f.params.sketches;
+      delete f.params.placeFrom;
+      delete f.params.configuration;
     });
+  const chooseVersion = async (v: string) => {
+    if (!v) return chooseStudio(options[0]?.id ?? '');
+    const snap = await versionDocument(v);
+    const first = snap ? snapshotStudios(snap)[0] : undefined;
+    // the Part Studio of the same tab in that version, if it has one
+    const same = snap && snapshotStudios(snap).find((s) => s.id === parseVersionStudio(studioId)?.tabId || s.id === studioId);
+    chooseStudio(versionStudioId((same ?? first)?.id ?? '', v));
+  };
+  const knownVersion = versioned.some((d) => d.versions.some((v) => v.id === versionId));
+  // ids: those parts; none: all of them; null: no parts at all (only sketches)
+  const setChosen = (ids: string[] | null) =>
+    update((f) => {
+      if (f.type !== 'derived') return;
+      f.params.parts = ids ?? [];
+      if (ids) delete f.params.noParts;
+      else f.params.noParts = true;
+    });
+  const setSketches = (ids: string[]) =>
+    update((f) => {
+      if (f.type !== 'derived') return;
+      if (ids.length) f.params.sketches = ids;
+      else delete f.params.sketches;
+    });
+  const partOn = (id: string) => !noParts && (!chosen.length || chosen.includes(id));
   return (
     <>
+      {(versioned.length > 0 || versionId) && (
+        // Onshape: the current state of this document, or a version — of this document or of another one
+        <div className="fd-row">
+          <label>{t('Source')}</label>
+          <div className="fd-control">
+            <select value={versionId} onChange={(e) => void chooseVersion(e.target.value)}>
+              <option value="">{t('This document (current)')}</option>
+              {versionId && !knownVersion && <option value={versionId}>{t('(deleted version)')}</option>}
+              {versioned.map((d) => (
+                <optgroup key={d.docId} label={d.docId === doc?.id ? t('Versions of this document') : d.name}>
+                  {d.versions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {d.docId === doc?.id ? v.name : `${d.name} — ${v.name}`}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
       <div className="fd-row">
         <label>{t('Part Studio')}</label>
         <div className="fd-control">
-          {options.length || gone ? (
-            <select
-              value={studioId}
-              onChange={(e) =>
-                update((f) => {
-                  if (f.type !== 'derived') return;
-                  f.params.studioId = e.target.value;
-                  f.params.parts = [];
-                })
-              }
-            >
+          {studioOptions.length || gone ? (
+            <select value={studioId} onChange={(e) => chooseStudio(e.target.value)}>
               {gone && <option value={studioId}>{t('(deleted)')}</option>}
-              {options.map((s) => (
+              {studioOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}
             </select>
+          ) : loading ? (
+            <span className="sel-empty">{t('Building the source…')}</span>
           ) : (
-            <span className="sel-empty">{t('No other Part Studio to derive from')}</span>
+            <span className="sel-empty">{versionId ? t('The version has no Part Studio') : t('No other Part Studio to derive from')}</span>
           )}
         </div>
       </div>
+      {source?.configuration?.length ? (
+        // its configuration (Onshape): an input left as in the source follows the option chosen there
+        <div className="fd-section">
+          <div className="sel-label">{t('Configuration')}</div>
+          <ConfigurationFields
+            studio={source}
+            value={configuration}
+            onChange={(c) =>
+              update((f) => {
+                if (f.type !== 'derived') return;
+                if (c) f.params.configuration = c;
+                else delete f.params.configuration;
+              })
+            }
+          />
+        </div>
+      ) : null}
       {studioId && !gone && (
         <div className="fd-section">
           <div className="sel-label">{t('Parts')}</div>
           <div className="feature-list-picker">
             <label>
-              <input type="checkbox" checked={!chosen.length} onChange={(e) => setChosen(e.target.checked ? [] : (parts ?? []).slice(0, 1).map((p) => p.id))} />
+              {/* unchecked: no parts (only sketches) */}
+              <input type="checkbox" checked={!noParts && !chosen.length} onChange={(e) => setChosen(e.target.checked ? [] : null)} />
               {t('All parts')}
             </label>
             {parts === null && <div className="sel-empty">{t('Building the source…')}</div>}
@@ -274,10 +420,12 @@ function DerivedSourceField() {
               <label key={p.id}>
                 <input
                   type="checkbox"
-                  checked={!chosen.length || chosen.includes(p.id)}
+                  checked={partOn(p.id)}
                   onChange={(e) => {
-                    const now = chosen.length ? chosen : parts.map((x) => x.id);
-                    setChosen(e.target.checked ? [...now, p.id] : now.filter((x) => x !== p.id));
+                    const now = parts.filter((x) => partOn(x.id)).map((x) => x.id);
+                    const next = e.target.checked ? [...now, p.id] : now.filter((x) => x !== p.id);
+                    // every part — all of them (also those the source makes later); none — only sketches
+                    setChosen(next.length === parts.length ? [] : next.length ? next : null);
                   }}
                 />
                 <Icon name="partItem" size={16} />
@@ -295,6 +443,208 @@ function DerivedSourceField() {
           </div>
         </div>
       )}
+      {studioId && !gone && (contents?.sketches.length || chosenSketches.length) ? (
+        // Onshape: sketches of the source come in too, their regions to extrude, their curves to use
+        <div className="fd-section">
+          <div className="sel-label">{t('Sketches')}</div>
+          <div className="feature-list-picker">
+            {contents?.sketches.map((s) => (
+              <label key={s.id}>
+                <input
+                  type="checkbox"
+                  checked={chosenSketches.includes(s.id)}
+                  onChange={(e) => setSketches(e.target.checked ? [...chosenSketches, s.id] : chosenSketches.filter((x) => x !== s.id))}
+                />
+                <Icon name="sketch" size={16} />
+                {tName(s.name)}
+              </label>
+            ))}
+            {contents &&
+              chosenSketches
+                .filter((id) => !contents.sketches.some((s) => s.id === id))
+                .map((id) => (
+                  <label key={id} className="gone">
+                    <input type="checkbox" checked onChange={() => setSketches(chosenSketches.filter((x) => x !== id))} />
+                    <Icon name="warning" size={16} />
+                    {t('A sketch that is gone')}
+                  </label>
+                ))}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Hole: Standard (Onshape) — custom (its own diameters) or ISO: clearance or tapped, the size, the fit of a clearance
+ * hole or the pitch of a tapped one; the sizes they give are shown (the fields of the diameters are not). A new size
+ * starts the depths as Onshape does: threaded 2 d deep, drilled a little deeper.
+ */
+function HoleStandardField() {
+  const update = useEditor((s) => s.updateDraft);
+  const draft = useEditor((s) => s.editing?.draft);
+  const doc = useDoc((s) => s.doc);
+  if (draft?.type !== 'hole' || !doc) return null;
+  const p = draft.params;
+  const iso = p.standard === 'iso';
+  const size = p.size ?? 'M6';
+  const tapped = p.holeType === 'tapped';
+  const unit = doc.units.length;
+  const mm = (v: number) => `${formatNumber(v / LENGTH_FACTOR[unit], 4)} ${unit}`;
+  const set = (fn: (q: Draft<HoleParams>) => void) =>
+    update((f) => {
+      if (f.type === 'hole') fn(f.params);
+    });
+  // a new size or type: the depths it starts with
+  const depthsFor = (q: Draft<HoleParams>) => {
+    const d = isoDefaultDepths(q.size ?? 'M6', q.holeType === 'tapped');
+    q.depth = mm(d.depth);
+    q.tapDepth = mm(d.tapDepth);
+  };
+  const std = iso ? isoHole({ ...p, size }) : null;
+  const row = (label: string, control: React.ReactNode) => (
+    <div className="fd-row">
+      <label>{t(label)}</label>
+      <div className="fd-control">{control}</div>
+    </div>
+  );
+  return (
+    <>
+      {row(
+        'Standard',
+        <select
+          value={iso ? 'iso' : 'custom'}
+          onChange={(e) =>
+            set((q) => {
+              if (e.target.value === 'iso') {
+                q.standard = 'iso';
+                q.holeType ??= 'clearance';
+                q.size ??= 'M6';
+                depthsFor(q);
+              } else delete q.standard;
+            })
+          }
+        >
+          <option value="custom">{t('Custom')}</option>
+          <option value="iso">ISO</option>
+        </select>,
+      )}
+      {iso && (
+        <>
+          {row(
+            'Type',
+            <select
+              value={p.holeType ?? 'clearance'}
+              onChange={(e) =>
+                set((q) => {
+                  q.holeType = e.target.value as 'clearance' | 'tapped';
+                  delete q.pitch;
+                  depthsFor(q);
+                })
+              }
+            >
+              <option value="clearance">{t('Clearance')}</option>
+              <option value="tapped">{t('Tapped')}</option>
+            </select>,
+          )}
+          {row(
+            'Size',
+            <select
+              value={size}
+              onChange={(e) =>
+                set((q) => {
+                  q.size = e.target.value;
+                  delete q.pitch;
+                  depthsFor(q);
+                })
+              }
+            >
+              {ISO_SIZE_NAMES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>,
+          )}
+          {tapped
+            ? row(
+                'Pitch',
+                <select
+                  value={p.pitch ?? ''}
+                  onChange={(e) =>
+                    set((q) => {
+                      if (e.target.value) q.pitch = e.target.value;
+                      else delete q.pitch;
+                    })
+                  }
+                >
+                  {isoPitches(size).map((x, i) => (
+                    <option key={x} value={i ? String(x) : ''}>
+                      {i ? `${x} mm` : `${x} mm (${t('coarse')})`}
+                    </option>
+                  ))}
+                </select>,
+              )
+            : row(
+                'Fit',
+                <select
+                  value={p.fit ?? 'normal'}
+                  onChange={(e) =>
+                    set((q) => {
+                      q.fit = e.target.value as 'close' | 'normal' | 'loose';
+                    })
+                  }
+                >
+                  <option value="close">{t('Close fit')}</option>
+                  <option value="normal">{t('Normal fit')}</option>
+                  <option value="loose">{t('Loose fit')}</option>
+                </select>,
+              )}
+          {std && typeof std !== 'string' && (
+            // the sizes the standard gives
+            <div className="fd-hint">
+              {tapped ? `${std.thread?.designation} · ${t('tap drill')} ⌀${mm(std.diameter)}` : `⌀${mm(std.diameter)}`}
+              {p.style === 'counterbore' && ` · ${t('counterbore')} ⌀${mm(std.cboreDiameter)} ↧${mm(std.cboreDepth)}`}
+              {p.style === 'countersink' && ` · ${t('countersink')} ⌀${mm(std.csinkDiameter)} × 90°`}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Variable fillet: a radius for each chosen vertex (empty — the fillet's radius); hovering a row lights its vertex. */
+function VertexRadiiField() {
+  const update = useEditor((s) => s.updateDraft);
+  const draft = useEditor((s) => s.editing?.draft);
+  const setHover = useEditor((s) => s.setHover);
+  if (draft?.type !== 'fillet') return null;
+  const p = draft.params;
+  const vertices = p.vertices ?? [];
+  if (!vertices.length) return <div className="fd-hint">{t('Pick vertices of the edges to give them radii of their own')}</div>;
+  return (
+    <>
+      {vertices.map((v, i) => (
+        <div key={refKey(v)} className="fd-row" onMouseEnter={() => setHover(v)} onMouseLeave={() => setHover(null)}>
+          <label>{`${t('Vertex')} ${i + 1}`}</label>
+          <div className="fd-control">
+            <ExprInput
+              value={p.vertexRadii?.[i] || p.radius}
+              unit="length"
+              onChange={(val) =>
+                update((f) => {
+                  if (f.type !== 'fillet') return;
+                  const radii = vertices.map((_, j) => f.params.vertexRadii?.[j] ?? '');
+                  radii[i] = val;
+                  f.params.vertexRadii = radii;
+                })
+              }
+            />
+          </div>
+        </div>
+      ))}
     </>
   );
 }
@@ -375,7 +725,7 @@ export function FeatureDialog() {
         return (
           <div key={i} className="segmented">
             {row.options.map(([v, label]) => (
-              <button key={v} className={p[row.key] === v ? 'on' : ''} onClick={() => set(row.key, v)}>
+              <button key={v} className={(p[row.key] ?? row.options[0][0]) === v ? 'on' : ''} onClick={() => set(row.key, v)}>
                 {t(label)}
               </button>
             ))}
@@ -477,6 +827,12 @@ export function FeatureDialog() {
         return <FileField key={i} />;
       case 'derivedSource':
         return <DerivedSourceField key={i} />;
+      case 'derivedPlaceFrom':
+        return <DerivedPlaceFromField key={i} />;
+      case 'holeStandard':
+        return <HoleStandardField key={i} />;
+      case 'vertexRadii':
+        return <VertexRadiiField key={i} />;
       case 'section':
         return (
           <div key={i} className="sel-label">

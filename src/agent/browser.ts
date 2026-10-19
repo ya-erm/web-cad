@@ -3,7 +3,8 @@
 
 import type { Draft } from 'immer';
 import type { CadDocument, ConfigInput, DocTab, Feature, PartStudioTab } from '../core/types';
-import { buildDerivedSources } from '../core/derived';
+import { buildDerivedSources, sourceUnits } from '../core/derived';
+import { derivableVersions, loadVersionSources, versionDocument } from '../store/versionSources';
 import { kernel } from '../kernel/client';
 import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
@@ -16,7 +17,7 @@ import { buildStudio } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
-import { AgentError, findDerivedSource, queryModel, runOps, summarize, type AgentKernel } from './runner';
+import { AgentError, derivedVariant, findDerivedSource, queryModel, runOps, summarize, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -41,21 +42,40 @@ function agentKernel(studio: PartStudioTab, doc: CadDocument): AgentKernel {
   return {
     async build(features: Feature[]) {
       await kernel().ready();
-      // the Part Studios it derives from first (their own agent builders)
-      const fs = await buildDerivedSources(doc, studio.id, features, keyOf, (s, feats) =>
-        kernel().build(keyOf(s.id), { units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }),
+      // the Part Studios it derives from first (their own agent builders), the versions among them loaded
+      await loadVersionSources(doc, features);
+      const fs = await buildDerivedSources(doc, studio.id, features, keyOf, (s, feats, u) =>
+        kernel().build(keyOf(s.id), { units: u, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }),
       );
       return kernel().build(studioKey, { units, features: fs, partMeta: metaOf(studio), upTo: fs.length });
     },
-    async derivedSource(name, forStudio) {
+    async derivedSource(name, forStudio, names, from) {
       await kernel().ready();
-      const s = findDerivedSource(doc, name, forStudio);
+      // a saved version: of this document, or of another one by name
+      let versionId: string | undefined;
+      if (from) {
+        const docs = await derivableVersions(doc.id, doc.name);
+        const lower = (x: string) => x.toLowerCase();
+        const d = from.document ? (docs.find((x) => x.name === from.document) ?? docs.find((x) => lower(x.name) === lower(from.document!))) : docs.find((x) => x.docId === doc.id);
+        if (!d) throw new AgentError(from.document ? `No document "${from.document}" with versions. Documents with versions: ${docs.map((x) => x.name).join(', ') || '(none)'}` : 'This document has no versions');
+        const v = d.versions.find((x) => x.name === from.version) ?? d.versions.find((x) => lower(x.name) === lower(from.version));
+        if (!v) throw new AgentError(`No version "${from.version}" of ${d.name}. Versions: ${d.versions.map((x) => x.name).join(', ')}`);
+        versionId = v.id;
+        // with the versions it derives from in turn
+        const snap = await versionDocument(v.id);
+        if (snap) await loadVersionSources(snap);
+      }
+      const base = findDerivedSource(doc, name, forStudio, versionId);
+      // in the configuration chosen for it (its builder: the variant's)
+      const { studio: s, configuration } = derivedVariant(base, names, units.length);
       const upTo = s.rollback ?? s.features.length;
-      const fs = await buildDerivedSources(doc, s.id, configuredFeatures(s).slice(0, upTo), keyOf, (x, feats) =>
-        kernel().build(keyOf(x.id), { units, features: feats, partMeta: metaOf(x), upTo: feats.length, meshless: true }),
+      const fs = await buildDerivedSources(doc, s.id, configuredFeatures(s).slice(0, upTo), keyOf, (x, feats, u) =>
+        kernel().build(keyOf(x.id), { units: u, features: feats, partMeta: metaOf(x), upTo: feats.length, meshless: true }),
       );
-      const res = await kernel().build(keyOf(s.id), { units, features: fs, partMeta: metaOf(s), upTo, meshless: true });
-      return { studioId: s.id, name: s.name, parts: res.partList ?? [] };
+      const res = await kernel().build(keyOf(s.id), { units: sourceUnits(doc, s.id), features: fs, partMeta: metaOf(s), upTo, meshless: true });
+      const connectors = s.features.filter((f) => f.type === 'mateConnector').map((f) => ({ id: f.id, name: f.name }));
+      const sketches = res.sketches.map((x) => ({ id: x.featureId, name: x.name ?? x.featureId }));
+      return { studioId: base.id, name: base.name, parts: res.partList ?? [], connectors, sketches, ...(configuration ? { configuration } : {}) };
     },
     async measure(refs) {
       return (await kernel().measure({ studioKey, refs })).items;

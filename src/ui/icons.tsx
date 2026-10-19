@@ -309,6 +309,31 @@ const ICONS = {
       <path d="M12 8 V20" {...THIN} {...DASH} />
     </>
   ),
+  // A grey block whose top face (blue) is taken away: the remove badge.
+  deleteFace: (
+    <>
+      {obox(3, 9, 12, 10, 4.5, 4.5, GREY_SHADE)}
+      <polygon points="3,9 7.5,4.5 19.5,4.5 15,9" fill={BLUE_FILL} stroke={BLUE} />
+      {badge('remove')}
+    </>
+  ),
+  // A grey block, its top face lifted (blue, dashed where it was) with an arrow.
+  moveFace: (
+    <>
+      {obox(3, 11, 12, 9, 4.5, 4.5, GREY_SHADE)}
+      <polygon points="3,11 7.5,6.5 19.5,6.5 15,11" fill="none" {...THIN} {...DASH} />
+      <polygon points="3,6.5 7.5,2 19.5,2 15,6.5" fill={BLUE_FILL} stroke={BLUE} />
+      <path d="M21.5 15 V7.5 M19.5 9.5 L21.5 7.5 L23.5 9.5" stroke={BLUE} strokeWidth={1.5} />
+    </>
+  ),
+  // A grey block whose top face goes to a slanted plane (blue).
+  replaceFace: (
+    <>
+      {obox(3, 11, 12, 9, 4.5, 4.5, GREY_SHADE)}
+      <polygon points="1.5,9 6,3 22,1.5 17.5,7.5" fill={BLUE_FILL} stroke={BLUE} opacity={0.85} />
+      <path d="M3 11 V9.3 M15 11 V7.8 M19.5 6.5 V5.7" {...THIN} {...DASH} />
+    </>
+  ),
   // L-bracket with a triangular rib in its inner corner.
   rib: (
     <g transform={MIRROR_X}>
@@ -354,6 +379,16 @@ const ICONS = {
       {cyl(4.5, 4.5, 6.5, GREY_SHADE)}
       {cyl(12, 11.5, 6.5)}
       {cyl(19.5, 6, 6.5)}
+    </>
+  ),
+  // A grey cylinder with a blue band rolled round it (the orange sketch rectangle it came from on the right).
+  wrap: (
+    <>
+      <path d="M3 6 V18 A5 2 0 0 0 13 18 V6" fill={GREY_LEFT} />
+      <ellipse cx={8} cy={6} rx={5} ry={2} fill={GREY_TOP} />
+      <path d="M3 10 A5 2 0 0 0 13 10 V14 A5 2 0 0 1 3 14 Z" fill={BLUE_FILL} stroke={BLUE} {...SMALL} />
+      <rect x={15.5} y={9.5} width={6} height={5} fill={ORANGE_FILL} stroke={ORANGE} {...SMALL} />
+      <path d="M15 12 H13.5 M14.75 10.75 L13.5 12 L14.75 13.25" stroke={BLUE} {...SMALL} />
     </>
   ),
   // L-shaped part and its mirror image on the other side of a plane.
@@ -578,6 +613,27 @@ const ICONS = {
       {pt(21, 7)}
     </>
   ),
+  /** A cubic Bézier with its control polygon. */
+  bezier: (
+    <>
+      <path d="M3 19 L6 5 L18 5 L21 19" {...THIN} {...DASH} />
+      <path d="M3 19 C6 5 18 5 21 19" stroke={ORANGE} strokeWidth={1.75} />
+      {pt(3, 19)}
+      {pt(21, 19)}
+      <rect x={4.75} y={3.75} width={2.5} height={2.5} fill={WHITE} {...THIN} />
+      <rect x={16.75} y={3.75} width={2.5} height={2.5} fill={WHITE} {...THIN} />
+    </>
+  ),
+  /** A conic: two ends, the apex of the tangents, the curve between. */
+  conic: (
+    <>
+      <path d="M3 20 L12 4 L21 20" {...THIN} {...DASH} />
+      <path d="M3 20 Q12 4 21 20" stroke={ORANGE} strokeWidth={1.75} />
+      {pt(3, 20)}
+      {pt(21, 20)}
+      <circle cx={12} cy={12} r={1.4} fill={BLUE} stroke="none" />
+    </>
+  ),
   point: (
     <>
       <path d="M12 3 V7.5 M12 16.5 V21 M3 12 H7.5 M16.5 12 H21" {...THIN} />
@@ -715,6 +771,15 @@ const ICONS = {
     </>
   ),
   // Square moved (straight arrow) and rotated (curved arrow).
+  /** Split a curve: a line in two pieces with the split point between them. */
+  sketchSplit: (
+    <>
+      <path d="M3 18 L10 11.5" stroke={ORANGE} strokeWidth={2} />
+      <path d="M14 8.5 L21 2" strokeWidth={2} />
+      <circle cx={12} cy={10} r={2.25} fill={WHITE} stroke={BLUE} strokeWidth={1.75} />
+      <path d="M8 21 L16 21 M12 18 L12 14.5" {...SMALL} />
+    </>
+  ),
   sketchTransform: (
     <>
       <rect x={3} y={13.5} width={7} height={7} />

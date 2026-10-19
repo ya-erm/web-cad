@@ -18,9 +18,23 @@ Rounds part edges with an arc of a given radius.
 
 | Field | Description |
 |---|---|
+| **Constant radius** / **Variable radius** | One radius all along, or radii of their own at some vertices, see [below](#variable). |
 | **Edges and faces to fillet** | Edges; a face means all its edges. You can select edges of different parts. |
-| **Radius** | Fillet radius (default 2 mm). |
+| **Radius** | Fillet radius (default 2 mm); for a variable one — at the vertices without a radius of their own. |
+| **Vertices with their own radius**, **Vertex 1**, **Vertex 2**… | For **Variable radius**: vertices of the selected edges and the radius at each. |
+| **Smooth transition** | For **Variable radius**: the radius changes smoothly, without a kink at the vertices; otherwise linearly along each edge. |
 | **Tangent propagation** | The fillet continues onto edges that smoothly continue the selected ones (for example, around an already rounded corner). See [below](#tangent). |
+
+## Variable radius {#variable}
+
+Like Onshape's variable fillet: along an edge the radius goes from its value at one vertex to the one at the other.
+
+1. Choose **Variable radius** and the edges.
+2. Click the **Vertices with their own radius** field and pick the ends of the edges in the graphics area.
+3. Each vertex gets a row **Vertex 1**, **Vertex 2**… — set its radius there. The vertices without one take the common **Radius**.
+4. **Smooth transition** makes the radius change smoothly (it levels off at the vertices), so a chain of edges has no kinks.
+
+A vertex removed from the selection takes its radius with it. The radius at every vertex must be greater than zero.
 
 ## Tips {#tips}
 
@@ -35,7 +49,7 @@ Clear the checkbox and the fillet stays on the selected edges only, as in Onshap
 
 If the fillet cannot be cut back to the selected edges, the feature is built along the whole chain and shows a yellow warning "Edges tangent to the selected ones are included too: the blend could not be stopped at the selected edges".
 
-> **Limitation.** Variable radius and face-to-face fillets are not supported yet.
+> **Limitation.** Points with their own radius inside an edge (not at vertices), conic cross sections and face-to-face fillets are not supported yet.
 
 ## See also {#see-also}
 

@@ -2,7 +2,7 @@
 // are resolved against the model built just before the feature that uses them, so references
 // carry the same persistent signatures as picks made in the UI.
 
-import type { CadDocument, ConfigInput, Feature, FeatureOf, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
+import type { CadDocument, ConfigInput, Feature, FeatureOf, FeatureType, MateInference, PartStudioTab, PlaneRef, SelRef, SkEntity, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, EdgeInfo, FaceInfo, PartMesh } from '../kernel/protocol';
 import { collectVariables, defaultParams, FEATURE_LABELS, isDimension, makeEvalContext, nextFeatureName } from '../core/features';
 import { formatQuantity, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
@@ -10,8 +10,22 @@ import { uid } from '../core/ids';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { computeRegions, regionAt, type SketchRegion } from '../sketch/regions';
 import { pointInPolygon } from '../sketch/curves';
-import { chosenLabel, configKey, configuredFeatures, DIM, inputName, inputVariable, ownValue, pruneConfiguration, setConfigured, splitConfigKey } from '../core/config';
-import { derivesFrom } from '../core/derived';
+import {
+  chosenLabel,
+  configKey,
+  configuredFeatures,
+  configurationFromNames,
+  DIM,
+  inputName,
+  inputVariable,
+  ownValue,
+  pruneConfiguration,
+  setConfigured,
+  splitConfigKey,
+  variantStudio,
+} from '../core/config';
+import { derivesFrom, sourceStudio, versionSnapshot, versionStudioId } from '../core/derived';
+import { ISO_SIZES, ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot } from '../sketch/sketchOps';
@@ -40,11 +54,18 @@ import type {
 
 export class AgentError extends Error {}
 
-/** Derived: the Part Studio named `name` in the document, as a source for Part Studio `forStudio` (no cycles). */
-export function findDerivedSource(doc: { tabs: CadDocument['tabs']; units: CadDocument['units'] }, name: string, forStudio: string): PartStudioTab {
-  const studios = doc.tabs.filter((t): t is PartStudioTab => t.type === 'partStudio');
+/**
+ * Derived: the Part Studio named `name` in the document, as a source for Part Studio `forStudio` (no cycles) — or in
+ * a saved version (`versionId`, its snapshot loaded): then a Part Studio "tab@version".
+ */
+export function findDerivedSource(doc: { tabs: CadDocument['tabs']; units: CadDocument['units'] }, name: string, forStudio: string, versionId?: string): PartStudioTab {
+  const snap = versionId ? versionSnapshot(versionId) : doc;
+  if (!snap) throw new AgentError('The version is not available');
+  const studios = snap.tabs.filter((t): t is PartStudioTab => t.type === 'partStudio');
   const s = studios.find((t) => t.name === name || t.id === name) ?? studios.find((t) => t.name.toLowerCase() === name.toLowerCase());
-  if (!s) throw new AgentError(`No Part Studio "${name}". Part Studios: ${studios.map((t) => t.name).join(', ')}`);
+  if (!s) throw new AgentError(`No Part Studio "${name}"${versionId ? ' in the version' : ''}. Part Studios: ${studios.map((t) => t.name).join(', ')}`);
+  // a version's Part Studio: its Derived features use the version's own Part Studios, no cycle is possible
+  if (versionId) return sourceStudio(doc, versionStudioId(s.id, versionId))!;
   if (s.id === forStudio) throw new AgentError('A Part Studio cannot derive from itself');
   if (derivesFrom(doc, s.id, forStudio)) throw new AgentError(`"${s.name}" uses this Part Studio: deriving from it would be a circular reference`);
   return s;
@@ -56,9 +77,45 @@ export interface AgentKernel {
   measure(refs: SelRef[]): Promise<{ label: string; value: number }[]>;
   /**
    * Derived: another Part Studio of the document by name (not one that uses Part Studio `forStudio` — a cycle),
-   * built, with its parts.
+   * built, with its parts; or a Part Studio of a saved version (`from.version` by name, of this document or of
+   * `from.document`).
    */
-  derivedSource?(name: string, forStudio: string): Promise<{ studioId: string; name: string; parts: { id: string; name: string }[] }>;
+  derivedSource?(
+    name: string,
+    forStudio: string,
+    configuration?: Record<string, string | number>,
+    from?: { version: string; document?: string },
+  ): Promise<{
+    studioId: string;
+    name: string;
+    parts: { id: string; name: string }[];
+    configuration?: Record<string, string>;
+    /** Its mate connectors (feature ids and names). */
+    connectors?: { id: string; name: string }[];
+    /** Its sketches (ids in its build and names). */
+    sketches?: { id: string; name: string }[];
+  }>;
+}
+
+/** A sketch to take regions from: its id (in the build) and entities. */
+interface ProfileSketch {
+  id: string;
+  name: string;
+  entities: SkEntity[];
+}
+
+/**
+ * The configuration a Derived feature chooses for its source, from names (see `configurationFromNames`), and the
+ * source as that configuration builds it.
+ */
+export function derivedVariant(studio: PartStudioTab, names: Record<string, string | number> | undefined, lengthUnit: string) {
+  if (!names || !Object.keys(names).length) return { studio, configuration: undefined };
+  try {
+    const configuration = configurationFromNames(studio, names, lengthUnit);
+    return { studio: variantStudio(studio, configuration), configuration };
+  } catch (e) {
+    throw new AgentError(`${studio.name}: ${(e as Error).message}`);
+  }
 }
 
 type Units = CadDocument['units'];
@@ -132,6 +189,20 @@ class Runner {
     const f = this.feature(id);
     if (f.type !== 'sketch') throw new AgentError(`"${name}" is not a sketch`);
     return f;
+  }
+
+  /** A sketch whose regions to use: one of this Part Studio, or one a Derived feature brings ("Derived 1 / Sketch 1"). */
+  async profileSketch(name: string | undefined): Promise<ProfileSketch> {
+    const m = name?.match(/^(.+?)\s*\/\s*(.+)$/);
+    const d = m && this.s.features.find((f) => f.type === 'derived' && (f.name === m[1] || f.name.toLowerCase() === m[1].toLowerCase()));
+    if (m && d) {
+      const list = (await this.model()).sketches.filter((s) => s.featureId.startsWith(`${d.id}.`));
+      const s = list.find((x) => x.name === m[2]) ?? list.find((x) => x.name?.toLowerCase() === m[2].toLowerCase());
+      if (!s) throw new AgentError(`No sketch "${m[2]}" in ${d.name}. Its sketches: ${list.map((x) => x.name).join(', ') || '(none)'}`);
+      return { id: s.featureId, name: `${d.name} / ${s.name}`, entities: s.entities };
+    }
+    const sk = this.sketchFeature(name);
+    return { id: sk.id, name: sk.name, entities: sk.params.entities };
   }
 
   // ----- values -------------------------------------------------------------
@@ -410,8 +481,8 @@ class Runner {
     return { kind: 'vertex', partId: best.part.id, index: best.i, sig: vertexSig([v[best.i * 3], v[best.i * 3 + 1], v[best.i * 3 + 2]], best.part.bbox) };
   }
 
-  regions(sk: Feature & { type: 'sketch' }, spec: Regions | undefined): SelRef[] {
-    const regions = computeRegions(sk.params.entities);
+  regions(sk: ProfileSketch, spec: Regions | undefined): SelRef[] {
+    const regions = computeRegions(sk.entities);
     if (!regions.length) throw new AgentError(`Sketch "${sk.name}" has no closed regions`);
     let pick: SketchRegion[];
     if (spec === undefined || spec === 'auto') {
@@ -445,7 +516,7 @@ class Runner {
           return this.parts(arg as Parts);
         case '$regions': {
           const a = (arg ?? {}) as { sketch?: string; regions?: Regions };
-          return this.regions(this.sketchFeature(a.sketch), a.regions);
+          return this.regions(await this.profileSketch(a.sketch), a.regions);
         }
         case '$plane':
           return [await this.planeRef(arg as PlaneSpec)];
@@ -453,10 +524,8 @@ class Runner {
           return [(await this.axis(arg as AxisSpec)).ref];
         case '$sketchPoints':
           return this.sketchPoints(this.sketchFeature(arg as string));
-        case '$sketchCurves': {
-          const sk = this.sketchFeature(arg as string);
-          return sk.params.entities.filter((e) => e.type !== 'point' && !e.construction).map((e) => ({ kind: 'sketchEntity', sketchId: sk.id, entityId: e.id }));
-        }
+        case '$sketchCurves':
+          return this.sketchCurves(this.sketchFeature(arg as string));
         case '$feature':
           return this.feature(arg as string).id;
         case '$features':
@@ -468,6 +537,11 @@ class Runner {
     const out: Record<string, unknown> = {};
     for (const k of keys) out[k] = await this.resolveParams(o[k]);
     return out;
+  }
+
+  /** The curves of a sketch (not points, not construction geometry). */
+  sketchCurves(sk: Feature & { type: 'sketch' }): SelRef[] {
+    return sk.params.entities.filter((e) => e.type !== 'point' && !e.construction).map((e) => ({ kind: 'sketchEntity', sketchId: sk.id, entityId: e.id }));
   }
 
   sketchPoints(sk: Feature & { type: 'sketch' }): SelRef[] {
@@ -619,7 +693,7 @@ class Runner {
         return;
       }
       case 'extrude': {
-        const sk = this.sketchFeature(op.sketch);
+        const sk = await this.profileSketch(op.sketch);
         const p = defaultParams('extrude');
         p.profiles = this.regions(sk, op.regions);
         p.depth = this.expr(op.depth, 'length', '10 mm');
@@ -642,7 +716,7 @@ class Runner {
         return;
       }
       case 'revolve': {
-        const sk = this.sketchFeature(op.sketch);
+        const sk = await this.profileSketch(op.sketch);
         const p = defaultParams('revolve');
         p.profiles = this.regions(sk, op.regions);
         const ax = await this.axis(op.axis);
@@ -661,6 +735,17 @@ class Runner {
         p.edges = await this.edges(op.edges);
         p.radius = this.expr(op.radius, 'length', '2 mm');
         if (op.tangentPropagation === false) p.tangentPropagation = false;
+        if (op.vertices?.length) {
+          // a variable fillet: radii at vertices (the nearest vertex of the model to each point)
+          p.filletType = 'variable';
+          p.vertices = [];
+          p.vertexRadii = [];
+          for (const v of op.vertices) {
+            p.vertices.push(await this.vertexNear(v.at));
+            p.vertexRadii.push(this.expr(v.radius, 'length', p.radius));
+          }
+          if (op.smooth) p.smooth = true;
+        }
         this.add('fillet', op.name, p);
         return;
       }
@@ -669,6 +754,10 @@ class Runner {
         p.edges = await this.edges(op.edges);
         p.distance = this.expr(op.distance, 'length', '2 mm');
         if (op.tangentPropagation === false) p.tangentPropagation = false;
+        if (op.type) p.chamferType = op.type;
+        p.distance2 = this.expr(op.distance2, 'length', p.distance2);
+        p.angle = this.expr(op.angle, 'angle', p.angle);
+        if (op.flip) p.flip = true;
         this.add('chamfer', op.name, p);
         return;
       }
@@ -680,11 +769,54 @@ class Runner {
         this.add('shell', op.name, p);
         return;
       }
+      case 'deleteFace': {
+        const p = defaultParams('deleteFace');
+        p.faces = await this.faces(op.faces);
+        this.add('deleteFace', op.name, p);
+        return;
+      }
+      case 'moveFace': {
+        const p = defaultParams('moveFace');
+        p.faces = await this.faces(op.faces);
+        if (op.translate) {
+          const d = await this.axis(op.translate.direction);
+          Object.assign(p, { moveType: 'translate', direction: [d.ref], flip: d.flip, distance: this.expr(op.translate.distance, 'length', p.distance) });
+        } else if (op.rotate) {
+          const a = await this.axis(op.rotate.axis);
+          Object.assign(p, { moveType: 'rotate', axis: [a.ref], flip: a.flip, angle: this.expr(op.rotate.angle, 'angle', p.angle) });
+        } else if (op.offset !== undefined) p.distance = this.expr(op.offset, 'length', p.distance);
+        else throw new AgentError('moveFace needs "offset", "translate" or "rotate"');
+        this.add('moveFace', op.name, p);
+        return;
+      }
+      case 'replaceFace': {
+        const p = defaultParams('replaceFace');
+        p.faces = await this.faces(op.faces);
+        p.target = [await this.planeRef(op.with)];
+        p.offset = this.expr(op.offset, 'length', p.offset);
+        if (op.flip) p.flip = true;
+        this.add('replaceFace', op.name, p);
+        return;
+      }
       case 'hole': {
         const p = defaultParams('hole');
         p.points = this.sketchPoints(this.sketchFeature(op.sketch));
         p.diameter = this.expr(op.diameter, 'length', '5 mm');
         if (op.through) p.endType = 'throughAll';
+        if (op.iso) {
+          // the diameters from the ISO tables; the depths, unless given, as a new hole of that size starts with
+          const size = Object.keys(ISO_SIZES).find((s) => s.toLowerCase() === op.iso!.size.toLowerCase());
+          if (!size) throw new AgentError(`No ISO size "${op.iso.size}". Sizes: ${ISO_SIZE_NAMES.join(', ')}`);
+          const tapped = op.iso.type === 'tapped';
+          Object.assign(p, { standard: 'iso', size, holeType: tapped ? 'tapped' : 'clearance' });
+          if (op.iso.fit) p.fit = op.iso.fit;
+          if (op.iso.pitch !== undefined && op.iso.pitch !== isoPitches(size)[0]) p.pitch = String(op.iso.pitch);
+          const bad = isoHole(p);
+          if (typeof bad === 'string') throw new AgentError(`${bad}. Pitches: ${isoPitches(size).join(', ')}`);
+          const d = isoDefaultDepths(size, tapped);
+          p.depth = `${d.depth} mm`;
+          p.tapDepth = this.expr(op.iso.tapDepth, 'length', `${d.tapDepth} mm`);
+        }
         p.depth = this.expr(op.depth, 'length', p.depth);
         if (op.style) p.style = op.style;
         p.cboreDiameter = this.expr(op.cboreDiameter, 'length', p.cboreDiameter);
@@ -723,6 +855,43 @@ class Runner {
         p.angle = this.expr(op.angle, 'angle', p.angle);
         if (op.boolean) p.op = op.boolean;
         this.add('circularPattern', op.name, p);
+        return;
+      }
+      case 'curvePattern': {
+        const p = defaultParams('curvePattern');
+        await this.patternSource(p, op.features, op.parts);
+        p.path = 'sketch' in op.path ? this.sketchCurves(this.sketchFeature(op.path.sketch)) : await this.edges(op.path.edges);
+        p.count = this.expr(op.count, 'number', p.count);
+        if (op.distance !== undefined) {
+          p.equalSpacing = false;
+          p.distance = this.expr(op.distance, 'length', p.distance);
+        }
+        if (op.flip) p.flip = true;
+        if (op.orient === false) p.orient = false;
+        if (op.boolean) p.op = op.boolean;
+        this.add('curvePattern', op.name, p);
+        return;
+      }
+      case 'rib': {
+        const p = defaultParams('rib');
+        p.profiles = this.sketchCurves(this.sketchFeature(op.sketch));
+        if (!p.profiles.length) throw new AgentError('The sketch has no curves for the rib');
+        p.thickness = this.expr(op.thickness, 'length', p.thickness);
+        if (op.normal) p.direction = 'normal';
+        if (op.flip) p.flip = true;
+        if (op.extend === false) p.extend = false;
+        this.add('rib', op.name, p);
+        return;
+      }
+      case 'wrap': {
+        const p = defaultParams('wrap');
+        p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
+        const onto = await this.faces(op.onto);
+        if (!onto.length) throw new AgentError('No face to wrap onto');
+        p.target = [onto[0]];
+        p.depth = this.expr(op.depth, 'length', p.depth);
+        if (op.boolean) p.op = op.boolean;
+        this.add('wrap', op.name, p);
         return;
       }
       case 'mirror': {
@@ -842,13 +1011,34 @@ class Runner {
       }
       case 'derived': {
         if (!this.kernel.derivedSource) throw new AgentError('Derived needs the document: run it on a document');
-        const src = await this.kernel.derivedSource(op.studio, this.s.id);
+        if (op.document && !op.version) throw new AgentError('"document" needs "version": other documents are derived from their versions');
+        const src = await this.kernel.derivedSource(op.studio, this.s.id, op.configuration, op.version ? { version: op.version, document: op.document } : undefined);
+        // parts: [] — none (only its sketches)
         const parts = (op.parts ?? []).map((n) => {
           const p = src.parts.find((x) => x.name === n || x.id === n) ?? src.parts.find((x) => x.name.toLowerCase() === n.toLowerCase());
           if (!p) throw new AgentError(`No part "${n}" in ${src.name}. Parts: ${src.parts.map((x) => x.name).join(', ') || '(none)'}`);
           return p.id;
         });
-        this.add('derived', op.name, { studioId: src.studioId, parts });
+        const sketches = (op.sketches ?? []).map((n) => {
+          const list = src.sketches ?? [];
+          const s = list.find((x) => x.name === n || x.id === n) ?? list.find((x) => x.name.toLowerCase() === n.toLowerCase());
+          if (!s) throw new AgentError(`No sketch "${n}" in ${src.name}. Sketches: ${list.map((x) => x.name).join(', ') || '(none)'}`);
+          return s.id;
+        });
+        if (op.parts && !op.parts.length && !sketches.length) throw new AgentError('Derived with "parts": [] needs "sketches"');
+        // placed at a mate connector of this Part Studio: the source's origin (or its mate connector `from`) there
+        const placeFrom = op.from ? src.connectors?.find((c) => c.name === op.from || c.name.toLowerCase() === op.from!.toLowerCase())?.id : undefined;
+        if (op.from && !placeFrom) throw new AgentError(`No mate connector "${op.from}" in ${src.name}. Mate connectors: ${src.connectors?.map((c) => c.name).join(', ') || '(none)'}`);
+        if (op.from && !op.at) throw new AgentError('"from" needs "at": the mate connector of this Part Studio to put it on');
+        this.add('derived', op.name, {
+          studioId: src.studioId,
+          parts,
+          ...(op.parts && !op.parts.length ? { noParts: true } : {}),
+          ...(sketches.length ? { sketches } : {}),
+          placeTo: op.at ? [this.mateRef(op.at)] : [],
+          ...(placeFrom ? { placeFrom } : {}),
+          ...(src.configuration ? { configuration: src.configuration } : {}),
+        });
         return;
       }
       case 'configuration': {
@@ -980,6 +1170,12 @@ function dedupe(refs: SelRef[]): SelRef[] {
 // Public entry points
 // ---------------------------------------------------------------------------
 
+/** A sketch a Derived feature brings (its key "derivedId.sketchId"): "Derived 1 / Sketch 1". */
+function derivedSketchName(studio: PartStudioTab, key: string, name: string | undefined): string {
+  const owner = studio.features.find((f) => f.id === key.split('.')[0]);
+  return owner && name ? `${owner.name} / ${name}` : key;
+}
+
 /** Summary of the model built from `studio` (document units). */
 export async function summarize(studio: PartStudioTab, units: Units, kernel: AgentKernel, build?: BuildResult): Promise<ModelSummary> {
   const rollback = studio.rollback === null ? studio.features.length : studio.rollback;
@@ -1037,7 +1233,8 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
     variables: Object.fromEntries(Object.entries(vars).map(([n, q]) => [n, formatQuantity(q, units.length)])),
     parts,
     sketches: res.sketches.map((s) => ({
-      name: studio.features.find((f) => f.id === s.featureId)?.name ?? s.featureId,
+      // one a Derived feature brings: "Derived 1 / Sketch 1"
+      name: studio.features.find((f) => f.id === s.featureId)?.name ?? derivedSketchName(studio, s.featureId, s.name),
       origin: round3(s.frame.origin.map((v) => v / k) as Vec3),
       xDir: round3(s.frame.xDir),
       yDir: round3(s.frame.yDir),
@@ -1051,6 +1248,17 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       zDir: round3(m.frame.normal),
       ...(m.owner && partNames.has(m.owner) ? { owner: partNames.get(m.owner) } : {}),
     })),
+    ...(res.threads?.length
+      ? {
+          threads: res.threads.map((t) => ({
+            designation: t.designation,
+            origin: round3(t.origin.map((v) => v / k) as Vec3),
+            dir: round3(t.dir),
+            length: round(t.length / k),
+            ...(t.owner && partNames.has(t.owner) ? { part: partNames.get(t.owner) } : {}),
+          })),
+        }
+      : {}),
   };
 }
 

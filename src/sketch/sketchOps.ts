@@ -4,6 +4,7 @@ import type { ConstraintType, SkArc, SkConstraint, SkEntity, SkLine, SkPoint, Sk
 import { uid } from '../core/ids';
 import { arcAngles, entityMap, intersectEntities, naturalHandles, pointOf, type EntityMap } from './curves';
 import { cleanPatterns, copyId, isCopyId, parseCopyId } from './patterns';
+import { frozenValues } from './solver';
 
 export type Snap =
   | { kind: 'point'; id: string; pos: Vec2 }
@@ -113,6 +114,40 @@ export function addSplineHandle(d: SketchData, splineId: string, end: 'h0' | 'h1
   const id = addPoint(d, pos ?? nat[end], splineId, true);
   sp[end] = id;
   return id;
+}
+
+/**
+ * A cubic Bézier curve (Onshape Bezier): a spline through its two ends whose tangent handles are the two inner
+ * control points — the one span of such a spline is exactly that Bézier.
+ */
+export function addBezier(d: SketchData, p0: Vec2, c1: Vec2, c2: Vec2, p3: Vec2, construction = false) {
+  const s = addSpline(d, [p0, p3], false, construction);
+  const h0 = addSplineHandle(d, s.id, 'h0', c1);
+  const h1 = addSplineHandle(d, s.id, 'h1', c2);
+  return { ...s, h0, h1 };
+}
+
+/**
+ * A conic (Onshape Conic) from `p0` to `p2` whose tangents there meet at `apex`, with its ρ (0.5 — a parabola;
+ * less — an ellipse arc, more — a hyperbola), as the inner control points of a cubic Bézier: on the tangents, at
+ * 4ρ/3 of the way to the apex. Exact for the parabola; for the others very close (a quarter circle: 0.03 %).
+ */
+export function conicControls(p0: Vec2, p2: Vec2, apex: Vec2, rho: number): [Vec2, Vec2] {
+  const k = (4 * rho) / 3;
+  return [
+    [p0[0] + (apex[0] - p0[0]) * k, p0[1] + (apex[1] - p0[1]) * k],
+    [p2[0] + (apex[0] - p2[0]) * k, p2[1] + (apex[1] - p2[1]) * k],
+  ];
+}
+
+/** The ρ of a conic through `shoulder`: how far it goes from the chord's middle towards the apex (kept in 0.05…0.95). */
+export function conicRho(p0: Vec2, p2: Vec2, apex: Vec2, shoulder: Vec2): number {
+  const m: Vec2 = [(p0[0] + p2[0]) / 2, (p0[1] + p2[1]) / 2];
+  const v: Vec2 = [apex[0] - m[0], apex[1] - m[1]];
+  const l2 = v[0] * v[0] + v[1] * v[1];
+  if (l2 < 1e-18) return 0.5;
+  const rho = ((shoulder[0] - m[0]) * v[0] + (shoulder[1] - m[1]) * v[1]) / l2;
+  return Math.min(0.95, Math.max(0.05, rho));
 }
 
 /** The spline end ('h0': first point, 'h1': last) at a point id, if that point is one of its ends. */
@@ -508,6 +543,94 @@ export function trimEntity(d: SketchData, id: string, at: Vec2): boolean {
   }
   deleteItems(d, [id]);
   return true;
+}
+
+/**
+ * Split a line or an arc at the point of it nearest to `at` (Onshape Split): it becomes two pieces joined there —
+ * a line's stay collinear, an arc's on one circle. The constraints of its far end go to the second piece. The id of
+ * the second piece, or null (a circle, another curve, or `at` at an end).
+ */
+export function splitEntity(d: SketchData, id: string, at: Vec2): string | null {
+  const map = entityMap(d.entities);
+  const ent = map.get(id);
+  const setPt = (pid: string, p: Vec2) => {
+    const e = d.entities.find((x) => x.id === pid);
+    if (e && e.type === 'point') [e.x, e.y] = p;
+  };
+  /** The constraints of the old far end go to the new piece's far end. */
+  const moveEnd = (from: string, to: string) => {
+    for (const c of d.constraints) c.refs = c.refs.map((r) => (r === from ? to : r));
+  };
+  if (ent?.type === 'line') {
+    const a = pointOf(map, ent.p1);
+    const b = pointOf(map, ent.p2);
+    const L2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+    if (L2 < 1e-18) return null;
+    const t = ((at[0] - a[0]) * (b[0] - a[0]) + (at[1] - a[1]) * (b[1] - a[1])) / L2;
+    if (!(t > 1e-6 && t < 1 - 1e-6)) return null;
+    const P: Vec2 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    // its length no longer holds; the second piece keeps its direction
+    d.constraints = d.constraints.filter((c) => !(c.refs.length === 1 && c.refs[0] === id && (c.type === 'distance' || c.type === 'fix')));
+    const nl = addLine(d, P, b, ent.construction);
+    moveEnd(ent.p2, nl.p2);
+    for (const c of d.constraints.filter((c) => c.refs.length === 1 && c.refs[0] === id && (c.type === 'horizontal' || c.type === 'vertical')))
+      addConstraint(d, c.type, [nl.id]);
+    setPt(ent.p2, P);
+    addConstraint(d, 'coincident', [ent.p2, nl.p1]);
+    addConstraint(d, 'parallel', [id, nl.id]);
+    return nl.id;
+  }
+  if (ent?.type === 'arc') {
+    const aa = arcAngles(ent, map);
+    const ang = Math.atan2(at[1] - aa.c[1], at[0] - aa.c[0]);
+    const t = (((ang - aa.a0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    if (!(t > 1e-6 && t < aa.a1 - aa.a0 - 1e-6)) return null;
+    const P: Vec2 = [aa.c[0] + aa.r * Math.cos(ang), aa.c[1] + aa.r * Math.sin(ang)];
+    d.constraints = d.constraints.filter((c) => !(c.refs.length === 1 && c.refs[0] === id && (c.type === 'arclength' || c.type === 'fix')));
+    const na = addArc(d, aa.c, P, pointOf(map, ent.p2), ent.construction);
+    moveEnd(ent.p2, na.p2);
+    setPt(ent.p2, P);
+    addConstraint(d, 'coincident', [ent.p2, na.p1]);
+    addConstraint(d, 'coincident', [na.c, ent.c]);
+    addConstraint(d, 'equal', [id, na.id]);
+    return na.id;
+  }
+  return null;
+}
+
+/**
+ * Move entities (with their own points) by a rigid motion `xf`, turning by `rotate` radians (Onshape sketch
+ * Transform). Constraints tying them to other entities go — they would hold them back; with a turn, so do their
+ * horizontal / vertical ones (a quarter turn swaps them). Fixed ones are fixed at the new place, dimension labels
+ * move with them. The number of constraints removed.
+ */
+export function moveEntities(d: SketchData, ids: string[], xf: (p: Vec2) => Vec2, rotate = 0): number {
+  const moved = withOwned(d, patternableIds(d, ids));
+  for (const e of d.entities) {
+    if (!moved.has(e.id)) continue;
+    if (e.type === 'point') [e.x, e.y] = xf([e.x, e.y]);
+    else if (e.type === 'ellipse') e.rot += rotate;
+  }
+  const quarter = Math.round(rotate / (Math.PI / 2));
+  const square = Math.abs(rotate - quarter * (Math.PI / 2)) < 1e-9;
+  const turned = Math.abs(Math.sin(rotate)) > 1e-9 || Math.cos(rotate) < 0;
+  const swap: Partial<Record<ConstraintType, ConstraintType>> = { horizontal: 'vertical', vertical: 'horizontal', hdistance: 'vdistance', vdistance: 'hdistance' };
+  const before = d.constraints.length;
+  d.constraints = d.constraints.filter((c) => {
+    const inside = c.refs.filter((r) => moved.has(r)).length;
+    if (!inside) return true;
+    if (inside < c.refs.length) return false;
+    if (turned && swap[c.type]) {
+      if (!square) return false;
+      if (quarter % 2) c.type = swap[c.type]!;
+      // the side the distance keeps is taken again from the geometry
+      delete c.variant;
+    }
+    if (c.labelPos) c.labelPos = xf(c.labelPos);
+    if (c.type === 'fix' && c.refs.length === 1) c.frozen = frozenValues(c.refs[0], d.entities);
+    return true;
+  });
+  return before - d.constraints.length;
 }
 
 export function attachToHit(d: SketchData, pid: string, others: SkEntity[], p: Vec2) {

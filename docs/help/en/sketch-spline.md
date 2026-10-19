@@ -37,4 +37,16 @@ As in Onshape, the direction of a spline at its ends is set by **tangent handles
 
 Handles move with the spline and are copied by [patterns](sketch-pattern) and [mirror](sketch-mirror).
 
-> **Limitation.** [Offset](sketch-offset) does not support splines.
+## Bezier curve {#bezier}
+
+**Bezier curve** on the sketch toolbar draws a cubic Bézier curve: click the **start**, **two control points** and the **end**. While you place the points, the control polygon is shown, after the third one the curve itself.
+
+The result is a spline through two points (start and end) with both [tangent handles](#handles) at the control points: such a spline is exactly the Bézier curve. Edit it as a spline afterwards — by dragging its ends and handles, with constraints and dimensions. Ends placed on points or curves are attached to them.
+
+## Conic {#conic}
+
+**Conic** (like Onshape's Conic) draws a second-order curve by its tangents: click the **start**, the **end** and the point where the **tangents** at the ends **meet**. Then move the cursor from the middle of the chord towards that point — this sets **ρ** (how close the curve comes to the apex): `0.5` is a parabola, less an ellipse arc, more a hyperbola. A click finishes the curve.
+
+A conic is built as the same Bézier curve (a spline with handles on the tangents): exactly for ρ = 0.5 (a parabola), within hundredths of a percent for the others (a quarter circle: 0.03 %). ρ is not kept afterwards: the curve is edited as a spline.
+
+> **Limitation.** [Offset](sketch-offset) does not support splines. Text in sketches is not available yet.

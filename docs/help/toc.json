@@ -46,8 +46,10 @@
         { "id": "sketch-fillet", "icon": "sketchFillet", "title": { "ru": "Скругление в эскизе", "en": "Sketch fillet" } },
         { "id": "sketch-trim", "icon": "trim", "title": { "ru": "Обрезка", "en": "Trim" } },
         { "id": "sketch-extend", "icon": "extend", "title": { "ru": "Удлинение", "en": "Extend" } },
+        { "id": "sketch-split", "icon": "sketchSplit", "title": { "ru": "Разбить кривую", "en": "Split curve" } },
         { "id": "sketch-offset", "icon": "offset", "title": { "ru": "Смещение", "en": "Offset" } },
         { "id": "sketch-use", "icon": "use", "title": { "ru": "Проецирование (Use)", "en": "Use (project)" } },
+        { "id": "sketch-transform", "icon": "sketchTransform", "title": { "ru": "Перемещение и поворот", "en": "Sketch transform" } },
         { "id": "sketch-mirror", "icon": "sketchMirror", "title": { "ru": "Зеркало в эскизе", "en": "Sketch mirror" } },
         { "id": "sketch-pattern", "icon": "sketchLinearPattern", "title": { "ru": "Массивы в эскизе", "en": "Sketch patterns" } },
         {
@@ -76,6 +78,7 @@
             { "id": "dimension-distance", "icon": "dimension", "title": { "ru": "Длина и расстояние", "en": "Length and distance" } },
             { "id": "dimension-radius", "icon": "circleCenter", "title": { "ru": "Радиус и диаметр", "en": "Radius and diameter" } },
             { "id": "dimension-angle", "icon": "dimension", "title": { "ru": "Угол", "en": "Angle" } },
+            { "id": "dimension-arc-length", "icon": "arcCenter", "title": { "ru": "Длина дуги", "en": "Arc length" } },
             { "id": "dimension-offset", "icon": "offset", "title": { "ru": "Размер смещения", "en": "Offset dimension" } }
           ]
         }
@@ -94,9 +97,15 @@
         { "id": "chamfer", "icon": "chamfer", "title": { "ru": "Фаска", "en": "Chamfer" } },
         { "id": "shell", "icon": "shell", "title": { "ru": "Оболочка", "en": "Shell" } },
         { "id": "draft", "icon": "draft", "title": { "ru": "Уклон", "en": "Draft" } },
+        { "id": "rib", "icon": "rib", "title": { "ru": "Ребро жёсткости", "en": "Rib" } },
+        { "id": "wrap", "icon": "wrap", "title": { "ru": "Обёртывание", "en": "Wrap" } },
+        { "id": "move-face", "icon": "moveFace", "title": { "ru": "Переместить грань", "en": "Move face" } },
+        { "id": "replace-face", "icon": "replaceFace", "title": { "ru": "Заменить грань", "en": "Replace face" } },
+        { "id": "delete-face", "icon": "deleteFace", "title": { "ru": "Удалить грань", "en": "Delete face" } },
         { "id": "hole", "icon": "hole", "title": { "ru": "Отверстие", "en": "Hole" } },
         { "id": "linear-pattern", "icon": "linearPattern", "title": { "ru": "Линейный массив", "en": "Linear pattern" } },
         { "id": "circular-pattern", "icon": "circularPattern", "title": { "ru": "Круговой массив", "en": "Circular pattern" } },
+        { "id": "curve-pattern", "icon": "curvePattern", "title": { "ru": "Массив по кривой", "en": "Curve pattern" } },
         { "id": "mirror", "icon": "mirror", "title": { "ru": "Зеркало", "en": "Mirror" } },
         { "id": "boolean", "icon": "boolean", "title": { "ru": "Булева операция", "en": "Boolean" } },
         { "id": "split", "icon": "split", "title": { "ru": "Разделение", "en": "Split" } },

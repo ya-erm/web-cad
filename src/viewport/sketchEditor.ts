@@ -10,7 +10,7 @@ import { STD_PLANES, toLocal } from '../core/math';
 import { collectVariables, isDimension, makeEvalContext, sketchDims } from '../core/features';
 import { configuredOf } from '../core/config';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
-import { sampleEntity } from '../sketch/curves';
+import { sampleEntity, sampleSpline } from '../sketch/curves';
 import { arcAngles, closestPointOnEntity, entityMap, naturalHandles, pointOf, type EntityMap } from '../sketch/curves';
 import { extensionPoint, inferDirection, type DirectionInference } from '../sketch/inference';
 import { computeRegions } from '../sketch/regions';
@@ -39,11 +39,17 @@ import {
   trimEntity,
   mirrorEntities,
   patternableIds,
+  copyEntities,
+  moveEntities,
+  splitEntity,
+  addBezier,
+  conicControls,
+  conicRho,
   type Snap,
 } from '../sketch/sketchOps';
 import { arrowTriangle, dimensionGeometry } from '../sketch/dimensions';
 import { CONSTRAINT_GLYPH_SVG } from '../ui/constraintGlyphs';
-import { refKey, useEditor, type SketchTool } from '../store/editorStore';
+import { refKey, useEditor, type SketchTool, type SketchTransformState } from '../store/editorStore';
 import { addUsedGeometry, projectGeometry } from '../sketch/useGeometry';
 import { applyOffset, chainIdsOf, chainPolylines, computeOffset, extendEntity, extendTarget, offsetChains, offsetDistanceAt } from '../sketch/offset';
 import type { SelToken } from '../core/fieldSpecs';
@@ -72,7 +78,8 @@ type ToolState =
   | { k: 'circle'; c: Pt }
   | { k: 'multi'; pts: Pt[] }
   | { k: 'tarc'; start: Vec2; startPoint: string; tangent: Vec2; curveId: string }
-  | { k: 'dim'; refs: string[] }
+  /** `toCurve`: a circle / arc picked with Shift — the distance to it, not to its centre. */
+  | { k: 'dim'; refs: string[]; toCurve?: boolean }
   | { k: 'offset'; ids: string[] }
   /** Polygon size locked: moving the cursor (or typing) sets the number of sides (Onshape). */
   | { k: 'polySides'; c: Pt; v: Vec2; base: number; startPx: number };
@@ -105,6 +112,8 @@ const DRAW_TOOLS = new Set<SketchTool>([
   'arcTangent',
   'arcCenter',
   'spline',
+  'bezier',
+  'conic',
   'point',
   'slot',
   'polygon',
@@ -346,6 +355,8 @@ export class SketchEditor {
       arcCenter: 'Click the center, the start and the end of the arc.',
       arcTangent: 'Start at the end of a line or arc.',
       spline: 'Click points; double-click or Enter to finish.',
+      bezier: 'Click the start, two control points and the end.',
+      conic: 'Click the start, the end, the point where its tangents meet, then move to set ρ and click.',
       point: 'Click to place points.',
       slot: 'Click two centers, then the width.',
       polygon: 'Click the center, then a vertex; then move the cursor or type a number to set the sides (3–50) and click.',
@@ -353,11 +364,12 @@ export class SketchEditor {
       ellipse: 'Click the center, the major axis end and a point for the minor radius.',
       fillet: 'Click a corner where two lines meet.',
       trim: 'Click the piece of a curve to remove.',
+      split: 'Click a line or an arc where to split it in two.',
       extend: 'Click near the end of a line or arc to extend it to the next curve.',
       offset: 'Click a curve (its connected chain is picked, Shift adds more), then click on the side and distance to offset.',
       use: 'Click edges, faces, vertices or entities of other sketches to project them into this sketch.',
       plane: 'Select a plane or a planar face for the sketch.',
-      dimension: 'Click entities, then click to place the dimension.',
+      dimension: 'Click entities, then click to place the dimension. A circle with Shift: to the circle itself; three points: an angle.',
       select: 'Select entities, drag to move. Use the constraint tools to constrain.',
     };
     useEditor.setState({ sketch: { ...s, hint: text ?? hints[this.toolName] } });
@@ -649,7 +661,7 @@ export class SketchEditor {
     this.snap = this.toolName === 'select' ? null : this.computeSnap(x, y, p, exclude, anchor);
     this.trackAcquire();
     const pickTools: SketchTool[] = ['select', 'dimension', 'trim', 'fillet'];
-    if (this.toolName === 'extend') useEditor.getState().setSketchHover(this.curveHit(x, y)?.id ?? null);
+    if (this.toolName === 'extend' || this.toolName === 'split') useEditor.getState().setSketchHover(this.curveHit(x, y)?.id ?? null);
     else if (pickTools.includes(this.toolName) || (this.toolName === 'offset' && this.tool.k !== 'offset')) {
       const hit = this.hitEntity(x, y);
       useEditor.getState().setSketchHover(hit?.id ?? null);
@@ -912,6 +924,16 @@ export class SketchEditor {
         return true;
       }
     }
+    if (useEditor.getState().sketchTransform) {
+      if (e.key === 'Enter') {
+        this.applyTransform();
+        return true;
+      }
+      if (e.key === 'Escape') {
+        this.cancelTransform();
+        return true;
+      }
+    }
     if (e.key === 'Escape') {
       if (this.tool.k !== 'idle') this.endTool();
       else if ((useEditor.getState().sketch?.selection.length ?? 0) > 0) useEditor.getState().setSketchSelection([]);
@@ -1162,9 +1184,11 @@ export class SketchEditor {
       case 'arcCenter':
       case 'slot':
       case 'ellipse':
+      case 'bezier':
+      case 'conic':
       case 'spline': {
         const pts = this.tool.k === 'multi' ? [...this.tool.pts, { pos, snap }] : [{ pos, snap }];
-        const need: Partial<Record<SketchTool, number>> = { circle3pt: 3, arc3pt: 3, arcCenter: 3, slot: 3, ellipse: 3 };
+        const need: Partial<Record<SketchTool, number>> = { circle3pt: 3, arc3pt: 3, arcCenter: 3, slot: 3, ellipse: 3, bezier: 4, conic: 4 };
         const n = need[this.toolName];
         if (n === undefined || pts.length < n) {
           this.tool = { k: 'multi', pts };
@@ -1235,6 +1259,22 @@ export class SketchEditor {
         });
         return;
       }
+      case 'split': {
+        // a line / an arc in two at the clicked point (Onshape Split)
+        const hit = this.curveHit(x, y);
+        if (!hit || isCopyId(hit.id)) return;
+        const type = this.map().get(hit.id)?.type;
+        if (type !== 'line' && type !== 'arc') {
+          ed.showToast('Only a line or an arc can be split', 'error');
+          return;
+        }
+        const out = { id: null as string | null };
+        this.change((d) => {
+          out.id = splitEntity(d, hit.id, p);
+        });
+        if (!out.id) ed.showToast('Click inside the curve, not at its end', 'error');
+        return;
+      }
       case 'extend': {
         const hit = this.curveHit(x, y);
         if (!hit || isCopyId(hit.id)) return;
@@ -1268,7 +1308,7 @@ export class SketchEditor {
         return;
       }
       case 'dimension':
-        this.dimensionClick(x, y, p);
+        this.dimensionClick(x, y, p, e.shiftKey);
         return;
       case 'use': {
         const ref = this.engine.pickRef(x, y, USE_ACCEPTS);
@@ -1436,6 +1476,19 @@ export class SketchEditor {
           ]);
         return;
       }
+      case 'bezier':
+      case 'conic': {
+        // a cubic Bézier: start, two control points, end; a conic: start, end, the apex of its tangents, ρ
+        const [p0, a, b, q] = P;
+        const [start, c1, c2, end] = this.toolName === 'bezier' ? [p0, a, b, q] : [p0, ...conicControls(p0, a, b, conicRho(p0, a, b, q)), a];
+        if (Math.hypot(end[0] - start[0], end[1] - start[1]) < 1e-9) return;
+        this.change((d) => {
+          const s = addBezier(d, start, c1, c2, end, cons);
+          applySnap(d, s.pts[0], pts[0].snap);
+          applySnap(d, s.pts[1], pts[this.toolName === 'bezier' ? 3 : 1].snap);
+        });
+        return;
+      }
     }
   }
 
@@ -1461,18 +1514,34 @@ export class SketchEditor {
   // Dimensions
   // -------------------------------------------------------------------------
 
-  private dimensionClick(x: number, y: number, p: Vec2) {
+  /** Whether `id` can be the next pick of the dimension tool: a second one; a third point (an angle by three points)
+   *  or, after the two ends of an arc, the arc (its length). */
+  private canPickForDimension(refs: string[], id: string): boolean {
+    if (refs.includes(id)) return false;
+    if (refs.length < 2) return true;
+    if (refs.length > 2) return false;
+    const map = this.map();
+    const [a, b] = refs.map((r) => map.get(r));
+    const e = map.get(id);
+    if (a?.type !== 'point' || b?.type !== 'point') return false;
+    return e?.type === 'point' || (e?.type === 'arc' && [e.p1, e.p2].includes(a.id) && [e.p1, e.p2].includes(b.id));
+  }
+
+  private dimensionClick(x: number, y: number, p: Vec2, shift = false) {
     const raw = this.hitEntity(x, y);
     const hit = raw && !isCopyId(raw.id) ? raw : null;
-    const st = this.tool.k === 'dim' ? this.tool : { k: 'dim' as const, refs: [] as string[] };
-    if (hit && st.refs.length < 2 && !st.refs.includes(hit.id)) {
-      this.tool = { k: 'dim', refs: [...st.refs, hit.id] };
+    const st: { refs: string[]; toCurve?: boolean } = this.tool.k === 'dim' ? this.tool : { refs: [] };
+    if (hit && this.canPickForDimension(st.refs, hit.id)) {
+      // a circle / arc picked with Shift: the distance to it, not to its centre
+      const t = this.map().get(hit.id)?.type;
+      const toCurve = st.toCurve || (shift && (t === 'circle' || t === 'arc'));
+      this.tool = { k: 'dim', refs: [...st.refs, hit.id], ...(toCurve ? { toCurve } : {}) };
       useEditor.getState().setSketchSelection(this.tool.refs);
       this.updatePreview();
       return;
     }
     if (!st.refs.length) return;
-    const c = this.dimensionFor(st.refs, p);
+    const c = this.dimensionFor(st.refs, p, st.toCurve);
     if (!c) {
       useEditor.getState().showToast('These entities cannot be dimensioned together', 'error');
       this.tool = { k: 'idle' };
@@ -1484,23 +1553,39 @@ export class SketchEditor {
     const units = useDoc.getState().doc!.units;
     const text = c.type === 'angle' ? `${formatNumber((value * 180) / Math.PI, 3)} deg` : `${formatNumber(value / LENGTH_FACTOR[units.length], 4)} ${units.length}`;
     const id = c.id;
+    // a dimension that would over-define the sketch becomes a driven one (Onshape)
+    const cur = this.data()!;
+    const before = this.solve(cur).info;
+    const trial = this.solve(produce(cur, (d) => void d.constraints.push({ ...c, value: text }))).info;
+    const driven = trial.redundant.includes(id) || trial.conflicting.includes(id) || trial.conflicting.length > before.conflicting.length || (!trial.ok && before.ok);
     this.change((d) => {
-      d.constraints.push({ ...c, value: text });
+      d.constraints.push({ ...c, value: text, ...(driven ? { driven: true } : {}) });
     });
     this.tool = { k: 'idle' };
     useEditor.getState().setSketchSelection([]);
     this.clearPreview();
+    if (driven) useEditor.getState().showToast('The dimension would over-define the sketch: it is added as a driven one');
     // open inline editor
-    setTimeout(() => this.openDimInput(id, true), 0);
+    else setTimeout(() => this.openDimInput(id, true), 0);
   }
 
   /** Build the dimension constraint implied by the picked entities and the label position. */
-  private dimensionFor(refs: string[], label: Vec2): SkConstraint | null {
+  private dimensionFor(refs: string[], label: Vec2, toCurve = false): SkConstraint | null {
     const map = this.map();
     const ents = refs.map((r) => map.get(r)).filter((e): e is SkEntity => !!e);
     const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     let c: Omit<SkConstraint, 'variant'> | null = null;
-    if (ents.length === 1) {
+    if (ents.length === 3) {
+      // three points: the angle at the middle one; two ends of an arc and the arc: its length
+      if (ents.every((e) => e.type === 'point')) c = { id, type: 'angle', refs: ents.map((e) => e.id), labelPos: label };
+      else if (ents[2].type === 'arc') c = { id, type: 'arclength', refs: [ents[2].id], labelPos: label };
+    } else if (ents.length === 2 && toCurve) {
+      // to a circle / arc itself: from a point, a line, another circle / arc
+      const curve = ents.find((e) => e.type === 'circle' || e.type === 'arc');
+      const other = ents.find((e) => e !== curve);
+      if (curve && other && (other.type === 'point' || other.type === 'line' || other.type === 'circle' || other.type === 'arc'))
+        c = { id, type: 'distance', refs: [other.id, curve.id], labelPos: label, toCurve: true };
+    } else if (ents.length === 1) {
       const e = ents[0];
       if (e.type === 'line') c = { id, type: 'distance', refs: [e.id], labelPos: label };
       else if (e.type === 'circle') c = { id, type: 'diameter', refs: [e.id], labelPos: label };
@@ -1570,6 +1655,10 @@ export class SketchEditor {
   openDimInput(id: string, isNew: boolean) {
     const c = this.data()?.constraints.find((x) => x.id === id);
     if (!c) return;
+    if (c.driven) {
+      useEditor.getState().showToast('A driven dimension shows what the geometry measures: make it driving (right click) to change it');
+      return;
+    }
     this.editingDim = { id, isNew };
     this.dimInput.value = c.value ?? '';
     this.dimInput.style.display = 'block';
@@ -1999,6 +2088,91 @@ export class SketchEditor {
     }, false);
   }
 
+  // -------------------------------------------------------------------------
+  // Transform (Onshape): move / turn / copy the selected entities
+  // -------------------------------------------------------------------------
+
+  startTransform() {
+    const ed = useEditor.getState();
+    const d = this.data();
+    if (!d) return;
+    const ids = patternableIds(d, (ed.sketch?.selection ?? []).filter((id) => !isCopyId(id)));
+    if (!ids.length) {
+      ed.showToast('Select sketch entities to transform', 'error');
+      return;
+    }
+    // the turn is about the middle of their bounding box
+    const map = this.map();
+    const lo: Vec2 = [Infinity, Infinity];
+    const hi: Vec2 = [-Infinity, -Infinity];
+    for (const id of ids) {
+      const e = map.get(id);
+      if (!e) continue;
+      for (const q of e.type === 'point' ? [[e.x, e.y] as Vec2] : sampleEntity(e, map)) {
+        lo[0] = Math.min(lo[0], q[0]);
+        lo[1] = Math.min(lo[1], q[1]);
+        hi[0] = Math.max(hi[0], q[0]);
+        hi[1] = Math.max(hi[1], q[1]);
+      }
+    }
+    const unit = useDoc.getState().doc!.units.length;
+    const pivot: Vec2 = Number.isFinite(lo[0]) ? [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2] : [0, 0];
+    useEditor.setState({ sketchTransform: { ids, dx: `0 ${unit}`, dy: `0 ${unit}`, angle: '0 deg', pivot, copy: false } });
+    this.updatePreview();
+  }
+
+  updateTransform(patch: Partial<SketchTransformState>) {
+    const st = useEditor.getState().sketchTransform;
+    if (!st) return;
+    useEditor.setState({ sketchTransform: { ...st, ...patch } });
+    this.updatePreview();
+  }
+
+  /** The motion of the transform being set up: turn about the pivot, then move (null while a value is invalid). */
+  private transformMotion(): { xf: (p: Vec2) => Vec2; angle: number } | null {
+    const st = useEditor.getState().sketchTransform;
+    if (!st) return null;
+    const ctx = this.evalCtx();
+    const dx = tryEvaluate(st.dx, 'length', ctx);
+    const dy = tryEvaluate(st.dy, 'length', ctx);
+    const a = tryEvaluate(st.angle, 'angle', ctx);
+    if (dx === null || dy === null || a === null) return null;
+    const [cx, cy] = st.pivot;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return { angle: a, xf: ([x, y]) => [cx + (x - cx) * c - (y - cy) * s + dx, cy + (x - cx) * s + (y - cy) * c + dy] };
+  }
+
+  applyTransform() {
+    const ed = useEditor.getState();
+    const st = ed.sketchTransform;
+    if (!st) return;
+    const m = this.transformMotion();
+    if (!m) {
+      ed.showToast('Invalid expression', 'error');
+      return;
+    }
+    const out = { removed: 0, ids: [] as string[] };
+    this.change((d) => {
+      if (st.copy) {
+        const made = copyEntities(d, st.ids, m.xf, { rotate: m.angle, copyConstraints: true });
+        out.ids = st.ids.flatMap((id) => made.get(id) ?? []);
+      } else {
+        out.removed = moveEntities(d, st.ids, m.xf, m.angle);
+        out.ids = st.ids;
+      }
+    });
+    useEditor.setState({ sketchTransform: null });
+    ed.setSketchSelection(out.ids);
+    if (out.removed) ed.showToast(`${t('Constraints that held the entities in place were removed')}: ${out.removed}`);
+    this.updatePreview();
+  }
+
+  cancelTransform() {
+    useEditor.setState({ sketchTransform: null });
+    this.updatePreview();
+  }
+
   /** Pattern ids touched by the selection (pattern itself or one of its copies). */
   private selectedPatterns(): string[] {
     const sel = useEditor.getState().sketch?.selection ?? [];
@@ -2393,20 +2567,26 @@ export class SketchEditor {
       const g = dimensionGeometry(c, map, px);
       if (!g) continue;
       // an offset is internally redundant at tangent joints by design: only conflicts count
-      const over = s.solve?.conflicting.includes(c.id) || (c.type !== 'offset' && s.solve?.redundant.includes(c.id));
+      const over = !c.driven && (s.solve?.conflicting.includes(c.id) || (c.type !== 'offset' && s.solve?.redundant.includes(c.id)));
       const sel = s.selection.includes(c.id);
       const hov = s.hover === c.id;
-      const color = sel ? COLORS.selected : hov ? COLORS.hover : over ? COLORS.over : 0x1b1f23;
+      // a driven dimension: grey (Onshape), what the geometry measures, in parentheses
+      const color = sel ? COLORS.selected : hov ? COLORS.hover : over ? COLORS.over : c.driven ? 0x9aa0a6 : 0x1b1f23;
       const el = document.createElement('div');
-      el.className = 'dim-label' + (over ? ' over' : '') + (sel ? ' selected' : '') + (hov ? ' hover' : '');
+      el.className = 'dim-label' + (over ? ' over' : '') + (sel ? ' selected' : '') + (hov ? ' hover' : '') + (c.driven ? ' driven' : '');
       const raw = c.value ?? '';
-      const v = tryEvaluate(raw, c.type === 'angle' ? 'angle' : 'length', ctx);
+      const v = c.driven ? measureConstraint(c, d.entities) : tryEvaluate(raw, c.type === 'angle' ? 'angle' : 'length', ctx);
       let text = raw;
       if (v !== null) text = c.type === 'angle' ? `${formatNumber((v * 180) / Math.PI, 2)}°` : formatNumber(v / LENGTH_FACTOR[units.length], 3);
       if (c.type === 'diameter') text = 'Ø' + text;
       if (c.type === 'radius') text = 'R' + text;
+      if (c.type === 'arclength') text = '⌒' + text;
+      if (c.driven) {
+        text = `(${text})`;
+        el.title = t('Driven dimension: right-click to make it driving');
+      }
       // Onshape marks dimensions driven by an expression with "fx" and shows the expression on hover
-      const isExpr = /[#*/+()^]|[a-z]{3,}\(/i.test(raw.replace(/^\s*-/, '')) && !/^\s*-?[\d.]+\s*[a-z°]*\s*$/i.test(raw);
+      const isExpr = !c.driven && /[#*/+()^]|[a-z]{3,}\(/i.test(raw.replace(/^\s*-/, '')) && !/^\s*-?[\d.]+\s*[a-z°]*\s*$/i.test(raw);
       if (isExpr) {
         const fx = document.createElement('span');
         fx.className = 'fx';
@@ -2415,7 +2595,7 @@ export class SketchEditor {
         // the other representation is shown on hover
         if (useEditor.getState().showExpressions) {
           el.title = text;
-          text = (c.type === 'diameter' ? 'Ø' : c.type === 'radius' ? 'R' : '') + raw;
+          text = (c.type === 'diameter' ? 'Ø' : c.type === 'radius' ? 'R' : c.type === 'arclength' ? '⌒' : '') + raw;
         } else el.title = raw;
       }
       el.appendChild(document.createTextNode(text));
@@ -2466,6 +2646,11 @@ export class SketchEditor {
         };
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
+      });
+      el.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.dimensionMenu(c.id, ev.clientX, ev.clientY);
       });
       el.addEventListener('pointerenter', () => useEditor.getState().setSketchHover(c.id));
       el.addEventListener('pointerleave', () => useEditor.getState().setSketchHover(null));
@@ -2849,6 +3034,53 @@ export class SketchEditor {
     useEditor.getState().setSketchSelection([]);
   }
 
+  /** The context menu of a dimension: edit its value, make it driven / driving, delete it. */
+  dimensionMenu(id: string, cx: number, cy: number) {
+    const c = this.data()?.constraints.find((x) => x.id === id);
+    if (!c) return;
+    useEditor.setState({
+      contextMenu: {
+        x: cx,
+        y: cy,
+        items: [
+          ...(c.driven ? [] : [{ label: t('Edit value'), icon: 'edit' as const, action: () => this.openDimInput(id, false) }]),
+          { label: t(c.driven ? 'Change to driving dimension' : 'Change to driven dimension'), icon: 'dimension' as const, action: () => this.toggleDriven(id) },
+          { separator: true, label: '' },
+          { label: t('Delete'), icon: 'trash' as const, danger: true, action: () => this.change((d) => deleteItems(d, [id])) },
+        ],
+      },
+    });
+  }
+
+  /**
+   * A driving dimension becomes driven (it no longer holds the geometry), a driven one driving — with the value the
+   * geometry has now, unless that over-defines the sketch.
+   */
+  toggleDriven(id: string) {
+    const cur = this.data();
+    const c = cur?.constraints.find((x) => x.id === id);
+    if (!cur || !c) return;
+    if (!c.driven) {
+      this.change((d) => {
+        const k = d.constraints.find((x) => x.id === id);
+        if (k) k.driven = true;
+      });
+      return;
+    }
+    const value = measureConstraint(c, cur.entities);
+    const units = useDoc.getState().doc!.units;
+    const text = c.type === 'angle' ? `${formatNumber((value * 180) / Math.PI, 3)} deg` : `${formatNumber(value / LENGTH_FACTOR[units.length], 4)} ${units.length}`;
+    this.change(
+      (d) => {
+        const k = d.constraints.find((x) => x.id === id);
+        if (!k) return;
+        delete k.driven;
+        k.value = text;
+      },
+      { checkConflict: true },
+    );
+  }
+
   /** Live size labels while drawing (Onshape shows the current length / width / diameter). */
   private live: HTMLDivElement | null = null;
 
@@ -3032,11 +3264,26 @@ export class SketchEditor {
           case 'spline':
             poly(P);
             break;
+          case 'bezier':
+            // the control polygon, and the curve once all four points are there
+            poly(P);
+            if (P.length === 4) poly(sampleSpline([P[0], P[3]], false, 48, { h0: P[1], h1: P[2] }));
+            break;
+          case 'conic':
+            // start → end, then the apex of the tangents (a parabola first), then ρ from the cursor
+            if (P.length === 2) seg(P[0], P[1]);
+            else {
+              const rho = P.length > 3 ? conicRho(P[0], P[1], P[2], P[3]) : 0.5;
+              const [c1, c2] = conicControls(P[0], P[1], P[2], rho);
+              poly(sampleSpline([P[0], P[1]], false, 48, { h0: c1, h1: c2 }));
+              poly([P[0], P[2], P[1]]);
+            }
+            break;
         }
         break;
       }
       case 'dim': {
-        const cst = this.dimensionFor(st.refs, c);
+        const cst = this.dimensionFor(st.refs, c, st.toCurve);
         if (cst) {
           const g = dimensionGeometry(cst, this.map(), this.px);
           if (g) for (let i = 0; i + 3 < g.segs.length + 1; i += 4) seg([g.segs[i], g.segs[i + 1]], [g.segs[i + 2], g.segs[i + 3]]);
@@ -3062,6 +3309,23 @@ export class SketchEditor {
         else while (a1 > a0) a1 -= Math.PI * 2;
         poly(circlePts(ac, r, a0, a1));
       } else if (tg) seg(tg.from, tg.to);
+    }
+    // a transform being set up: where its entities go (standalone points as dots)
+    const xfm = useEditor.getState().sketchTransform ? this.transformMotion() : null;
+    if (xfm) {
+      const map = this.map();
+      const dots: Vec2[] = [];
+      for (const id of useEditor.getState().sketchTransform!.ids) {
+        const e = map.get(id);
+        if (!e) continue;
+        if (e.type === 'point') dots.push(xfm.xf([e.x, e.y]));
+        else poly(sampleEntity(e, map).map(xfm.xf));
+      }
+      if (dots.length) {
+        const o = pointsObject(dots, COLORS.hover, 7, false);
+        o.renderOrder = 34;
+        this.preview.add(o);
+      }
     }
     if (segs.length) {
       // drawn exactly as the result will look (construction: the same dash-dot)

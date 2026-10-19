@@ -6,11 +6,11 @@ import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRe
 import type { Draft } from 'immer';
 import type { MateConnectorRef, MateInference, PlaneFrame, SelRef, SkEntity, Vec3 } from '../core/types';
 import { STD_PLANES, frameFromNormal, toWorld, v3 } from '../core/math';
-import { adaptRef, FIELD_SPECS, type SelToken } from '../core/fieldSpecs';
+import { adaptRef, FIELD_SPECS, keepRefs, type SelToken } from '../core/fieldSpecs';
 import { computeRegions, type SketchRegion } from '../sketch/regions';
 import { arcAngles, entityMap, pointOf } from '../sketch/curves';
 import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
-import type { BuildResult, PartMesh, SketchResult } from '../kernel/protocol';
+import type { BuildResult, PartMesh, SketchResult, ThreadResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { useEditor, refKey, sameRef } from '../store/editorStore';
 import { activeAssembly, activeStudio, activeTab, useDoc } from '../store/docStore';
@@ -132,6 +132,27 @@ function mateTriad(frame: PlaneFrame, highlight?: number): THREE.Group {
   return g;
 }
 
+/**
+ * Cosmetic threads: thin circles of the major diameter where each thread starts (just above the face) and ends, and
+ * four lines along it — inside the material, so seen in a section or through a transparent part.
+ */
+function threadObject(threads: ThreadResult[]): THREE.Object3D {
+  const segs: number[] = [];
+  for (const t of threads) {
+    const r = t.major / 2;
+    const e1 = frameFromNormal(t.origin, t.dir).xDir;
+    const e2 = v3.cross(t.dir, e1);
+    const at = (s: number, a: number) => v3.add(v3.add(t.origin, v3.scale(t.dir, s)), v3.add(v3.scale(e1, r * Math.cos(a)), v3.scale(e2, r * Math.sin(a))));
+    const lift = -Math.min(0.02, t.length * 0.01);
+    for (const s of [lift, t.length])
+      for (let i = 0; i < 48; i++) segs.push(...at(s, (i / 48) * 2 * Math.PI), ...at(s, ((i + 1) / 48) * 2 * Math.PI));
+    for (let k = 0; k < 4; k++) segs.push(...at(0, (k * Math.PI) / 2), ...at(t.length, (k * Math.PI) / 2));
+  }
+  const obj = fatSegments(segs, lineMaterial(COLORS.partEdge, 1));
+  obj.renderOrder = 3;
+  return obj;
+}
+
 const TRIAD_COLORS = [0xd64545, 0x3aa655, 0x2f80d1];
 const TRIAD_ACTIVE = 0xf29d38;
 /** Screen length of the triad manipulator's arrows, px. */
@@ -223,6 +244,8 @@ export class Engine {
   private unsub: (() => void)[] = [];
 
   private partsGroup = new THREE.Group();
+  /** Cosmetic threads of the build (cut by a section view). */
+  private threadObj: THREE.Object3D | null = null;
   private sketchGroup = new THREE.Group();
   private planesGroup = new THREE.Group();
   private previewGroup = new THREE.Group();
@@ -527,15 +550,22 @@ export class Engine {
     const editingId = ed.editing?.featureId;
     const changed = new Set(build?.preview?.changed ?? []);
 
+    this.threadObj = null;
     if (build) {
       for (const p of build.parts) {
         if (p.hidden) continue;
         this.addPart(p, changed.has(p.id));
       }
+      // cosmetic threads of tapped holes (not of hidden parts)
+      const hiddenParts = new Set(build.parts.filter((p) => p.hidden).map((p) => p.id));
+      const threads = (build.threads ?? []).filter((t) => !t.owner || !hiddenParts.has(t.owner));
+      if (threads.length) this.partsGroup.add((this.threadObj = threadObject(threads)));
       this.applySection();
       for (const s of build.sketches) {
         sketchFrames.set(s.featureId, s.frame);
-        if (s.featureId === editingId || hidden.has(s.featureId) || !ed.showSketches) continue;
+        // a Derived feature's sketch ("derivedId.sketchId") is hidden with that feature
+        const owner = s.featureId.split('.')[0];
+        if (s.featureId === editingId || hidden.has(s.featureId) || hidden.has(owner) || owner === editingId || !ed.showSketches) continue;
         this.addSketch(s);
       }
       for (const pl of build.planes) {
@@ -689,6 +719,12 @@ export class Engine {
       const o = new THREE.Vector3(...sec.origin).addScaledVector(n, sec.offset);
       // keep the material behind the plane (the side its normal points away from)
       planes = [new THREE.Plane().setFromNormalAndCoplanarPoint(sec.flip ? n : n.clone().negate(), o)];
+    }
+    // threads are cut by the section like the parts they are in
+    if (this.threadObj) {
+      const m = (this.threadObj as THREE.Mesh).material as THREE.Material;
+      m.clippingPlanes = planes;
+      m.needsUpdate = true;
     }
     for (const po of this.parts.values()) {
       for (const m of [po.material, po.edges.material as THREE.Material, ...po.pickMats]) {
@@ -883,6 +919,8 @@ export class Engine {
     }
     for (const pl of pv.planes ?? []) this.addPlane(pl.featureId, pl.name, pl.frame, pl.size, false);
     for (const m of pv.mates ?? []) this.previewGroup.add(mateTriad(m.frame));
+    if (useEditor.getState().showSketches) for (const s of pv.sketches ?? []) this.addSketch(s);
+    if (pv.threads?.length) this.previewGroup.add(threadObject(pv.threads));
   }
 
   /** A mate connector: triad + ring, kept at a constant screen size (see render), pickable. */
@@ -1853,7 +1891,7 @@ export class Engine {
         const params = f.params as unknown as Record<string, SelRef[]>;
         const cur = params[field] ?? [];
         const exists = cur.some((r) => sameRef(r, ref));
-        if (exists) params[field] = cur.filter((r) => !sameRef(r, ref));
+        if (exists) keepRefs(params, field, (r) => !sameRef(r, ref), spec);
         else if (spec?.max === 1) params[field] = [ref];
         else params[field] = [...cur, ref];
       });

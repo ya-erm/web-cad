@@ -4,9 +4,9 @@ The Agent API lets you create and modify WebCAD models programmatically, with de
 
 ## Features {#features}
 
-- Operations: variables, sketches from shapes (rectangles, circles, lines, arcs, slots, polygons, points), extrude, revolve, fillets, chamfers, shells, holes, patterns, mirror, Boolean operations, planes, mate connectors, section view, and any other features with "raw" parameters.
+- Operations: variables, sketches from shapes (rectangles, circles, lines, arcs, slots, polygons, points), extrude, revolve, fillets, chamfers, shells, holes (including [ISO standard](hole#standard) tapped ones), patterns (along a [curve](curve-pattern) too), mirror, [ribs](rib), [face edits](move-face), Boolean operations, planes, mate connectors, section view, and any other features with "raw" parameters.
 - [Assemblies](assembly): create an assembly tab, insert parts and sub-assemblies ([flexible](assembly#flexible) ones too), place and fix instances, mate them (faces and edges found with the same queries), group them, add mate relations. One call can build the parts and then assemble them.
-- [Derived](derived): bring in parts of another Part Studio of the document and build on their edges (a sketch with Use projection).
+- [Derived](derived): bring in parts and sketches of another Part Studio of the document or of a [version](derived#versions) (of this document or another one) and build on them (a sketch with Use projection, an extrude of a derived sketch's regions).
 - [Configurations](configurations): set up a table of variants (feature parameters, sketch dimensions, disabled features, variables; list, checkbox and variable inputs), choose a variant and give an assembly instance a variant of its own.
 - Queries for faces, edges and parts by geometry ("top planar face", "edges parallel to Z").
 - A model report: features and their errors, variables, parts with their bounding boxes, volume and area; for an assembly — its instances (placement and bounding box) and whether every mate holds.

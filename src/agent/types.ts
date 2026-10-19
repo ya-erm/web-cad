@@ -113,19 +113,50 @@ export type AgentOp =
     })
   | (Named & { op: 'revolve'; sketch?: string; regions?: Regions; axis: AxisSpec; angle?: Num; boolean?: BoolOp })
   /** `tangentPropagation: false` — only the selected edges, not the edges tangent to them (by default it runs on). */
-  | (Named & { op: 'fillet'; edges: Edges; radius: Num; tangentPropagation?: boolean })
-  | (Named & { op: 'chamfer'; edges: Edges; distance: Num; tangentPropagation?: boolean })
+  | (Named & {
+      op: 'fillet';
+      edges: Edges;
+      radius: Num;
+      tangentPropagation?: boolean;
+      /** A variable fillet: radii at vertices of the edges (the nearest model vertex to `at`); elsewhere — `radius`. */
+      vertices?: { at: Pt3; radius: Num }[];
+      /** Variable: the radius changes smoothly (level at the vertices), not linearly. */
+      smooth?: boolean;
+    })
+  | (Named & {
+      op: 'chamfer';
+      edges: Edges;
+      distance: Num;
+      tangentPropagation?: boolean;
+      /** Two distances (`distance2`) or distance and angle (`angle`); `flip` — the other face takes `distance`. */
+      type?: 'equal' | 'twoDistances' | 'distanceAngle';
+      distance2?: Num;
+      angle?: Num;
+      flip?: boolean;
+    })
   | (Named & { op: 'shell'; faces: Faces; thickness: Num; outward?: boolean })
+  /** Onshape Delete face (healed): a whole hole / pocket / boss, or a fillet / chamfer between planar faces. */
+  | (Named & { op: 'deleteFace'; faces: Faces })
+  /**
+   * Onshape Move face — one of: `offset` (planar faces along their normals; + out of the material), `translate`,
+   * `rotate` (a whole hole / pocket / boss moves as one; planar faces each to its moved plane).
+   */
+  | (Named & { op: 'moveFace'; faces: Faces; offset?: Num; translate?: { direction: AxisSpec; distance: Num }; rotate?: { axis: AxisSpec; angle: Num } })
+  /** Onshape Replace face: planar faces to a plane (`offset` from it, along its normal turned like the faces). */
+  | (Named & { op: 'replaceFace'; faces: Faces; with: PlaneSpec; offset?: Num; flip?: boolean })
   | (Named & {
       op: 'hole';
       sketch: string;
-      diameter: Num;
+      /** Custom holes: the diameter (none with `iso`). */
+      diameter?: Num;
       depth?: Num;
       through?: boolean;
       style?: 'simple' | 'counterbore' | 'countersink';
       cboreDiameter?: Num;
       cboreDepth?: Num;
       csinkDiameter?: Num;
+      /** ISO standard holes: "M6" — a clearance hole (fit: close / normal / loose), or tapped (the pitch: coarse by default). */
+      iso?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose'; pitch?: number; tapDepth?: Num };
     })
   | (Named & {
       op: 'linearPattern';
@@ -141,6 +172,28 @@ export type AgentOp =
     })
   | (Named & { op: 'circularPattern'; features?: string[]; parts?: Parts; axis: AxisSpec; count: number; angle?: Num; boolean?: 'new' | 'add' })
   | (Named & { op: 'mirror'; features?: string[]; parts?: Parts; plane: PlaneSpec; boolean?: 'new' | 'add' })
+  /**
+   * Copies along a path — the curves of a sketch or model edges — spread over it (or `distance` apart), turning with
+   * it (`orient: false` — only moved); `flip` — from the path's other end.
+   */
+  | (Named & {
+      op: 'curvePattern';
+      features?: string[];
+      parts?: Parts;
+      path: { sketch: string } | { edges: Edges };
+      count: Num;
+      distance?: Num;
+      flip?: boolean;
+      orient?: boolean;
+      boolean?: 'new' | 'add';
+    })
+  /** Ribs from the curves of a sketch (lines, arcs) out to the parts: within its plane, or along its normal (`normal`). */
+  | (Named & { op: 'rib'; sketch?: string; thickness: Num; normal?: boolean; flip?: boolean; extend?: boolean })
+  /**
+   * Sketch regions rolled onto a cylindrical face (`onto`): `boolean` `add` (default) raises them `depth` out of it,
+   * `remove` sinks them into it. The sketch plane runs along the cylinder's axis (tangent to it, usually).
+   */
+  | (Named & { op: 'wrap'; sketch?: string; regions?: Regions; onto: FaceQuery; depth: Num; boolean?: 'add' | 'remove' })
   | (Named & { op: 'plane'; from: PlaneSpec; offset: Num })
   | (Named & {
       op: 'mateConnector';
@@ -168,7 +221,23 @@ export type AgentOp =
    * Derived (Onshape): parts of another Part Studio of the document (`studio`, by name), linked one way — they stand
    * where they are there and follow its changes. `parts` — their names (all of them by default).
    */
-  | (Named & { op: 'derived'; studio: string; parts?: string[] })
+  /**
+   * `configuration` — of the source: input name → option name, a variable input's value (the others as chosen there).
+   * `at` — a mate connector of this Part Studio to put the parts at: the source's origin lands there (or its mate
+   * connector `from`); without it — where they stand in the source.
+   */
+  | (Named & {
+      op: 'derived';
+      studio: string;
+      /** A saved version (its name) to take the Part Studio from — of this document or of `document` (by name). */
+      version?: string;
+      document?: string;
+      parts?: string[];
+      sketches?: string[];
+      configuration?: Record<string, string | number>;
+      at?: string;
+      from?: string;
+    })
   /** Merge params into an existing feature (same $-queries as 'feature'). */
   | { op: 'set'; feature: string; params: Record<string, unknown> }
   | { op: 'setVariable'; name: string; value: Num }
@@ -316,6 +385,8 @@ export interface ModelSummary {
   sketches: SketchSummary[];
   /** Mate connectors: origin and axes (document units), owner part name. */
   mates: { name: string; origin: Pt3; xDir: Pt3; zDir: Pt3; owner?: string }[];
+  /** Cosmetic threads of tapped holes: where each starts, its direction into the material and length (document units). */
+  threads?: { designation: string; origin: Pt3; dir: Pt3; length: number; part?: string }[];
 }
 
 export interface RunReport {

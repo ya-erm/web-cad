@@ -2,8 +2,8 @@
 // them, mate them, group them, relate mates — the same operations as the assembly tab of the app. Faces and
 // edges for mates are found with the usual queries, in assembly coordinates, on the instance's placed part.
 
-import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, ConfigInput, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
-import { chosenLabel, inputName, inputVariable } from '../core/config';
+import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
+import { chosenLabel, configurationFromNames, inputName } from '../core/config';
 import { uid } from '../core/ids';
 import { LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { makeEvalContext } from '../core/features';
@@ -122,25 +122,12 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
   const configurationOf = (inst: AssemblyInstance, names: Record<string, string | number>): Record<string, string> => {
     if (inst.assemblyId) throw new AgentError('"configuration" is for an instance of a part');
     const s = d.tabs.find((t): t is PartStudioTab => t.id === inst.studioId && t.type === 'partStudio');
-    const inputs = s?.configuration ?? [];
-    const label = (x: ConfigInput) => (s ? inputName(s.features, x) : x.name);
-    const out: Record<string, string> = {};
-    for (const [name, optionName] of Object.entries(names)) {
-      const n = name.replace(/^#/, '').toLowerCase();
-      const input = inputs.find((x) => x.name === name) ?? inputs.find((x) => x.name.toLowerCase() === n || label(x).replace(/^#/, '').toLowerCase() === n);
-      if (!input) throw new AgentError(`No configuration "${name}" in ${s?.name ?? 'the Part Studio'}. Configurations: ${inputs.map(label).join(', ') || '(none)'}`);
-      const v = s && inputVariable(s.features, input);
-      if (v) {
-        // a variable: any value of its type, a bare number in the document's units
-        const type = v.params.varType ?? 'any';
-        out[input.id] = typeof optionName === 'number' && type !== 'any' && type !== 'number' ? `${optionName} ${type === 'angle' ? 'deg' : d.units.length}` : String(optionName);
-        continue;
-      }
-      const o = input.options.find((x) => x.name === optionName) ?? input.options.find((x) => x.name.toLowerCase() === String(optionName).toLowerCase());
-      if (!o) throw new AgentError(`No option "${optionName}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
-      out[input.id] = o.id;
+    if (!s) throw new AgentError('The Part Studio of the instance is gone');
+    try {
+      return configurationFromNames(s, names, d.units.length);
+    } catch (e) {
+      throw new AgentError(`${s.name}: ${(e as Error).message}`);
     }
-    return out;
   };
   const mateByName = (n: string): AssemblyMate => {
     const m = (need().mates ?? []).find((x) => x.name === n || x.id === n) ?? (need().mates ?? []).find((x) => x.name.toLowerCase() === n.toLowerCase());

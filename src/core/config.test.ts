@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { produce } from 'immer';
 import type { ConfigInput, Feature, PartStudioTab } from './types';
-import { chosenLabel, commitConfigured, configKey, configuredFeatures, DIM, inputName, pruneConfiguration, setConfigured, sourceKey, variantStudio } from './config';
+import { chosenLabel, commitConfigured, configKey, configuredFeatures, DIM, inputName, parseSourceKey, pruneConfiguration, setConfigured, sourceKey, variantStudio } from './config';
 
 const extrude = { id: 'e', type: 'extrude', name: 'Extrude 1', params: { depth: '10 mm', thin: false } } as unknown as Feature;
 const fillet = { id: 'f', type: 'fillet', name: 'Fillet 1', params: { radius: '3 mm' } } as unknown as Feature;
@@ -101,7 +101,11 @@ describe('configurations', () => {
     expect(chosenLabel(s.features, input, { cv: '65 mm' })).toBe('65 mm');
     // an instance's (a view's) own value: a variant of its own
     const v = variantStudio(s, { cv: '70 mm' });
-    expect(v.id).toBe('ps#cv=70 mm');
+    expect(v.id).toBe('ps#cv=70%20mm');
+    // and back
+    expect(parseSourceKey(v.id)).toEqual({ studioId: 'ps', configuration: { cv: '70 mm' } });
+    expect(parseSourceKey('ps')).toEqual({ studioId: 'ps' });
+    expect(parseSourceKey(sourceKey({ studioId: 'ps', configuration: { 'a,b': 'x=1, y', c: 'max(1,2)' } }))).toEqual({ studioId: 'ps', configuration: { 'a,b': 'x=1, y', c: 'max(1,2)' } });
     expect(sourceKey({ studioId: 'ps', configuration: { cv: '70 mm' } })).toBe(v.id);
     expect(value(configuredFeatures(v)[0])).toBe('70 mm');
     // typed in the variable table: the value now, the variable keeps its own

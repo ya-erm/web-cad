@@ -19,6 +19,17 @@ width: 340
 | A point and a line | **Perpendicular distance** from the point to the line. |
 | Two parallel lines | **Distance between the lines**. |
 | A circle or arc and a point, line, circle or arc | Distance **from the center** of the circle (arc). |
+| A circle or arc **with `Shift`** and a point, line, circle or arc | Distance **to the circle itself** — see [below](#to-curve). |
+
+### To a circle or arc {#to-curve}
+
+To dimension to the circle (arc) itself rather than its center, pick it with `Shift` held — first or second. The dimension measures the shortest gap:
+
+- from a point — to the nearest point of the circle (outside or inside);
+- from a line — from the line to the circle (its edge on the near side);
+- between circles — the gap between their edges; when one is inside the other — the gap inside the bigger one.
+
+The side the dimension was made on is kept: a point outside stays outside, a circle inside another stays inside. An arc counts as its whole circle, even when the nearest point lies beyond the arc's ends.
 
 ### Horizontal, vertical or aligned {#placement}
 

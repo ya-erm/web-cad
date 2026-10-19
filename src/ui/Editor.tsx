@@ -16,6 +16,7 @@ import { FeatureTree } from './FeatureTree';
 import { PartsList } from './PartsList';
 import { FeatureDialog } from './FeatureDialog';
 import { SketchPatternPanel } from './SketchPatternPanel';
+import { SketchTransformPanel } from './SketchTransformPanel';
 import { SketchDialog } from './SketchDialog';
 import { RightPanels } from './RightPanels';
 import { Viewport } from './Viewport';
@@ -355,6 +356,7 @@ export function Editor({ onBack }: { onBack: () => void }) {
               <Viewport />
               <FeatureDialog />
               <SketchPatternPanel />
+              <SketchTransformPanel />
               <SketchDialog />
               <RightPanels />
               <MeasurePanel />

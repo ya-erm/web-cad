@@ -3,7 +3,7 @@
 import * as R from 'replicad';
 import { evaluate, evaluateTypedVariable, type EvalContext } from '../core/expr';
 import { sketchDims } from '../core/features';
-import { frameFromNormal, offsetFrame, rotateVec, v3 } from '../core/math';
+import { frameFromNormal, offsetFrame, rotateVec, STD_PLANES, v3 } from '../core/math';
 import type {
   BoolOp,
   Feature,
@@ -32,6 +32,7 @@ import {
   rotated,
   scaled,
   shapesTouch,
+  simplified,
   solidsOf,
   sweepFace,
   translated,
@@ -39,6 +40,7 @@ import {
 } from './geom';
 import { topologyOf } from './meshing';
 import {
+  getSketch,
   resolveAxis,
   resolveCurveEdges,
   resolveDirection,
@@ -50,11 +52,16 @@ import {
   resolvePlaneRef,
   resolvePoint,
   resolveProfiles,
+  resolveRegion,
   resolveSketchPlane,
   worldGeometryForRef,
   type ProfileFace,
 } from './refs';
-import { removePart, setPart, type BuildState, type PartState } from './state';
+import { adoptThreads, removePart, setPart, type BuildState, type PartState, type ThreadState } from './state';
+import { isoHole, type ThreadSpec } from '../core/holes';
+import { pathFrames } from './paths';
+import { wrapRegion } from './wrap';
+import { allPlanar, deleteFaces, encloses, facePlane, moveFeature, movePlanarFace, reachOf, type Motion, type Plane as FacePlane } from './faceOps';
 
 export interface FeatureOutput {
   /** Tool body used (for preview colouring). */
@@ -129,13 +136,6 @@ function sceneExtent(st: BuildState, extra: Shape3D[] = []): number {
   return d * 4;
 }
 
-function simplified(s: Shape3D): Shape3D {
-  try {
-    return s.simplify();
-  } catch {
-    return s;
-  }
-}
 
 function newPartId(st: BuildState, base: string): string {
   let id = base;
@@ -180,6 +180,7 @@ export function applyBodyOp(st: BuildState, fid: string, tool: Shape3D, op: Bool
       let acc: Shape3D = targets[0].shape.fuse(solid);
       for (let i = 1; i < targets.length; i++) {
         acc = acc.fuse(targets[i].shape);
+        adoptThreads(st, targets[i].id, targets[0].id);
         removePart(st, targets[i].id);
       }
       replacePart(st, targets[0].id, simplified(acc), fid);
@@ -239,7 +240,7 @@ function buildSketch(ctx: Ctx, f: FeatureOf<'sketch'>): FeatureOutput {
   // pattern copies are derived from the solved seed geometry
   entities = expandPatterns(entities, f.params.patterns, ctx.ec);
   const regions = computeRegions(entities);
-  ctx.st.sketches.set(f.id, { featureId: f.id, frame, entities, regions, ok });
+  ctx.st.sketches.set(f.id, { featureId: f.id, frame, entities, regions, ok, name: f.name });
   if (lostUse) return { warning: 'Some projected (Use) geometry could not be found' };
   if (errors.length) return { warning: 'Some dimensions have invalid expressions' };
   if (!ok) return { warning: 'Sketch constraints could not be fully solved' };
@@ -622,10 +623,20 @@ function buildFillet(ctx: Ctx, f: FeatureOf<'fillet'>): FeatureOutput {
   const groups = edgesByPart(ctx.st, p.edges);
   if (!groups.size) fail('Select edges or faces to fillet');
   const oc = R.getOC();
+  // Variable (Onshape): radii of their own at some vertices, the default one at the others
+  const at =
+    p.filletType === 'variable'
+      ? (p.vertices ?? []).map((v, i) => {
+          const rv = len(ctx, p.vertexRadii?.[i] || p.radius, 'Vertex radius');
+          if (!(rv > 0)) fail('Radius must be positive');
+          return { p: resolvePoint(ctx.st, v), r: rv };
+        })
+      : [];
   let propagated = false;
   for (const { part, edges } of groups.values()) {
     const mk = new oc.BRepFilletAPI_MakeFillet(part.shape.wrapped, oc.ChFi3d_FilletShape.ChFi3d_Rational);
     for (const e of edges) mk.Add(r, e.wrapped);
+    if (at.length) variableRadii(mk, at, r, !!p.smooth);
     const extra = p.tangentPropagation ? [] : contoursBeyond(mk, edges);
     try {
       mk.Build(new oc.Message_ProgressRange());
@@ -643,6 +654,55 @@ function buildFillet(ctx: Ctx, f: FeatureOf<'fillet'>): FeatureOutput {
     replacePart(ctx.st, part.id, res, ctx.fid);
   }
   return propagated ? { warning: TANGENT_ALWAYS } : {};
+}
+
+/**
+ * A variable fillet: along each edge of each contour the radius goes from the one at its start vertex to the one at
+ * its end (a vertex's own radius, or `r`) — linearly, or smoothly (level at the vertices, so no kink between edges).
+ */
+function variableRadii(mk: InstanceType<ReturnType<typeof R.getOC>['BRepFilletAPI_MakeFillet']>, at: { p: Vec3; r: number }[], r: number, smooth: boolean) {
+  const oc = R.getOC();
+  const radiusAt = (q: Vec3) => {
+    let best = r;
+    let bestD = Infinity;
+    for (const a of at) {
+      const d = v3.len(v3.sub(a.p, q));
+      if (d < bestD) [best, bestD] = [a.r, d];
+    }
+    return bestD < 1e-5 ? best : r;
+  };
+  for (let ic = 1; ic <= mk.NbContours(); ic++)
+    for (let j = 1; j <= mk.NbEdges(ic); j++) {
+      const e = mk.Edge(ic, j);
+      // its ends in the contour's direction: the edge as the contour runs along it
+      const edge = R.cast(e) as R.Edge;
+      const ends = [0, 1].map((u) => {
+        const q = edge.pointAt(u);
+        const out: Vec3 = [q.x, q.y, q.z];
+        q.delete();
+        return out;
+      });
+      if (e.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED) ends.reverse();
+      const [r1, r2] = ends.map(radiusAt);
+      if (Math.abs(r1 - r2) < 1e-9) {
+        mk.SetRadius(r1, r2, ic, j);
+        continue;
+      }
+      if (!smooth) {
+        mk.SetRadius(r1, r2, ic, j);
+        continue;
+      }
+      // smoothstep: the radius levels off at both vertices
+      const n = 9;
+      const law = new oc.NCollection_Array1_gp_Pnt2d(1, n);
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const s = u * u * (3 - 2 * u);
+        law.SetValue(i + 1, new oc.gp_Pnt2d(u, r1 + (r2 - r1) * s));
+      }
+      mk.SetRadius(law, ic, j);
+      law.delete();
+    }
 }
 
 /** When the blend cannot be stopped at the selected edges, the whole tangent chain stays. */
@@ -812,6 +872,112 @@ function buildShell(ctx: Ctx, f: FeatureOf<'shell'>): FeatureOutput {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Direct edits of faces (Onshape Delete face / Move face / Replace face)
+// ---------------------------------------------------------------------------
+
+/** The selected faces by part: indices into each part's faces. */
+function facesByPart(st: BuildState, refs: SelRef[]): Map<string, { part: PartState; faces: number[] }> {
+  const out = new Map<string, { part: PartState; faces: number[] }>();
+  for (const r of refs) {
+    const { part, index } = resolveFace(st, r);
+    const g = out.get(part.id) ?? { part, faces: [] };
+    if (!g.faces.includes(index)) g.faces.push(index);
+    out.set(part.id, g);
+  }
+  return out;
+}
+
+function buildDeleteFace(ctx: Ctx, f: FeatureOf<'deleteFace'>): FeatureOutput {
+  const groups = facesByPart(ctx.st, f.params.faces);
+  if (!groups.size) fail('Select faces to delete');
+  for (const { part, faces } of groups.values()) replacePart(ctx.st, part.id, deleteFaces(part.shape, faces), ctx.fid);
+  return {};
+}
+
+/**
+ * Planar faces each to a plane of its own (computed from the solid as it was): the faces around them follow.
+ * `target` — the plane of face `i` (its normal out of the material).
+ */
+function toPlanes(shape: Shape3D, faces: number[], target: (i: number) => { to: FacePlane; reach: number }): Shape3D {
+  const changes = faces.map((i) => {
+    const { to, reach } = target(i);
+    return movePlanarFace(shape, i, to, reach);
+  });
+  let s = shape;
+  for (const c of changes) {
+    if (c.add) s = s.fuse(c.add);
+    if (c.remove) s = s.cut(c.remove);
+  }
+  return simplified(s);
+}
+
+function buildMoveFace(ctx: Ctx, f: FeatureOf<'moveFace'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  const groups = facesByPart(st, p.faces);
+  if (!groups.size) fail('Select faces to move');
+  const sign = p.flip ? -1 : 1;
+  let motion: Motion | null = null;
+  if (p.moveType === 'translate') {
+    if (!p.direction[0]) fail('Select a direction');
+    const d = v3.scale(resolveDirection(st, p.direction[0]), len(ctx, p.distance, 'Distance') * sign);
+    motion = { shape: (s) => translated(s, d), point: (q) => v3.add(q, d) };
+  } else if (p.moveType === 'rotate') {
+    if (!p.axis[0]) fail('Select an axis');
+    const a = resolveAxis(st, p.axis[0]);
+    const rad = (ang(ctx, p.angle, 'Angle') * sign) as number;
+    const dir = v3.norm(a.dir);
+    motion = { shape: (s) => rotated(s, rad * DEG, a.origin, dir), point: (q) => v3.add(a.origin, rotateVec(v3.sub(q, a.origin), dir, rad)) };
+  }
+  const dist = p.moveType === 'offset' ? len(ctx, p.distance, 'Distance') * sign : 0;
+  for (const { part, faces } of groups.values()) {
+    let res: Shape3D;
+    if (!motion) {
+      // offset: each planar face along its own normal
+      if (!allPlanar(part.shape, faces)) fail('Only planar faces can be offset: move holes and bosses with Translate or Rotate');
+      res = toPlanes(part.shape, faces, (i) => {
+        const pl = facePlane(part.shape, i);
+        return { to: { p: v3.add(pl.p, v3.scale(pl.n, dist)), n: pl.n }, reach: Math.abs(dist) };
+      });
+    } else {
+      const m = motion;
+      // a whole hole, pocket or boss moves as one; planar faces on their own otherwise
+      res = encloses(part.shape, faces)
+        ? moveFeature(part.shape, faces, m)
+        : toPlanes(part.shape, faces, (i) => {
+            const pl = facePlane(part.shape, i);
+            const o = m.point(pl.p);
+            return { to: { p: o, n: v3.norm(v3.sub(m.point(v3.add(pl.p, pl.n)), o)) }, reach: reachOf(part.shape, [i], m.point) };
+          });
+    }
+    replacePart(st, part.id, res, ctx.fid);
+  }
+  return {};
+}
+
+function buildReplaceFace(ctx: Ctx, f: FeatureOf<'replaceFace'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  const groups = facesByPart(st, p.faces);
+  if (!groups.size) fail('Select faces to replace');
+  if (!p.target[0]) fail('Select the plane or planar face to replace them with');
+  const fr = resolvePlaneRef(st, p.target[0]);
+  const off = len(ctx, p.offset, 'Offset') * (p.flip ? -1 : 1);
+  for (const { part, faces } of groups.values()) {
+    if (!allPlanar(part.shape, faces)) fail('Only planar faces can be replaced');
+    const res = toPlanes(part.shape, faces, (i) => {
+      const pl = facePlane(part.shape, i);
+      // the target's normal turned the way the face looks (out of the material); the offset along it
+      const n = v3.dot(fr.normal, pl.n) < 0 ? v3.neg(fr.normal) : fr.normal;
+      const o = v3.add(fr.origin, v3.scale(n, off));
+      return { to: { p: o, n }, reach: reachOf(part.shape, [i], (q) => v3.sub(q, v3.scale(n, v3.dot(v3.sub(q, o), n)))) };
+    });
+    replacePart(st, part.id, res, ctx.fid);
+  }
+  return {};
+}
+
 function buildDraft(ctx: Ctx, f: FeatureOf<'draft'>): FeatureOutput {
   const p = f.params;
   if (!p.neutral[0]) fail('Select a neutral plane');
@@ -840,32 +1006,59 @@ function buildDraft(ctx: Ctx, f: FeatureOf<'draft'>): FeatureOutput {
   return {};
 }
 
-function holeTool(ctx: Ctx, f: FeatureOf<'hole'>, p0: Vec3, drill: Vec3, big: number): Shape3D {
+/** A hole's sizes (mm, radians): its own fields, or a standard's (ISO) — with a thread when tapped. */
+interface HoleDims {
+  R0: number;
+  through: boolean;
+  depth: number;
+  tip: number;
+  cbore?: { R: number; depth: number };
+  csink?: { R: number; angle: number };
+  thread?: ThreadSpec & { depth: number };
+}
+
+function holeDims(ctx: Ctx, f: FeatureOf<'hole'>, big: number): HoleDims {
   const p = f.params;
-  const R0 = len(ctx, p.diameter, 'Diameter') / 2;
+  const std = p.standard === 'iso' ? isoHole(p) : null;
+  if (typeof std === 'string') fail(std);
+  const R0 = (std ? std.diameter : len(ctx, p.diameter, 'Diameter')) / 2;
   if (!(R0 > 0)) fail('Diameter must be positive');
   const through = p.endType === 'throughAll';
   const depth = through ? big : len(ctx, p.depth, 'Depth');
-  const tip = ang(ctx, p.tipAngle, 'Tip angle');
+  const d: HoleDims = { R0, through, depth, tip: ang(ctx, p.tipAngle, 'Tip angle') };
+  if (p.style === 'counterbore') {
+    const R = (std ? std.cboreDiameter : len(ctx, p.cboreDiameter, 'Counterbore diameter')) / 2;
+    if (R <= R0) fail('Counterbore diameter must exceed the hole diameter');
+    d.cbore = { R, depth: std ? std.cboreDepth : len(ctx, p.cboreDepth, 'Counterbore depth') };
+  } else if (p.style === 'countersink') {
+    const R = (std ? std.csinkDiameter : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
+    if (R <= R0) fail('Countersink diameter must exceed the hole diameter');
+    d.csink = { R, angle: std ? std.csinkAngle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle') };
+  }
+  if (std?.thread) {
+    // a blind hole is threaded as deep as asked (no deeper than the hole), a through one all the way
+    const tap = through ? big : Math.min(len(ctx, p.tapDepth ?? p.depth, 'Tapped depth'), depth);
+    if (!(tap > 0)) fail('Tapped depth must be positive');
+    d.thread = { ...std.thread, depth: tap };
+  }
+  return d;
+}
+
+function holeTool(d: HoleDims, p0: Vec3, drill: Vec3): Shape3D {
+  const { R0, depth, tip } = d;
   const eps = Math.max(R0 * 0.02, 0.01);
   // profile in (r, z) with z along -drill (z <= 0 is inside material)
   const pts: Vec2[] = [[0, eps]];
-  if (p.style === 'counterbore') {
-    const Rc = len(ctx, p.cboreDiameter, 'Counterbore diameter') / 2;
-    const dc = len(ctx, p.cboreDepth, 'Counterbore depth');
-    if (Rc <= R0) fail('Counterbore diameter must exceed the hole diameter');
-    pts.push([Rc, eps], [Rc, -dc], [R0, -dc]);
-  } else if (p.style === 'countersink') {
-    const Rs = len(ctx, p.csinkDiameter, 'Countersink diameter') / 2;
-    const a = ang(ctx, p.csinkAngle, 'Countersink angle');
-    if (Rs <= R0) fail('Countersink diameter must exceed the hole diameter');
-    const h = (Rs - R0) / Math.tan(a / 2);
-    pts.push([Rs + eps * Math.tan(a / 2), eps], [R0, -h]);
+  if (d.cbore) {
+    pts.push([d.cbore.R, eps], [d.cbore.R, -d.cbore.depth], [R0, -d.cbore.depth]);
+  } else if (d.csink) {
+    const h = (d.csink.R - R0) / Math.tan(d.csink.angle / 2);
+    pts.push([d.csink.R + eps * Math.tan(d.csink.angle / 2), eps], [R0, -h]);
   } else {
     pts.push([R0, eps]);
   }
   pts.push([R0, -depth]);
-  if (!through && tip > 0 && tip < Math.PI) pts.push([0, -depth - R0 / Math.tan(tip / 2)]);
+  if (!d.through && tip > 0 && tip < Math.PI) pts.push([0, -depth - R0 / Math.tan(tip / 2)]);
   else pts.push([0, -depth]);
   const frame = frameFromNormal(p0, drill);
   // local 2D (u along frame.xDir = radial, v along -drill)
@@ -884,14 +1077,93 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
   const p = f.params;
   if (!p.points.length) fail('Select sketch points for hole locations');
   const big = sceneExtent(ctx.st);
-  const tools = p.points.map((r) => {
+  const dims = holeDims(ctx, f, big);
+  const at = p.points.map((r) => {
     const { p: pt, n } = resolveHolePoint(ctx.st, r);
-    return holeTool(ctx, f, pt, v3.neg(n), big);
+    return { pt, drill: v3.neg(n) };
   });
+  const tools = at.map((a) => holeTool(dims, a.pt, a.drill));
   const tool = tools.length === 1 ? tools[0] : compoundOf(tools);
   recordTool(ctx.st, ctx.fid, tool, 'remove');
   applyBodyOp(ctx.st, ctx.fid, tool, 'remove', { mergeAll: p.scopeAll, parts: p.scope });
+  if (dims.thread) {
+    const th = dims.thread;
+    // the thread starts below a counterbore / countersink, where the hole has its own diameter
+    const start = dims.cbore ? dims.cbore.depth : dims.csink ? (dims.csink.R - dims.R0) / Math.tan(dims.csink.angle / 2) : 0;
+    at.forEach((a, i) => {
+      // as far as there is material around the hole (a through hole: to where it comes out)
+      const run = materialRun(ctx.st, a.pt, a.drill, (dims.R0 + th.major / 2) / 2, start, start + th.depth);
+      if (!run) return;
+      ctx.st.threads.set(`${ctx.fid}.${i}`, {
+        featureId: ctx.fid,
+        origin: v3.add(a.pt, v3.scale(a.drill, start)),
+        dir: a.drill,
+        major: th.major,
+        minor: dims.R0 * 2,
+        length: run.length,
+        designation: th.designation,
+        owner: run.owner,
+      });
+    });
+  }
   return { tool, op: 'remove' };
+}
+
+/**
+ * Material along a line parallel to a hole's axis (`r` from it), from `start` to at most `end` along `dir` from `p0`:
+ * the part there and how far it goes without a gap.
+ */
+function materialRun(st: BuildState, p0: Vec3, dir: Vec3, r: number, start: number, end: number): { length: number; owner: string } | null {
+  const oc = R.getOC();
+  const side = v3.scale(frameFromNormal(p0, dir).xDir, r);
+  const a = v3.add(v3.add(p0, side), v3.scale(dir, start));
+  const line = R.makeLine(a, v3.add(a, v3.scale(dir, end - start)));
+  const tol = Math.max(1e-4, (end - start) * 1e-6);
+  for (const part of st.parts.values()) {
+    const common = new oc.BRepAlgoAPI_Common(part.shape.wrapped, line.wrapped);
+    common.Build();
+    const res = common.Shape();
+    // the pieces of the line inside the part, as distances from its start
+    const spans: [number, number][] = [];
+    for (const e of R.iterTopo(res, 'edge')) {
+      const edge = R.cast(e) as R.Edge;
+      const t = [0, 1].map((u) => {
+        const q = edge.pointAt(u);
+        const d = v3.dot(v3.sub([q.x, q.y, q.z], a), dir);
+        q.delete();
+        return d;
+      });
+      spans.push([Math.min(t[0], t[1]), Math.max(t[0], t[1])]);
+    }
+    common.delete();
+    spans.sort((x, y) => x[0] - y[0]);
+    if (!spans.length || spans[0][0] > tol) continue;
+    let reach = spans[0][1];
+    for (const s of spans.slice(1)) if (s[0] <= reach + tol) reach = Math.max(reach, s[1]);
+    if (reach > tol) return { length: Math.min(reach, end - start), owner: part.id };
+  }
+  return null;
+}
+
+/** A cosmetic thread carried along by a motion of shapes (patterns, mirror, Derived placement): its axis as an edge, moved. */
+function movedThread(t: ThreadState, x: Xform): Pick<ThreadState, 'origin' | 'dir' | 'length'> {
+  const end = v3.add(t.origin, v3.scale(t.dir, t.length));
+  const e = x(R.makeLine(t.origin, end) as unknown as Shape3D) as unknown as R.Edge;
+  const [a, b] = [0, 1].map((u) => {
+    const q = e.pointAt(u);
+    const out: Vec3 = [q.x, q.y, q.z];
+    q.delete();
+    return out;
+  });
+  return { origin: a, dir: v3.norm(v3.sub(b, a)), length: v3.len(v3.sub(b, a)) };
+}
+
+/** Cosmetic threads of these parts (as they are before copies of them are made). */
+const threadsOf = (st: BuildState, partIds: string[]) => [...st.threads].filter(([, t]) => t.owner && partIds.includes(t.owner));
+
+/** Copies of cosmetic threads (`threadsOf`) owned by `from`, moved by `x`, for its copy `to` (the same part: fused copies). */
+function copyThreads(st: BuildState, threads: [string, ThreadState][], from: string, to: string, x: Xform, fid: string, n: number) {
+  for (const [k, t] of threads) if (t.owner === from) st.threads.set(`${k}@${fid}.${n}`, { ...t, ...movedThread(t, x), owner: to, featureId: fid });
 }
 
 // ---------------------------------------------------------------------------
@@ -913,14 +1185,19 @@ function patternInstances(
   if (kind === 'part') {
     const src = resolveParts(st, parts);
     if (!src.length) fail('Select parts to pattern');
+    // the copies' cosmetic threads come with them
+    const threads = threadsOf(st, src.map((p) => p.id));
     xforms.forEach((x, i) => {
       for (const part of src) {
         const copy = x(part.shape);
         if (op === 'add') {
           const cur = st.parts.get(part.id);
           if (cur) setPart(st, part.id, simplified(cur.shape.fuse(copy)));
+          copyThreads(st, threads, part.id, part.id, x, ctx.fid, i + 1);
         } else {
-          setPart(st, newPartId(st, `${part.id}@${ctx.fid}.${i + 1}`), copy);
+          const id = newPartId(st, `${part.id}@${ctx.fid}.${i + 1}`);
+          setPart(st, id, copy);
+          copyThreads(st, threads, part.id, id, x, ctx.fid, i + 1);
         }
       }
     });
@@ -928,8 +1205,15 @@ function patternInstances(
   }
   const records = features.flatMap((fid) => st.tools.get(fid) ?? []);
   if (!records.length) fail('Select extrude, revolve, sweep, loft or hole features to pattern');
-  xforms.forEach((x) => {
+  const threads = [...st.threads].filter(([, t]) => features.includes(t.featureId));
+  xforms.forEach((x, i) => {
     for (const rec of records) applyBodyOp(st, ctx.fid, x(rec.tool), rec.op, { mergeAll: true, parts: [] });
+    // the copied holes' threads: in whatever part each copy went into, as far as its material goes
+    for (const [k, t] of threads) {
+      const m = movedThread(t, x);
+      const run = materialRun(st, m.origin, m.dir, (t.minor + t.major) / 4, 0, m.length);
+      if (run) st.threads.set(`${k}@${ctx.fid}.${i + 1}`, { ...t, ...m, length: run.length, owner: run.owner, featureId: ctx.fid });
+    }
   });
 }
 
@@ -974,6 +1258,175 @@ function buildCircularPattern(ctx: Ctx, f: FeatureOf<'circularPattern'>): Featur
   return {};
 }
 
+/**
+ * Curve pattern (Onshape): the copies go along a path — the first one where the seed is (the path's start), the
+ * others spread over the path or `distance` apart — turning with it (frames carried along the path).
+ */
+function buildCurvePattern(ctx: Ctx, f: FeatureOf<'curvePattern'>): FeatureOutput {
+  const p = f.params;
+  if (!p.path.length) fail('Select a path');
+  const n = count(ctx, p.count, 'Instance count');
+  let wire = chainWire(p.path.flatMap((r) => resolveCurveEdges(ctx.st, r)));
+  if (p.flip) wire = R.cast(wire.wrapped.Reversed()) as R.Wire;
+  const path = pathFrames(wire);
+  const step = p.equalSpacing ? path.length / (path.closed ? n : Math.max(n - 1, 1)) : len(ctx, p.distance, 'Distance');
+  if (!(step > 0)) fail('Distance must be positive');
+  if (!path.closed && step * (n - 1) > path.length * (1 + 1e-9)) fail('The instances do not fit on the path: fewer of them or a shorter distance');
+  const start = path.frameAt(0);
+  const xforms: Xform[] = [];
+  for (let i = 1; i < n; i++) {
+    const at = path.frameAt(step * i);
+    if (p.orient) xforms.push((s) => frameToFrame(s, start, at));
+    else {
+      const d = v3.sub(at.origin, start.origin);
+      xforms.push((s) => translated(s, d));
+    }
+  }
+  patternInstances(ctx, p.patternType, p.parts, p.features, xforms, p.op);
+  return {};
+}
+
+/**
+ * Rib (Onshape): each sketch curve becomes a wall `thickness` thick that runs from the curve to the parts — within
+ * the sketch plane (symmetric about it) or along its normal (symmetric about the curve) — and merges with them.
+ */
+function buildRib(ctx: Ctx, f: FeatureOf<'rib'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  if (!p.profiles.length) fail('Select sketch curves for the rib');
+  const t = len(ctx, p.thickness, 'Thickness');
+  if (!(t > 0)) fail('Thickness must be positive');
+  const targets = p.mergeAll ? [...st.parts.values()] : resolveParts(st, p.parts);
+  if (!targets.length) fail('There is no part for the rib to meet');
+  const solid = fuseAll(targets.map((x) => x.shape));
+  const big = sceneExtent(st);
+  const ribs: Shape3D[] = [];
+  for (const r of p.profiles) {
+    if (r.kind !== 'sketchEntity') fail('Select sketch curves for the rib');
+    const n = getSketch(st, r.sketchId).frame.normal;
+    for (const e0 of resolveCurveEdges(st, r)) {
+      const e = p.extend === false ? e0 : extendToSolid(e0, solid, big);
+      const rib = ribWall(e, n, t, p.direction, p.flip, solid, big);
+      if (!rib) fail('The rib does not meet a part: check its curves and direction');
+      ribs.push(rib);
+    }
+  }
+  const tool = ribs.length === 1 ? ribs[0] : fuseAll(ribs);
+  recordTool(st, ctx.fid, tool, 'add');
+  applyBodyOp(st, ctx.fid, tool, 'add', p);
+  return { tool, op: 'add' };
+}
+
+/** A line run on from both ends up to the solid where it points at it (Onshape: Extend profiles up to part). */
+function extendToSolid(e: R.Edge, solid: Shape3D, big: number): R.Edge {
+  if (e.geomType !== 'LINE') return e;
+  const a = e.startPoint.toTuple() as Vec3;
+  const b = e.endPoint.toTuple() as Vec3;
+  const d = v3.norm(v3.sub(b, a));
+  // how far from p along dir the material begins (0: right there), none — it never does
+  const hit = (p: Vec3, dir: Vec3): number => {
+    const oc = R.getOC();
+    const ray = R.makeLine(p, v3.add(p, v3.scale(dir, big)));
+    const common = new oc.BRepAlgoAPI_Common(solid.wrapped, ray.wrapped);
+    common.Build();
+    let best = Infinity;
+    for (const x of R.iterTopo(common.Shape(), 'edge')) {
+      const edge = R.cast(x) as R.Edge;
+      for (const u of [0, 1]) {
+        const q = edge.pointAt(u);
+        best = Math.min(best, v3.dot(v3.sub([q.x, q.y, q.z], p), dir));
+        q.delete();
+      }
+    }
+    common.delete();
+    return Number.isFinite(best) ? Math.max(0, best) : 0;
+  };
+  const ta = hit(a, v3.neg(d));
+  const tb = hit(b, d);
+  if (ta < 1e-9 && tb < 1e-9) return e;
+  return R.makeLine(v3.sub(a, v3.scale(d, ta)), v3.add(b, v3.scale(d, tb)));
+}
+
+/** Wrap (Onshape): sketch regions rolled onto a cylindrical face, raised out of it or sunk into it. */
+function buildWrap(ctx: Ctx, f: FeatureOf<'wrap'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  if (!p.profiles.length) fail('Select sketch regions to wrap');
+  if (!p.target[0]) fail('Select the cylindrical face to wrap them onto');
+  const { face, info } = resolveFace(st, p.target[0]);
+  if (info.type !== 'CYLINDRE' || !info.axis || !info.axisPoint || info.radius === undefined) fail('Regions wrap onto cylindrical faces only');
+  const depth = len(ctx, p.depth, 'Depth');
+  if (!(depth > 0)) fail('Depth must be positive');
+  const target = { face, axis: info.axis, axisPoint: info.axisPoint, radius: info.radius };
+  const tools = p.profiles.map((r) => {
+    const { sketch, region } = resolveRegion(st, r);
+    return wrapRegion(sketch.frame, region, target, p.op === 'add' ? depth : -depth);
+  });
+  const tool = tools.length === 1 ? tools[0] : fuseAll(tools);
+  recordTool(st, ctx.fid, tool, p.op);
+  applyBodyOp(st, ctx.fid, tool, p.op, p);
+  return { tool, op: p.op };
+}
+
+/** One curve's rib: the wall from it to the solid (the first way that meets it, or the other with `flip`). */
+function ribWall(e: R.Edge, n: Vec3, t: number, mode: 'parallel' | 'normal', flip: boolean, solid: Shape3D, big: number): Shape3D | null {
+  const a = e.startPoint.toTuple() as Vec3;
+  const b = e.endPoint.toTuple() as Vec3;
+  const mid = e.pointAt(0.5).toTuple() as Vec3;
+  // within the plane: square to the curve's chord; along the normal: the normal
+  const along = mode === 'parallel' ? v3.norm(v3.cross(n, v3.sub(b, a))) : n;
+  for (const sign of flip ? [-1, 1] : [1, -1]) {
+    const d = v3.scale(along, sign);
+    let wall: Shape3D;
+    try {
+      if (mode === 'parallel') {
+        // the region the curve sweeps along d, thickened about the sketch plane
+        const far = (q: Vec3) => v3.add(q, v3.scale(d, big));
+        const moved = R.cast(R.translate(e.wrapped, v3.scale(d, big))) as R.Edge;
+        const face = R.makeFace(R.assembleWire([e.clone(), R.makeLine(b, far(b)), moved, R.makeLine(far(a), a)]));
+        wall = prism(face, n, -t / 2, t / 2);
+      } else {
+        wall = prism(stripAround(e, n, t), d, 0, big);
+      }
+    } catch {
+      continue;
+    }
+    // what lies between the curve and the solid: the piece next to the curve, if it ends before the far side
+    const probe = v3.add(mid, v3.scale(d, Math.min(t, big) * 1e-3));
+    const piece = solidsOf(wall.cut(solid)).find((s) => touches(s, probe));
+    if (!piece) continue;
+    const [lo, hi] = bboxOf(piece);
+    let reach = 0;
+    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) reach = Math.max(reach, v3.dot(v3.sub([x, y, z], mid), d));
+    if (reach < big * 0.9) return piece;
+  }
+  return null;
+}
+
+/** The strip `t` wide around a line or arc within its plane (normal `n`), symmetric about it. */
+function stripAround(e: R.Edge, n: Vec3, t: number): R.Face {
+  const a = e.startPoint.toTuple() as Vec3;
+  const b = e.endPoint.toTuple() as Vec3;
+  if (e.geomType === 'LINE') {
+    const s = v3.scale(v3.norm(v3.cross(n, v3.sub(b, a))), t / 2);
+    return R.makePolygon([v3.add(a, s), v3.add(b, s), v3.sub(b, s), v3.sub(a, s)]);
+  }
+  if (e.geomType === 'CIRCLE') {
+    const m = e.pointAt(0.5).toTuple() as Vec3;
+    const oc = R.getOC();
+    const ad = new oc.BRepAdaptor_Curve(e.wrapped);
+    const loc = ad.Circle().Location();
+    const c: Vec3 = [loc.X(), loc.Y(), loc.Z()];
+    ad.delete();
+    // the arc's points pushed in and out along their radii
+    const at = (q: Vec3, k: number) => v3.add(q, v3.scale(v3.norm(v3.sub(q, c)), k));
+    const outer = R.makeThreePointArc(at(a, t / 2), at(m, t / 2), at(b, t / 2));
+    const inner = R.makeThreePointArc(at(b, -t / 2), at(m, -t / 2), at(a, -t / 2));
+    return R.makeFace(R.assembleWire([outer, R.makeLine(at(b, t / 2), at(b, -t / 2)), inner, R.makeLine(at(a, -t / 2), at(a, t / 2))]));
+  }
+  fail('Ribs along the sketch normal take lines and arcs');
+}
+
 function buildMirror(ctx: Ctx, f: FeatureOf<'mirror'>): FeatureOutput {
   const p = f.params;
   if (!p.plane[0]) fail('Select a mirror plane');
@@ -990,7 +1443,10 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
   if (p.op === 'union') {
     if (tools.length < 2) fail('Select at least two parts to union');
     const acc = fuseAll(tools.map((t) => t.shape));
-    tools.slice(1).forEach((t) => removePart(st, t.id));
+    tools.slice(1).forEach((t) => {
+      adoptThreads(st, t.id, tools[0].id);
+      removePart(st, t.id);
+    });
     replacePart(st, tools[0].id, acc, ctx.fid);
   } else if (p.op === 'subtract') {
     const targets = resolveParts(st, p.targets).filter((t) => !tools.some((x) => x.id === t.id));
@@ -1003,7 +1459,10 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
     let acc: Shape3D = tools[0].shape;
     for (let i = 1; i < tools.length; i++) acc = acc.intersect(tools[i].shape);
     if (isEmptyShape(acc)) fail('Parts do not intersect');
-    tools.slice(1).forEach((t) => removePart(st, t.id));
+    tools.slice(1).forEach((t) => {
+      adoptThreads(st, t.id, tools[0].id);
+      removePart(st, t.id);
+    });
     replacePart(st, tools[0].id, simplified(acc), ctx.fid);
   }
   return {};
@@ -1074,20 +1533,24 @@ function buildTransform(ctx: Ctx, f: FeatureOf<'transform'>): FeatureOutput {
       const a = resolvePlaneRef(st, p.fromMate[0]);
       const b = resolvePlaneRef(st, p.toMate[0]);
       x = (s) => frameToFrame(s, a, b);
-      pt = (q) => {
-        const r = v3.sub(q, a.origin);
-        const u = [v3.dot(r, a.xDir), v3.dot(r, a.yDir), v3.dot(r, a.normal)];
-        return v3.add(b.origin, v3.add(v3.scale(b.xDir, u[0]), v3.add(v3.scale(b.yDir, u[1]), v3.scale(b.normal, u[2]))));
-      };
+      pt = frameToFramePoint(a, b);
       break;
     }
     default:
       fail('Unknown transform type');
   }
+  const threads = threadsOf(st, parts.map((q) => q.id));
   for (const part of parts) {
     const res = x(part.shape);
-    if (p.copy) setPart(st, newPartId(st, `${part.id}@${ctx.fid}`), res);
-    else setPart(st, part.id, res);
+    if (p.copy) {
+      const id = newPartId(st, `${part.id}@${ctx.fid}`);
+      setPart(st, id, res);
+      copyThreads(st, threads, part.id, id, x, ctx.fid, 1);
+    } else {
+      setPart(st, part.id, res);
+      // its cosmetic threads move with it
+      for (const [k, t] of threads) if (t.owner === part.id) st.threads.set(k, { ...t, ...movedThread(t, x) });
+    }
   }
   if (!p.copy) {
     // mate connectors follow their owner parts
@@ -1102,6 +1565,15 @@ function movedFrame(f: PlaneFrame, pt: (q: Vec3) => Vec3): PlaneFrame {
   const o = pt(f.origin);
   const dir = (d: Vec3) => v3.norm(v3.sub(pt(v3.add(f.origin, d)), o));
   return { origin: o, xDir: dir(f.xDir), yDir: dir(f.yDir), normal: dir(f.normal) };
+}
+
+/** The motion of `frameToFrame` applied to a point. */
+function frameToFramePoint(a: PlaneFrame, b: PlaneFrame): (q: Vec3) => Vec3 {
+  return (q) => {
+    const r = v3.sub(q, a.origin);
+    const u = [v3.dot(r, a.xDir), v3.dot(r, a.yDir), v3.dot(r, a.normal)];
+    return v3.add(b.origin, v3.add(v3.scale(b.xDir, u[0]), v3.add(v3.scale(b.yDir, u[1]), v3.scale(b.normal, u[2]))));
+  };
 }
 
 /** Rigid motion taking frame `a` onto frame `b` (origins and all three axes). */
@@ -1214,25 +1686,54 @@ function buildDerived(ctx: Ctx, f: FeatureOf<'derived'>): FeatureOutput {
   const p = f.params;
   if (!p.studioId) fail('Select a Part Studio');
   if (p.sourceError === 'missing') fail('The source Part Studio no longer exists');
+  if (p.sourceError === 'version') fail('The source version is not available: it was deleted or is in another browser');
   if (p.sourceError === 'cycle') fail('Circular reference: the source Part Studio uses this one');
   const src = p.sourceKey ? ctx.sources?.(p.sourceKey) : undefined;
   if (!src) fail('The source Part Studio is not built');
-  const wanted = p.parts.length ? p.parts : [...src.state.parts.keys()];
-  if (!wanted.length) fail('The source Part Studio has no parts');
-  let missing = 0;
+  const wanted = p.noParts ? [] : p.parts.length ? p.parts : [...src.state.parts.keys()];
+  const sketches = p.sketches ?? [];
+  if (!wanted.length && !sketches.length) fail(p.noParts ? 'Select parts or sketches to derive' : 'The source Part Studio has no parts');
+  // placed at a mate connector of this Part Studio: the source's origin (or its mate connector) lands there
+  let place = (s: Shape3D) => s;
+  let placeFrame = (f: PlaneFrame) => f;
+  if (p.placeTo?.[0]) {
+    const to = resolvePlaneRef(ctx.st, p.placeTo[0]);
+    const from = p.placeFrom ? src.state.mates.get(p.placeFrom)?.frame : STD_PLANES.top;
+    if (!from) fail('The mate connector of the source Part Studio no longer exists');
+    place = (s) => frameToFrame(s, from, to);
+    const pt = frameToFramePoint(from, to);
+    placeFrame = (f) => movedFrame(f, pt);
+  }
+  let lostParts = 0;
   for (const id of wanted) {
     const part = src.state.parts.get(id);
     if (!part) {
-      missing++;
+      lostParts++;
       continue;
     }
     // a copy: the source's shapes stay its own
     const pid = `${ctx.fid}.${id}`;
-    setPart(ctx.st, pid, part.shape.clone() as Shape3D);
+    setPart(ctx.st, pid, place(part.shape.clone() as Shape3D));
     ctx.st.derived.set(pid, { name: src.name(id), color: src.color(id) });
+    // with its cosmetic threads
+    for (const [k, t] of src.state.threads)
+      if (t.owner === id) ctx.st.threads.set(`${ctx.fid}.${k}`, { ...t, ...(p.placeTo?.[0] ? movedThread(t, place) : {}), owner: pid, featureId: ctx.fid });
   }
-  if (missing === wanted.length) fail('The selected parts no longer exist in the source Part Studio');
-  return missing ? { warning: 'Some of the selected parts no longer exist in the source Part Studio' } : {};
+  // its sketches, under "derivedId.sketchId": their regions and curves are referenced like this Part Studio's own
+  let lostSketches = 0;
+  for (const id of sketches) {
+    const sk = src.state.sketches.get(id);
+    if (!sk) {
+      lostSketches++;
+      continue;
+    }
+    const key = `${ctx.fid}.${id}`;
+    ctx.st.sketches.set(key, { ...sk, featureId: key, frame: placeFrame(sk.frame) });
+  }
+  if (lostParts + lostSketches === wanted.length + sketches.length)
+    fail(sketches.length ? 'The selected parts and sketches no longer exist in the source Part Studio' : 'The selected parts no longer exist in the source Part Studio');
+  if (lostSketches) return { warning: 'Some of the selected sketches no longer exist in the source Part Studio' };
+  return lostParts ? { warning: 'Some of the selected parts no longer exist in the source Part Studio' } : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -1268,6 +1769,12 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildShell(ctx, feature);
     case 'draft':
       return buildDraft(ctx, feature);
+    case 'deleteFace':
+      return buildDeleteFace(ctx, feature);
+    case 'moveFace':
+      return buildMoveFace(ctx, feature);
+    case 'replaceFace':
+      return buildReplaceFace(ctx, feature);
     case 'hole':
       return buildHole(ctx, feature);
     case 'linearPattern':
@@ -1276,6 +1783,12 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildCircularPattern(ctx, feature);
     case 'mirror':
       return buildMirror(ctx, feature);
+    case 'curvePattern':
+      return buildCurvePattern(ctx, feature);
+    case 'rib':
+      return buildRib(ctx, feature);
+    case 'wrap':
+      return buildWrap(ctx, feature);
     case 'boolean':
       return buildBoolean(ctx, feature);
     case 'split':

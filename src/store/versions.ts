@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import type { Draft } from 'immer';
 import type { CadDocument, DocumentVersion, ProjectVersion } from '../core/types';
 import { uid } from '../core/ids';
+import { renameVersionSources } from '../core/derived';
 import { compareDocuments, contentHash, historyDue, historyOverflow, isEmptyDocument, nextVersionName, withVersionContent, type DocumentDiff } from '../core/versions';
 import * as db from './persistence';
 import { useDoc } from './docStore';
@@ -126,19 +127,25 @@ export async function fileVersions(docId: string): Promise<ProjectVersion[]> {
   return out;
 }
 
+/** New ids for the versions of a copy of a project (old id → new); its Derived features follow them (`renameVersionSources`). */
+export const copiedVersionIds = (versions: ProjectVersion[] | undefined) =>
+  new Map((versions ?? []).filter((v) => typeof v?.id === 'string').map((v) => [v.id, uid('vr')]));
+
 /**
  * Versions of a project file into the browser, for document `docId`. `sameDocument`: the file is this document's
  * own (a file of a folder) — the versions it has already are skipped; otherwise (an imported copy) all are added
- * anew. The number added.
+ * anew, under the ids `copies` gives them (see `copiedVersionIds`). The number added.
  */
-export async function importVersions(docId: string, versions: ProjectVersion[] | undefined, sameDocument: boolean): Promise<number> {
+export async function importVersions(docId: string, versions: ProjectVersion[] | undefined, sameDocument: boolean, copies?: Map<string, string>): Promise<number> {
   if (!versions?.length) return 0;
   const have = new Set((await db.listVersions(docId)).map((v) => v.id));
   let added = 0;
   for (const pv of versions) {
     if (!pv || !Array.isArray(pv.tabs) || !pv.units || (sameDocument && have.has(pv.id))) continue;
-    const id = sameDocument && typeof pv.id === 'string' ? pv.id : uid('vr');
-    const snap: CadDocument = { id: docId, name: '', created: pv.created, modified: pv.created, units: pv.units, tabs: pv.tabs, activeTab: pv.activeTab, version: 1 };
+    const id = sameDocument && typeof pv.id === 'string' ? pv.id : (copies?.get(pv.id) ?? uid('vr'));
+    // in a copy, versions that derive from earlier ones use the copies
+    const tabs = !sameDocument && copies ? renameVersionSources(pv.tabs, copies) : pv.tabs;
+    const snap: CadDocument = { id: docId, name: '', created: pv.created, modified: pv.created, units: pv.units, tabs, activeTab: pv.activeTab, version: 1 };
     await db.saveVersion({ id, docId, kind: 'version', name: pv.name || 'V', ...(pv.description ? { description: pv.description } : {}), created: pv.created || Date.now(), hash: contentHash(pv) }, snap);
     added++;
   }

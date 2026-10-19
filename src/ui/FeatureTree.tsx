@@ -13,6 +13,12 @@ import { Icon } from './icons';
 import { FEATURE_ICONS } from './FeatureDialog';
 import { t, tName } from '../i18n';
 
+/** Features shown in the graphics area besides parts (an eye to hide them): a Derived feature — with its sketches. */
+function canHide(f: Feature | undefined) {
+  if (!f) return false;
+  return f.type === 'sketch' || f.type === 'plane' || f.type === 'helix' || f.type === 'mateConnector' || (f.type === 'derived' && !!f.params.sketches?.length);
+}
+
 function toggleHidden(ids: string[]) {
   useDoc.getState().update(
     (d) =>
@@ -254,7 +260,7 @@ export function FeatureTree() {
     }
     const inFolder = ids.some((id) => folderOf(studio, id));
     const anySuppressed = features.some((x) => ids.includes(x.id) && x.suppressed);
-    const visualIds = ids.filter((id) => ['sketch', 'plane', 'helix', 'mateConnector'].includes(features.find((x) => x.id === id)?.type ?? ''));
+    const visualIds = ids.filter((id) => canHide(features.find((x) => x.id === id)));
     const items: ContextMenuItem[] =
       ids.length > 1
         ? [
@@ -286,7 +292,7 @@ export function FeatureTree() {
   const folderMenu = (e: React.MouseEvent, fo: FeatureFolder) => {
     e.preventDefault();
     const anySuppressed = features.some((x) => fo.featureIds.includes(x.id) && x.suppressed);
-    const visualIds = fo.featureIds.filter((id) => ['sketch', 'plane', 'helix'].includes(features.find((x) => x.id === id)?.type ?? ''));
+    const visualIds = fo.featureIds.filter((id) => canHide(features.find((x) => x.id === id)));
     const items: ContextMenuItem[] = [
       { label: t('Rename'), icon: 'rename', action: () => setRenaming(fo.id) },
       { label: fo.collapsed ? t('Expand') : t('Collapse'), icon: fo.collapsed ? 'chevronDown' : 'chevronRight', action: () => toggleFolder(fo.id) },
@@ -464,7 +470,7 @@ export function FeatureTree() {
         )}
         {st && !st.ok && <span className="status-dot error" />}
         {st?.ok && st.warning && <span className="status-dot warn" />}
-        {(f.type === 'sketch' || f.type === 'plane' || f.type === 'helix' || f.type === 'mateConnector') && (
+        {canHide(f) && (
           <span
             className={'eye' + (hidden.has(f.id) ? ' off' : '')}
             onClick={(e) => {

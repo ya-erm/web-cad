@@ -15,6 +15,8 @@ export interface SketchState {
   entities: SkEntity[];
   regions: SketchRegion[];
   ok: boolean;
+  /** Its feature's name (a sketch brought by a Derived feature: its name in the source). */
+  name?: string;
 }
 
 export interface PlaneState {
@@ -40,6 +42,23 @@ export interface CurveState {
   points: Vec3[];
 }
 
+/** A cosmetic thread (of a tapped hole, Onshape): shown and listed, not modelled — the hole is the tap drill. */
+export interface ThreadState {
+  /** The feature that made it (a hole, or a pattern of it). */
+  featureId: string;
+  /** Where it starts on the hole's axis, and its direction into the material. */
+  origin: Vec3;
+  dir: Vec3;
+  /** Major (nominal) and minor (the hole's) diameters, and its length. */
+  major: number;
+  minor: number;
+  length: number;
+  /** "M6", "M8×1". */
+  designation: string;
+  /** The part it is in: it follows that part's moves and copies. */
+  owner?: string;
+}
+
 export interface ToolRecord {
   tool: Shape3D;
   op: BoolOp;
@@ -58,6 +77,8 @@ export interface BuildState {
   partOrder: string[];
   /** Parts brought from another Part Studio (Derived): their names and colours there. */
   derived: Map<string, { name: string; color?: string }>;
+  /** Cosmetic threads of tapped holes (and their copies). */
+  threads: Map<string, ThreadState>;
 }
 
 export function emptyState(): BuildState {
@@ -71,6 +92,7 @@ export function emptyState(): BuildState {
     vars: {},
     partOrder: [],
     derived: new Map(),
+    threads: new Map(),
   };
 }
 
@@ -85,6 +107,7 @@ export function cloneState(s: BuildState): BuildState {
     vars: { ...s.vars },
     partOrder: s.partOrder,
     derived: new Map(s.derived),
+    threads: new Map(s.threads),
   };
 }
 
@@ -95,4 +118,11 @@ export function setPart(st: BuildState, id: string, shape: Shape3D) {
 
 export function removePart(st: BuildState, id: string) {
   st.parts.delete(id);
+  // its cosmetic threads go with it
+  for (const [k, t] of st.threads) if (t.owner === id) st.threads.delete(k);
+}
+
+/** Part `from` merged into part `to` (before `from` is removed): its cosmetic threads are `to`'s now. */
+export function adoptThreads(st: BuildState, from: string, to: string) {
+  for (const [k, t] of st.threads) if (t.owner === from) st.threads.set(k, { ...t, owner: to });
 }

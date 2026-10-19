@@ -50,11 +50,15 @@ The arrow in the header goes back to the list of versions. While a version is op
 
 **Restore this version** (in the panel or on the viewing banner) makes the workspace what the chosen version has: all tabs and units. The document's name does not change. Before that the current state goes to the history (**Autosave · before a version was restored**), and the restore itself is one undo step: `Ctrl+Z` brings everything back at once.
 
+## Parts from a version {#derived}
+
+A version can be the source of a [Derived](derived#versions) feature: the parts of a Part Studio come in as they were in the version, into this document or another one. Delete such a version and the features that refer to it show an error.
+
 ## Versions in the project file {#file}
 
 A `.webcad.json` project file keeps the document together with its versions (the `versions` field; the history stays in the browser):
 
-- A project **Export** saves the versions to the file; **Import project** makes a copy of the document with copies of its versions.
+- A project **Export** saves the versions to the file; **Import project** makes a copy of the document with copies of its versions ([Derived](derived#versions) features taking parts from the document's versions move to their copies).
 - A document of a [folder on the computer](documents#folder) writes its versions to its file on every save, and when a version is made or deleted. A file opened from a folder adds the versions the browser does not have yet (a copy of the file on another computer, in Git or a cloud folder comes with its versions).
 
 > **Limitation.** Duplicating a document does not copy its versions. There is no branching or merging of versions (as in Onshape). Deleting a document from the trash deletes its versions in the browser (a folder's file keeps them). The comparison is a list of changes, without highlighting them on the model.

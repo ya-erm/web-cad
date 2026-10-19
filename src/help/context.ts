@@ -25,6 +25,7 @@ export function contextHelpPage(): string {
   if (!ed.editing) return HELP_START;
   if (ed.editing.draft.type === 'sketch') {
     if (ed.sketchPattern) return CONTEXT_HELP.sketchPattern;
+    if (ed.sketchTransform) return CONTEXT_HELP.sketchTransform;
     return SKETCH_TOOL_HELP[ed.sketch?.tool ?? 'select'] ?? FEATURE_HELP.sketch;
   }
   return FEATURE_HELP[ed.editing.draft.type] ?? HELP_START;

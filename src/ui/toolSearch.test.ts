@@ -13,9 +13,10 @@ describe('tool search', () => {
   });
 
   it('finds them by the English name too, names that start with the query first', () => {
-    expect(searchTools('pla', ru).map((x) => x.id)).toEqual(['plane']);
+    // "Plane" starts with it, "Replace face" has it inside
+    expect(searchTools('pla', ru).map((x) => x.id)).toEqual(['plane', 'replaceFace']);
     // a word of the name starts with it
-    expect(searchTools('pattern').map((x) => x.id)).toEqual(['linearPattern', 'circularPattern']);
+    expect(searchTools('pattern').map((x) => x.id)).toEqual(['linearPattern', 'circularPattern', 'curvePattern']);
     expect(searchTools('li').map((x) => x.id)[0]).toBe('linearPattern');
     expect(searchTools('xyz')).toEqual([]);
     expect(searchTools('   ')).toEqual([]);

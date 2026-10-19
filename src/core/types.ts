@@ -88,12 +88,13 @@ export type ConstraintType =
   | 'symmetric' // [point, point, line]
   | 'fix' // [entity] — freezes all its variables at their current values
   // dimensional (value is an expression string)
-  | 'distance' // [line] (length) | [point, point] | [point, line] | [line, line] (parallel lines)
+  | 'distance' // [line] (length) | [point, point] | [point, line] | [line, line] (parallel lines); circles / arcs act as their centre, with `toCurve` as themselves
   | 'hdistance' // [point, point] horizontal distance
   | 'vdistance' // [point, point] vertical distance
   | 'radius' // [circle|arc|ellipse] (ellipse: variant 0 = first axis (rx), 1 = second axis (ry))
   | 'diameter' // [circle|arc|ellipse] (same)
-  | 'angle' // [line, line]
+  | 'angle' // [line, line] | [point, point, point] (the angle at the middle one)
+  | 'arclength' // [arc] its length
   | 'offset'; // [src, copy, src, copy, ...] offset curves / chains at one distance
 
 export interface SkConstraint {
@@ -109,6 +110,10 @@ export interface SkConstraint {
   variant?: number;
   /** Values frozen by a 'fix' constraint (x, y, r ... in entity variable order). */
   frozen?: number[];
+  /** A distance to a circle / arc itself (its nearest point), not to its centre. */
+  toCurve?: boolean;
+  /** A driven (reference) dimension (Onshape): shows what the geometry measures, does not drive it. */
+  driven?: boolean;
 }
 
 /**
@@ -262,6 +267,13 @@ export interface FilletParams {
   edges: SelRef[];
   radius: string;
   tangentPropagation: boolean;
+  /** Onshape fillet type: Edge (one radius, none) or Variable — radii at vertices of the edges. */
+  filletType?: 'edge' | 'variable';
+  /** Variable: the vertices with radii of their own and those radii (the same order); elsewhere — `radius`. */
+  vertices?: SelRef[];
+  vertexRadii?: string[];
+  /** Variable: the radius changes smoothly (level at the vertices: no kink between edges), not linearly. */
+  smooth?: boolean;
 }
 
 export interface ChamferParams {
@@ -272,6 +284,31 @@ export interface ChamferParams {
   angle: string;
   flip: boolean;
   tangentPropagation: boolean;
+}
+
+/** Onshape Delete face (with Heal): the gap closes from the faces around. */
+export interface DeleteFaceParams {
+  faces: SelRef[];
+}
+
+/** Onshape Move face: the faces move, the faces around them extend or shrink to follow. */
+export interface MoveFaceParams {
+  faces: SelRef[];
+  /** Offset — along each face's normal; translate — along a direction; rotate — about an axis. */
+  moveType: 'offset' | 'translate' | 'rotate';
+  distance: string;
+  flip: boolean;
+  direction: SelRef[];
+  axis: SelRef[];
+  angle: string;
+}
+
+/** Onshape Replace face: planar faces go to a plane (a plane, a planar face, a mate connector), offset from it. */
+export interface ReplaceFaceParams {
+  faces: SelRef[];
+  target: SelRef[];
+  offset: string;
+  flip: boolean;
 }
 
 export interface ShellParams {
@@ -300,6 +337,21 @@ export interface HoleParams {
   tipAngle: string;
   scopeAll: boolean;
   scope: SelRef[];
+  /**
+   * Onshape Standard: ISO — the diameters come from the tables (`core/holes`) by the hole type, size, fit and pitch
+   * instead of the fields above; custom (none) — those fields.
+   */
+  standard?: 'custom' | 'iso';
+  /** Clearance (for a screw to pass) or tapped (threaded: the tap drill, with a cosmetic thread). */
+  holeType?: 'clearance' | 'tapped';
+  /** "M6". */
+  size?: string;
+  /** Clearance hole fit, ISO 273: fine, medium, coarse. */
+  fit?: 'close' | 'normal' | 'loose';
+  /** Thread pitch, mm ("1.25"); none — coarse. */
+  pitch?: string;
+  /** A tapped blind hole: how deep the thread goes (no deeper than the hole). */
+  tapDepth?: string;
 }
 
 export type PatternKind = 'part' | 'feature' | 'face';
@@ -333,6 +385,48 @@ export interface CircularPatternParams {
   equalSpacing: boolean;
   flip: boolean;
   op: 'new' | 'add';
+}
+
+/** Onshape Curve pattern: copies along a path (edges, sketch curves), turning with it. */
+export interface CurvePatternParams {
+  patternType: PatternKind;
+  parts: SelRef[];
+  features: string[];
+  faces: SelRef[];
+  path: SelRef[];
+  count: string;
+  /** Spread over the whole path (open: from end to end; closed: all the way round); else `distance` apart. */
+  equalSpacing: boolean;
+  distance: string;
+  /** From the other end of the path. */
+  flip: boolean;
+  /** The copies turn with the path (none: only moved along it). */
+  orient: boolean;
+  op: 'new' | 'add';
+}
+
+/** Onshape Wrap: sketch regions rolled onto a cylindrical face, raised out of it or sunk into it. */
+export interface WrapParams extends MergeScope {
+  /** Sketch regions on a plane along the cylinder's axis (tangent to it, usually). */
+  profiles: SelRef[];
+  /** The cylindrical face. */
+  target: SelRef[];
+  /** Emboss (add, out of the face) or deboss (remove, into it). */
+  op: 'add' | 'remove';
+  depth: string;
+}
+
+/** Onshape Rib: walls of a thickness from sketch curves out to the parts. */
+export interface RibParams extends MergeScope {
+  /** Sketch curves (lines, arcs): the rib's profile. */
+  profiles: SelRef[];
+  thickness: string;
+  /** The rib grows within the sketch plane (out from the curves), or along its normal. */
+  direction: 'parallel' | 'normal';
+  /** The other way (by default the way the rib meets a part). */
+  flip: boolean;
+  /** Lines run on from their ends up to the parts they point at (Onshape: Extend profiles up to part). */
+  extend?: boolean;
 }
 
 export interface MirrorParams {
@@ -451,15 +545,28 @@ export interface ImportParams {
 export interface DerivedParams {
   /** The source Part Studio (a tab of this document). */
   studioId: string;
-  /** Its parts to bring in (ids in its build); empty — all of them. */
+  /** Its parts to bring in (ids in its build); empty — all of them (none with `noParts`). */
   parts: string[];
+  /** No parts: only sketches. */
+  noParts?: boolean;
+  /** Its sketches to bring in (their feature ids): their regions can be extruded, their geometry used here. */
+  sketches?: string[];
+  /** Its configuration (input id → option id, a variable input's value); the inputs not set — as chosen there. */
+  configuration?: Record<string, string>;
+  /**
+   * Where to put the parts (Onshape Derived location): a mate connector of this Part Studio; empty — where they
+   * stand in the source. `placeFrom` — the mate connector of the source (its feature id) that lands on it; none —
+   * the source's origin.
+   */
+  placeTo?: SelRef[];
+  placeFrom?: string;
   /**
    * Filled in for the build only, never stored: the source's builder key, its version (a change of the source makes
    * the feature rebuild) and why it cannot be used.
    */
   sourceKey?: string;
   sourceVersion?: string;
-  sourceError?: 'missing' | 'cycle';
+  sourceError?: 'missing' | 'cycle' | 'version';
 }
 
 export interface HelixParams {
@@ -481,10 +588,16 @@ export interface FeatureParamsMap {
   chamfer: ChamferParams;
   shell: ShellParams;
   draft: DraftParams;
+  deleteFace: DeleteFaceParams;
+  moveFace: MoveFaceParams;
+  replaceFace: ReplaceFaceParams;
   hole: HoleParams;
   linearPattern: LinearPatternParams;
   circularPattern: CircularPatternParams;
+  curvePattern: CurvePatternParams;
   mirror: MirrorParams;
+  rib: RibParams;
+  wrap: WrapParams;
   boolean: BooleanParams;
   split: SplitParams;
   transform: TransformParams;

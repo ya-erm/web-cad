@@ -4,7 +4,7 @@
 import * as R from 'replicad';
 import type { EvalContext } from '../core/expr';
 import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
-import { v3 } from '../core/math';
+import { perpendicular as perpendicularTo, v3 } from '../core/math';
 import { FeatureError, compoundOf, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
@@ -21,9 +21,10 @@ import type {
   StepAssembly,
   ProjectedEdge,
   SketchResult,
+  ThreadResult,
 } from './protocol';
 import { resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePoint } from './refs';
-import { cloneState, emptyState, type BuildState } from './state';
+import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
 import type { SelRef } from '../core/types';
 
 export const DEFAULT_PART_COLOR = '#a9bfd6';
@@ -151,6 +152,7 @@ export class StudioBuilder {
       planes: this.planeResults(final),
       mates: [...final.mates.values()].map((m) => ({ featureId: m.featureId, name: m.name, frame: m.frame, owner: m.owner })),
       curves: this.curveResults(final),
+      threads: threadResults(final),
       statuses,
       partOrder: final.partOrder,
       timeMs: 0,
@@ -178,6 +180,9 @@ export class StudioBuilder {
       const planes = this.planeResults(next).filter((pl) => !base.planes.has(pl.featureId));
       const curves = this.curveResults(next).filter((c) => !base.curves.has(c.featureId));
       const mates = [...next.mates.values()].filter((m) => !base.mates.has(m.featureId)).map((m) => ({ featureId: m.featureId, name: m.name, frame: m.frame }));
+      // a Derived feature's sketches (a sketch being edited is drawn by the sketch editor)
+      const sketches = feature.type === 'derived' ? this.sketchResults(next).filter((s) => !base.sketches.has(s.featureId)) : [];
+      const threads = threadResults(next).filter((t) => base.threads.get(t.key) !== next.threads.get(t.key));
       return {
         status: { ok: true, warning: out.warning },
         parts,
@@ -187,6 +192,8 @@ export class StudioBuilder {
         planes,
         curves,
         mates,
+        sketches,
+        threads,
       };
     } catch (e) {
       return { status: { ok: false, error: errorMessage(e) }, parts: [], changed: [] };
@@ -194,7 +201,7 @@ export class StudioBuilder {
   }
 
   private sketchResults(st: BuildState): SketchResult[] {
-    return [...st.sketches.values()].map((s) => ({ featureId: s.featureId, frame: s.frame, entities: s.entities, ok: s.ok }));
+    return [...st.sketches.values()].map((s) => ({ featureId: s.featureId, frame: s.frame, entities: s.entities, ok: s.ok, name: s.name }));
   }
 
   private planeResults(st: BuildState): PlaneResult[] {
@@ -381,6 +388,10 @@ export class StudioBuilder {
       collect(cast(toShape.HCompound()), true, edges);
       collect(cast(toShape.OutLineHCompound()), true, edges);
     }
+    // cosmetic threads of these parts, thin (ISO 6410)
+    const ids = new Set(items.map((i) => i.id));
+    const threads = [...this.current.threads.values()].filter((t) => !t.owner || ids.has(t.owner));
+    edges.push(...threadLines(threads, n, x, withHidden));
     toShape.delete();
     projector.delete();
     algo.delete();
@@ -393,6 +404,52 @@ export class StudioBuilder {
       }
     return { edges, bounds: edges.length ? [lo, hi] : null };
   }
+}
+
+/** Cosmetic threads as results (by key). */
+function threadResults(st: BuildState): ThreadResult[] {
+  return [...st.threads].map(([key, t]) => ({ key, ...t }));
+}
+
+/**
+ * Cosmetic threads in a drawing view looking along -`n` (`x` to the right), ISO 6410 for internal threads: seen
+ * end-on from where the hole starts — a thin three-quarter circle of the major diameter; from the side — hidden thin
+ * lines of the major diameter along the thread and across its end.
+ */
+export function threadLines(threads: Pick<ThreadState, 'origin' | 'dir' | 'major' | 'length'>[], n: Vec3, x: Vec3, withHidden: boolean): ProjectedEdge[] {
+  const y = v3.cross(n, x);
+  const P = (p: Vec3): Vec2 => [v3.dot(p, x), v3.dot(p, y)];
+  const out: ProjectedEdge[] = [];
+  for (const t of threads) {
+    const r = t.major / 2;
+    const along = v3.dot(t.dir, n);
+    if (along < -0.2) {
+      // the hole goes away from the viewer: its mouth is seen, the thread's circle (as an ellipse when oblique)
+      const e1 = perpendicularTo(t.dir);
+      const e2 = v3.cross(t.dir, e1);
+      const c = P(t.origin);
+      // three quarters, open at the upper right of the view: the circle's points by their angle there
+      const arc: [number, Vec2][] = [];
+      for (let i = 0; i < 96; i++) {
+        const a = (i / 96) * 2 * Math.PI;
+        const q = P(v3.add(t.origin, v3.add(v3.scale(e1, r * Math.cos(a)), v3.scale(e2, r * Math.sin(a)))));
+        const phi = ((Math.atan2(q[1] - c[1], q[0] - c[0]) * 180) / Math.PI + 360) % 360;
+        if (phi >= 100 && phi <= 350) arc.push([phi, q]);
+      }
+      arc.sort((a, b) => a[0] - b[0]);
+      out.push({ pts: arc.map((a) => a[1]), hidden: false, thin: true });
+    } else if (Math.abs(along) < 0.98 && withHidden) {
+      // from the side: inside the material, hidden
+      const a = t.origin;
+      const b = v3.add(t.origin, v3.scale(t.dir, t.length));
+      const side = v3.norm(v3.cross(t.dir, n));
+      const s = v3.scale(side, r);
+      out.push({ pts: [P(v3.add(a, s)), P(v3.add(b, s))], hidden: true, thin: true });
+      out.push({ pts: [P(v3.sub(a, s)), P(v3.sub(b, s))], hidden: true, thin: true });
+      out.push({ pts: [P(v3.add(b, s)), P(v3.sub(b, s))], hidden: true, thin: true });
+    }
+  }
+  return out;
 }
 
 /** Projection axes: n points towards the viewer, x is the screen right direction. */

@@ -4,14 +4,14 @@
 
 import { setOC } from 'replicad';
 import opencascade from 'replicad-opencascadejs';
-import type { AssemblyTab, CadDocument, Feature, PartStudioTab, SelRef } from '../core/types';
-import { buildDerivedSources } from '../core/derived';
+import type { AssemblyTab, CadDocument, Feature, PartStudioTab, ProjectVersion, SelRef } from '../core/types';
+import { buildDerivedSources, setVersionSnapshot, sourceUnits } from '../core/derived';
 import { docId, uid } from '../core/ids';
 import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/build';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
-import { findDerivedSource, runOps, summarize, queryModel, type AgentKernel } from './runner';
+import { AgentError, derivedVariant, findDerivedSource, runOps, summarize, queryModel, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -90,18 +90,29 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
   const builderOf = (key: string) => kernels.get(key)?.builder;
   const metaOf = (s: PartStudioTab) => Object.fromEntries(Object.entries(s.parts).map(([id, m]) => [id, { name: m.name, color: m.color }]));
   let reqId = 0;
+  // the versions a project file keeps (named ones): Derived features may use their Part Studios
+  const versions = (doc as CadDocument & { versions?: ProjectVersion[] }).versions ?? [];
+  for (const v of versions) if (v?.id && Array.isArray(v.tabs)) setVersionSnapshot(v.id, v);
   /** Build the Part Studios a studio derives from (theirs first), then ready its features. */
   const prepare = (studioId: string, features: Feature[]) =>
-    buildDerivedSources(docNow, studioId, features, (id) => id, (s, feats) =>
-      kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units: docNow.units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }, builderOf),
+    buildDerivedSources(docNow, studioId, features, (id) => id, (s, feats, units) =>
+      kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }, builderOf),
     );
-  /** A Part Studio by name, built (its sources first), as a source for another one. */
-  const source = async (name: string, forStudio: string) => {
-    const s = findDerivedSource(docNow, name, forStudio);
+  /** A Part Studio by name (of the document or of a version it keeps), built (its sources first), as a source for another one. */
+  const source = async (name: string, forStudio: string, names?: Record<string, string | number>, from?: { version: string; document?: string }) => {
+    if (from?.document) throw new AgentError('Versions of other documents can be derived from in the browser only (`npm run agent -- run`)');
+    const version = from && (versions.find((v) => v.name === from.version) ?? versions.find((v) => v.name.toLowerCase() === from.version.toLowerCase()));
+    if (from && !version) throw new AgentError(`No version "${from.version}". Versions: ${versions.map((v) => v.name).join(', ') || '(none)'}`);
+    const base = findDerivedSource(docNow, name, forStudio, version?.id);
+    // in the configuration chosen for it (its builder: the variant's)
+    const { studio: s, configuration } = derivedVariant(base, names, docNow.units.length);
     const upTo = s.rollback ?? s.features.length;
     const features = await prepare(s.id, configuredFeatures(s).slice(0, upTo));
-    const res = await kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units: docNow.units, features, partMeta: metaOf(s), upTo, meshless: true }, builderOf);
-    return { studioId: s.id, name: s.name, parts: res.partList ?? [] };
+    const units = sourceUnits(docNow, s.id);
+    const res = await kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units, features, partMeta: metaOf(s), upTo, meshless: true }, builderOf);
+    const connectors = s.features.filter((f) => f.type === 'mateConnector').map((f) => ({ id: f.id, name: f.name }));
+    const sketches = res.sketches.map((x) => ({ id: x.featureId, name: x.name ?? x.featureId }));
+    return { studioId: base.id, name: base.name, parts: res.partList ?? [], connectors, sketches, ...(configuration ? { configuration } : {}) };
   };
   const kernelOf = (d: CadDocument, studio: PartStudioTab): ReturnType<typeof nodeKernel> => {
     docNow = d;

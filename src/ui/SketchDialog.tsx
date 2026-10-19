@@ -9,7 +9,8 @@ import { t, tName } from '../i18n';
 export function SketchDialog() {
   const editing = useEditor((s) => s.editing);
   const sketch = useEditor((s) => s.sketch);
-  const pattern = useEditor((s) => s.sketchPattern);
+  // a pattern or a transform being set up takes the dialog's place
+  const pattern = useEditor((s) => !!s.sketchPattern || !!s.sketchTransform);
   const showConstraints = useEditor((s) => s.showConstraints);
   const showExpressions = useEditor((s) => s.showExpressions);
   const commit = useEditor((s) => s.commitEditing);

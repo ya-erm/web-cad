@@ -835,3 +835,74 @@ describe('performance', () => {
     expect(t).toBeLessThan(budget(2));
   });
 });
+
+describe('more dimensions: to a circle itself, arc length, angle by three points, driven', () => {
+  /** A distance to a circle / arc itself, with the variant it gets when made. */
+  const toCurve = (id: string, refs: string[], entities: SkEntity[]): SkConstraint => {
+    const c = con(id, 'distance', refs, { toCurve: true });
+    return { ...c, variant: initialVariant(c, entities) };
+  };
+  const fixedCircle = [pt('c', 0, 0), circ('C', 'c', 10)];
+  const fixC = con('fc', 'fix', ['C']);
+
+  it('from a point to a circle: outside and inside', () => {
+    for (const [x0, gap, x] of [
+      [25, 5, 15],
+      [3, 4, 6],
+    ]) {
+      const entities = [...fixedCircle, pt('p', x0, 0)];
+      const d = toCurve('d', ['p', 'C'], entities);
+      expect(measureConstraint(d, entities)).toBeCloseTo(Math.abs(x0 - 10), 9);
+      const res = solveSketch(entities, [fixC, con('h', 'horizontal', ['c', 'p']), d], { d: gap });
+      expect(res.ok).toBe(true);
+      expect(P(res.entities, 'p')[0]).toBeCloseTo(x, 6);
+    }
+  });
+
+  it('from a line to a circle, and between circles (apart and one in the other)', () => {
+    const line = [pt('a', -10, 20), pt('b', 10, 20), ln('L', 'a', 'b')];
+    const entities = [...fixedCircle, ...line];
+    const res = solveSketch(entities, [fixC, con('h', 'horizontal', ['L']), toCurve('d', ['L', 'C'], entities)], { d: 5 });
+    expect(P(res.entities, 'a')[1]).toBeCloseTo(15, 6);
+
+    for (const [x0, gap, x] of [
+      [30, 8, 23],
+      [2, 3, 2],
+    ]) {
+      const ents = [...fixedCircle, pt('k', x0, 0), circ('K', 'k', 5)];
+      const d = toCurve('d', ['K', 'C'], ents);
+      const r = solveSketch(ents, [fixC, con('hk', 'horizontal', ['c', 'k']), con('r', 'radius', ['K']), d], { d: gap, r: 5 });
+      expect(r.ok).toBe(true);
+      expect(P(r.entities, 'k')[0]).toBeCloseTo(x, 6);
+    }
+  });
+
+  it('the length of an arc', () => {
+    const entities = [pt('c', 0, 0), pt('s', 10, 0), pt('e', 7, 7), arc('A', 'c', 's', 'e')];
+    const len = con('l', 'arclength', ['A']);
+    expect(measureConstraint(len, entities)).toBeCloseTo(Math.hypot(10, 0) * (Math.PI / 4), 6);
+    const res = solveSketch(entities, [con('f1', 'fix', ['c']), con('f2', 'fix', ['s']), len], { l: (10 * Math.PI) / 2 });
+    expect(res.ok).toBe(true);
+    const e = P(res.entities, 'e');
+    expect(e[0]).toBeCloseTo(0, 5);
+    expect(e[1]).toBeCloseTo(10, 5);
+  });
+
+  it('the angle at the middle of three points', () => {
+    const entities = [pt('a', 10, 0), pt('v', 0, 0), pt('b', 10, 3)];
+    const ang = con('g', 'angle', ['a', 'v', 'b']);
+    expect(measureConstraint(ang, entities)).toBeCloseTo(Math.atan2(3, 10), 9);
+    const res = solveSketch(entities, [con('f1', 'fix', ['a']), con('f2', 'fix', ['v']), con('d', 'distance', ['v', 'b']), ang], { d: 10, g: Math.PI / 3 });
+    expect(res.ok).toBe(true);
+    const b = P(res.entities, 'b');
+    expect(b[0]).toBeCloseTo(5, 5);
+    expect(b[1]).toBeCloseTo(10 * Math.sin(Math.PI / 3), 5);
+  });
+
+  it('a driven dimension does not move the geometry', () => {
+    const entities = [pt('a', 0, 0), pt('b', 10, 0), ln('L', 'a', 'b')];
+    const res = solveSketch(entities, [con('f', 'fix', ['a']), con('d', 'distance', ['L'], { driven: true })], { d: 50 });
+    expect(res.ok).toBe(true);
+    expect(P(res.entities, 'b')).toEqual([10, 0]);
+  });
+});

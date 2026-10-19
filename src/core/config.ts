@@ -42,7 +42,47 @@ export function chosenLabel(features: Feature[], input: ConfigInput, choice?: Re
 /** The key of a Part Studio as a configuration of its own builds it: "studio#input=option,…" (the id alone without one). */
 export function sourceKey(inst: Pick<AssemblyInstance, 'studioId' | 'configuration'>): string {
   const pairs = Object.entries(inst.configuration ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return pairs.length ? `${inst.studioId}#${pairs.map(([k, v]) => `${k}=${v}`).join(',')}` : inst.studioId;
+  // a variable input's value may have anything in it: escaped
+  return pairs.length ? `${inst.studioId}#${pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join(',')}` : inst.studioId;
+}
+
+/**
+ * A configuration of a Part Studio from names (the Agent API): input name (a variable input: its variable, with or
+ * without "#") → option name, or a variable input's value (a bare number takes the document's units). Throws on an
+ * unknown input or option.
+ */
+export function configurationFromNames(studio: Configured, names: Record<string, string | number>, lengthUnit: string): Record<string, string> {
+  const inputs = studio.configuration ?? [];
+  const label = (x: ConfigInput) => inputName(studio.features, x);
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(names)) {
+    const n = name.replace(/^#/, '').toLowerCase();
+    const input = inputs.find((x) => x.name === name) ?? inputs.find((x) => x.name.toLowerCase() === n || label(x).replace(/^#/, '').toLowerCase() === n);
+    if (!input) throw new Error(`No configuration "${name}". Configurations: ${inputs.map(label).join(', ') || '(none)'}`);
+    const v = inputVariable(studio.features, input);
+    if (v) {
+      // a variable: any value of its type
+      const type = v.params.varType ?? 'any';
+      out[input.id] = typeof value === 'number' && type !== 'any' && type !== 'number' ? `${value} ${type === 'angle' ? 'deg' : lengthUnit}` : String(value);
+      continue;
+    }
+    const o = input.options.find((x) => x.name === value) ?? input.options.find((x) => x.name.toLowerCase() === String(value).toLowerCase());
+    if (!o) throw new Error(`No option "${value}" in "${input.name}". Options: ${input.options.map((x) => x.name).join(', ')}`);
+    out[input.id] = o.id;
+  }
+  return out;
+}
+
+/** The Part Studio and its own configuration a source key stands for. */
+export function parseSourceKey(key: string): { studioId: string; configuration?: Record<string, string> } {
+  const i = key.indexOf('#');
+  if (i < 0) return { studioId: key };
+  const configuration: Record<string, string> = {};
+  for (const pair of key.slice(i + 1).split(',')) {
+    const j = pair.indexOf('=');
+    if (j > 0) configuration[decodeURIComponent(pair.slice(0, j))] = decodeURIComponent(pair.slice(j + 1));
+  }
+  return { studioId: key.slice(0, i), ...(Object.keys(configuration).length ? { configuration } : {}) };
 }
 
 /** A Part Studio as an instance's (a drawing view's) own configuration builds it (its id: the source key). */

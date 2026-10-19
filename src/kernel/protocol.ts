@@ -77,6 +77,8 @@ export interface SketchResult {
   /** Entities after re-solving with current variable values. */
   entities: SkEntity[];
   ok: boolean;
+  /** Its feature's name; a sketch brought by a Derived feature (its key "derivedId.sketchId") — its name in the source. */
+  name?: string;
 }
 
 export interface PlaneResult {
@@ -101,6 +103,20 @@ export interface CurveResult {
   points: Float32Array;
 }
 
+/** A cosmetic thread (a tapped hole's): drawn as thin lines at its major diameter. */
+export interface ThreadResult {
+  key: string;
+  featureId: string;
+  origin: Vec3;
+  /** Into the material. */
+  dir: Vec3;
+  major: number;
+  minor: number;
+  length: number;
+  designation: string;
+  owner?: string;
+}
+
 export interface FeatureStatus {
   ok: boolean;
   error?: string;
@@ -119,6 +135,10 @@ export interface PreviewResult {
   planes?: PlaneResult[];
   curves?: CurveResult[];
   mates?: MateResult[];
+  /** Sketches the feature brings (Derived). */
+  sketches?: SketchResult[];
+  /** Cosmetic threads it makes (a tapped hole). */
+  threads?: ThreadResult[];
 }
 
 export interface BuildRequest {
@@ -147,6 +167,8 @@ export interface BuildResult {
   planes: PlaneResult[];
   mates: MateResult[];
   curves: CurveResult[];
+  /** Cosmetic threads of tapped holes. */
+  threads?: ThreadResult[];
   statuses: Record<string, FeatureStatus>;
   preview?: PreviewResult;
   /** Default names "Part 1", "Part 2"… by creation order, for all parts. */
@@ -252,6 +274,8 @@ export interface ProjectedEdge {
   /** Polyline in view coordinates (mm, Y up). */
   pts: Vec2[];
   hidden: boolean;
+  /** A thin line: a cosmetic thread (ISO 6410). */
+  thin?: boolean;
   /** Circle data for dimensioning when the projected edge is a circle/arc. */
   circle?: { c: Vec2; r: number };
 }

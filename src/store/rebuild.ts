@@ -5,8 +5,9 @@ import { kernel, SupersededError } from '../kernel/client';
 import { activeAssembly, activeStudio, effectiveRollback, studioById, useDoc } from './docStore';
 import { useEditor } from './editorStore';
 import type { AssemblyTab, CadDocument, Feature, PartStudioTab } from '../core/types';
-import { configuredFeatures } from '../core/config';
-import { buildDerivedSources, derivedInputs } from '../core/derived';
+import { configuredFeatures, parseSourceKey } from '../core/config';
+import { buildDerivedSources, derivedInputs, parseVersionStudio, sourceStudio, sourceUnits } from '../core/derived';
+import { loadVersionSources, versionDocument } from './versionSources';
 import { sourceKey, variantStudio, type AssemblySources } from '../assembly/compose';
 import { buildStudio, useAssembly } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
@@ -59,14 +60,30 @@ export const derivedKey = (studioId: string) => `src:${studioId}`;
 /** Part order of each source's last build: its parts' palette colours go with them into other Part Studios. */
 const sourceOrder = new Map<string, string[]>();
 
-/** The parts of a Part Studio (ids and names) as a Derived source has them: built — its own sources first. */
-export async function sourcePartList(doc: CadDocument, source: PartStudioTab): Promise<{ id: string; name: string }[]> {
+/**
+ * The parts and sketches of a Derived source (its key: a Part Studio of the document or of a saved version, in a
+ * configuration) as it has them: built — its own sources first.
+ */
+export async function sourceContents(doc: CadDocument, key: string): Promise<SourceContents> {
   await kernel().ready();
+  const v = parseVersionStudio(parseSourceKey(key).studioId);
+  if (v) await versionDocument(v.versionId);
+  const source = sourceStudio(doc, key);
+  if (!source) return { parts: [], sketches: [] };
   const upTo = effectiveRollback(source);
   const features = await withDerivedSources(doc, source.id, configuredFeatures(source).slice(0, upTo));
   const meta = Object.fromEntries(Object.entries(source.parts).map(([id, m]) => [id, { name: m.name }]));
-  const res = await kernel().build(derivedKey(source.id), { units: doc.units, features, partMeta: meta, upTo, meshless: true });
-  return res.partList ?? [];
+  const res = await kernel().build(derivedKey(source.id), { units: sourceUnits(doc, key), features, partMeta: meta, upTo, meshless: true });
+  return {
+    parts: res.partList ?? [],
+    sketches: res.sketches.map((s) => ({ id: s.featureId, name: s.name ?? s.featureId })),
+  };
+}
+
+/** What a Part Studio can give to a Derived feature: its parts and sketches (ids and names). */
+export interface SourceContents {
+  parts: { id: string; name: string }[];
+  sketches: { id: string; name: string }[];
 }
 
 /**
@@ -74,9 +91,11 @@ export async function sourcePartList(doc: CadDocument, source: PartStudioTab): P
  * first; returns the features, prepared for the build (each Derived feature knows its source's builder and version).
  */
 export async function withDerivedSources(doc: CadDocument, studioId: string, features: Feature[]): Promise<Feature[]> {
-  return buildDerivedSources(doc, studioId, features, derivedKey, async (s, feats) => {
+  // saved versions it derives from (of this document or others): their snapshots first
+  await loadVersionSources(doc, features);
+  return buildDerivedSources(doc, studioId, features, derivedKey, async (s, feats, units) => {
     const req = (order: string[]) => ({
-      units: doc.units,
+      units,
       features: feats,
       // names and colours (as the source shows them) go with its parts
       partMeta: Object.fromEntries(order.map((id) => [id, { name: s.parts[id]?.name, color: partColorFor(s, id, order) }])),

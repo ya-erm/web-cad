@@ -280,10 +280,35 @@ const sign = (v: number): number => (v < 0 ? -1 : 1);
 type DistKind =
   | { k: 'pp'; p: number; q: number }
   | { k: 'pl'; p: number; l: [number, number] }
-  | { k: 'll'; l1: [number, number]; l2: [number, number] };
+  | { k: 'll'; l1: [number, number]; l2: [number, number] }
+  /** To a circle / arc itself (`toCurve`): from a point, a line, another circle / arc. */
+  | { k: 'pc'; p: number; cc: number; r: RTerm }
+  | { k: 'lc'; l: [number, number]; cc: number; r: RTerm }
+  | { k: 'cc'; c1: number; r1: RTerm; c2: number; r2: RTerm };
 
-/** Classify the refs of a 'distance' constraint. Circles/arcs/ellipses act as their centre. */
-function distanceKind(m: Model, refs: string[]): DistKind | null {
+/**
+ * Classify the refs of a 'distance' constraint. Circles/arcs/ellipses act as their centre — with `toCurve`, a
+ * circle / arc as itself.
+ */
+function distanceKind(m: Model, refs: string[], toCurve = false): DistKind | null {
+  if (toCurve && refs.length >= 2) {
+    const curve = (id: string) => {
+      const r = isCircleLike(m, id) ? radiusTerm(m, id) : null;
+      const cc = centreVar(m, id);
+      return r && cc >= 0 ? { cc, r } : null;
+    };
+    const a = curve(refs[0]);
+    const b = curve(refs[1]);
+    if (a && b) return { k: 'cc', c1: a.cc, r1: a.r, c2: b.cc, r2: b.r };
+    const cv = a ?? b;
+    const other = a ? refs[1] : refs[0];
+    if (cv) {
+      const l = lineVars(m, other);
+      if (l) return { k: 'lc', l, cc: cv.cc, r: cv.r };
+      const p = centreVar(m, other);
+      if (p >= 0) return { k: 'pc', p, cc: cv.cc, r: cv.r };
+    }
+  }
   if (refs.length === 1) {
     const l = lineVars(m, refs[0]);
     return l ? { k: 'pp', p: l[0], q: l[1] } : null;
@@ -317,6 +342,53 @@ function twoLines(m: Model, refs: string[]): [[number, number], [number, number]
   return a && b ? [a, b] : null;
 }
 
+/** The two directions of an angle dimension: two lines, or three points — rays from the middle one to the others. */
+function angleRays(m: Model, refs: string[]): [[number, number], [number, number]] | null {
+  if (refs.length === 3) {
+    const [a, v, b] = refs.map((r) => (m.byId.get(r)?.type === 'point' ? (m.base.get(r) ?? -1) : -1));
+    return a >= 0 && v >= 0 && b >= 0 ? [
+      [v, a],
+      [v, b],
+    ] : null;
+  }
+  return twoLines(m, refs);
+}
+
+/**
+ * Side / kind of a distance to a circle (kept from when it was made): from a point — 1 outside, -1 inside; from a
+ * line — the side of the centre (±1), times 2 when the line cuts the circle; between circles — 1 apart, -1 one in
+ * the other.
+ */
+function curveVariant(X: Float64Array, dk: DistKind): number {
+  if (dk.k === 'pc') return sign(distAt(X, dk.p, dk.cc) - radiusAt(X, dk.r));
+  if (dk.k === 'lc') {
+    const sd = sdAt(X, dk.cc, dk.l[0], dk.l[1]);
+    return sign(sd) * (Math.abs(sd) < radiusAt(X, dk.r) ? 2 : 1);
+  }
+  if (dk.k === 'cc') {
+    const d = distAt(X, dk.c1, dk.c2);
+    return d < Math.abs(radiusAt(X, dk.r1) - radiusAt(X, dk.r2)) ? -1 : 1;
+  }
+  return 0;
+}
+
+/** The gap a distance to a circle measures (with its variant). */
+function curveGap(X: Float64Array, dk: DistKind, variant: number): number {
+  if (dk.k === 'pc') return (variant || 1) * (distAt(X, dk.p, dk.cc) - radiusAt(X, dk.r));
+  if (dk.k === 'lc') {
+    const s1 = variant < 0 ? -1 : 1;
+    const out = Math.abs(variant) === 2 ? -1 : 1;
+    return out * (s1 * sdAt(X, dk.cc, dk.l[0], dk.l[1]) - radiusAt(X, dk.r));
+  }
+  if (dk.k === 'cc') {
+    const d = distAt(X, dk.c1, dk.c2);
+    const r1 = radiusAt(X, dk.r1);
+    const r2 = radiusAt(X, dk.r2);
+    return variant < 0 ? Math.abs(r1 - r2) - d : d - r1 - r2;
+  }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Equations: residual = Σ coef·term - rhs, each term with analytic gradient
 // ---------------------------------------------------------------------------
@@ -329,6 +401,8 @@ const T_PROJ = 3; // (q - p)·(b - a) / |b - a|                          [px py 
 // like sin/cos residuals have); used for angle, parallel and perpendicular.  [ax ay bx by cx cy dx dy]
 const T_ANG = 4;
 const T_ELL = 5; // normalised ellipse radius - 1                       [px py cx cy rx ry rot]
+// arc length r·θ: r = |p1 - c|, θ the counter-clockwise angle from p1 to p2 about c, in (0, 2π]  [cx cy ax ay bx by]
+const T_ARC = 6;
 
 interface Eq {
   /** Index of the owning constraint, -1 for implicit (arc radius) equations. */
@@ -543,6 +617,35 @@ function evalEq(e: Eq, X: Float64Array, g: Float64Array): number {
           for (let j = 0; j < 7; j++) g[o + j] = 0;
         }
         o += 7;
+        break;
+      }
+      case T_ARC: {
+        const ax = X[v[o + 2]] - X[v[o]];
+        const ay = X[v[o + 3]] - X[v[o + 1]];
+        const bx = X[v[o + 4]] - X[v[o]];
+        const by = X[v[o + 5]] - X[v[o + 1]];
+        const n1 = ax * ax + ay * ay;
+        const n2 = bx * bx + by * by;
+        if (n1 > 0 && n2 > 0) {
+          const r = Math.sqrt(n1);
+          let th = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+          if (th <= 0) th += TWO_PI;
+          f += c * r * th;
+          // d(rθ)/da = θ·a/r + r·(ay, -ax)/|a|², d(rθ)/db = r·(-by, bx)/|b|²
+          const gax = c * ((th * ax) / r + ay / r);
+          const gay = c * ((th * ay) / r - ax / r);
+          const gbx = (c * r * -by) / n2;
+          const gby = (c * r * bx) / n2;
+          g[o] = -(gax + gbx);
+          g[o + 1] = -(gay + gby);
+          g[o + 2] = gax;
+          g[o + 3] = gay;
+          g[o + 4] = gbx;
+          g[o + 5] = gby;
+        } else {
+          for (let j = 0; j < 6; j++) g[o + j] = 0;
+        }
+        o += 6;
         break;
       }
     }
@@ -1166,6 +1269,8 @@ function solveOnce(
    * pushes equations; all substitutions are known when equations are built.
    */
   const translate = (c: SkConstraint, ci: number, phase: number): number => {
+    // a driven (reference) dimension only shows what the geometry measures
+    if (c.driven) return 0;
     const refs = c.refs ?? [];
     const E = (i: number) => (refs[i] === undefined ? undefined : model.byId.get(refs[i]));
     const push = (d: EqDraft) => {
@@ -1418,8 +1523,28 @@ function solveOnce(
       }
       case 'distance': {
         const dv = dimOf(c);
-        const dk = distanceKind(model, refs);
+        const dk = distanceKind(model, refs, c.toCurve);
         if (dv === undefined || !dk) return 0;
+        if (dk.k === 'pc' || dk.k === 'lc' || dk.k === 'cc') {
+          // to a circle / arc itself: the gap on the side it was made on
+          const v = c.variant || curveVariant(X, dk);
+          if (dk.k === 'pc') return push(addT(addT(draft(ci, dv), T_DIST, v, [...pv(dk.p), ...pv(dk.cc)]), dk.r.type, -v, dk.r.vars));
+          if (dk.k === 'lc') {
+            const s1 = v < 0 ? -1 : 1;
+            const out = Math.abs(v) === 2 ? -1 : 1;
+            const d = addT(draft(ci, dv), T_SD, out * s1, [...pv(dk.cc), ...pv(dk.l[0]), ...pv(dk.l[1])]);
+            return push(addT(d, dk.r.type, -out, dk.r.vars));
+          }
+          const d = draft(ci, dv);
+          if (v < 0) {
+            // one in the other: |r1 - r2| - |c1 c2|
+            const s = sign(radiusAt(X, dk.r1) - radiusAt(X, dk.r2));
+            addT(addT(d, dk.r1.type, s, dk.r1.vars), dk.r2.type, -s, dk.r2.vars);
+            return push(addT(d, T_DIST, -1, [...pv(dk.c1), ...pv(dk.c2)]));
+          }
+          addT(addT(d, T_DIST, 1, [...pv(dk.c1), ...pv(dk.c2)]), dk.r1.type, -1, dk.r1.vars);
+          return push(addT(d, dk.r2.type, -1, dk.r2.vars));
+        }
         if (dk.k === 'pp') {
           if (dk.p === dk.q) return 0;
           return push(addT(draft(ci, dv), T_DIST, 1, [...pv(dk.p), ...pv(dk.q)]));
@@ -1454,11 +1579,20 @@ function solveOnce(
       }
       case 'angle': {
         const dv = dimOf(c);
-        const ll = twoLines(model, refs);
+        const ll = angleRays(model, refs);
         if (dv === undefined || !ll) return 0;
         // dv is the unsigned angle between the directions; keep the current rotation sense
         const [cr] = crossDotAt(X, ll[0], ll[1]);
         return push(angleEq(ci, ll[0], ll[1], sign(cr) * dv));
+      }
+      case 'arclength': {
+        const dv = dimOf(c);
+        const e = E(0);
+        if (dv === undefined || e?.type !== 'arc') return 0;
+        const cc = ptVar(model, e.c);
+        const [a, b] = arcEnds(e.id);
+        if (cc < 0 || a === undefined || b === undefined) return 0;
+        return push(addT(draft(ci, dv), T_ARC, 1, [...pv(cc), ...pv(a), ...pv(b)]));
       }
       case 'offset': {
         const dv0 = dimOf(c);
@@ -2029,13 +2163,32 @@ export function initialVariant(c: Omit<SkConstraint, 'variant'>, entities: SkEnt
       return Math.abs(d - Math.abs(a - b)) < Math.abs(d - (a + b)) ? 1 : 0;
     }
     case 'distance': {
-      const dk = distanceKind(m, refs);
-      if (!dk || dk.k !== 'pl') return 0;
+      const dk = distanceKind(m, refs, c.toCurve);
+      if (!dk) return 0;
+      if (dk.k === 'pc' || dk.k === 'lc' || dk.k === 'cc') return curveVariant(X, dk);
+      if (dk.k !== 'pl') return 0;
       return sign(sdAt(X, dk.p, dk.l[0], dk.l[1]));
     }
     default:
       return 0;
   }
+}
+
+/** The length of an arc of the entities (counter-clockwise from p1 to p2). */
+function arcLengthAt(m: Model, X: Float64Array, id: string | undefined): number {
+  const e = id === undefined ? undefined : m.byId.get(id);
+  if (e?.type !== 'arc') return 0;
+  const c = ptVar(m, e.c);
+  const a = ptVar(m, e.p1);
+  const b = ptVar(m, e.p2);
+  if (c < 0 || a < 0 || b < 0) return 0;
+  const ax = X[a] - X[c];
+  const ay = X[a + 1] - X[c + 1];
+  const bx = X[b] - X[c];
+  const by = X[b + 1] - X[c + 1];
+  let th = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+  if (th <= 0) th += TWO_PI;
+  return Math.hypot(ax, ay) * th;
 }
 
 /** Current measured value of a dimensional constraint (mm or radians). */
@@ -2045,13 +2198,16 @@ export function measureConstraint(c: SkConstraint, entities: SkEntity[]): number
   const refs = c.refs ?? [];
   switch (c.type) {
     case 'distance': {
-      const dk = distanceKind(m, refs);
+      const dk = distanceKind(m, refs, c.toCurve);
       if (!dk) return 0;
       if (dk.k === 'pp') return distAt(X, dk.p, dk.q);
       if (dk.k === 'pl') return Math.abs(sdAt(X, dk.p, dk.l[0], dk.l[1]));
+      if (dk.k === 'pc' || dk.k === 'lc' || dk.k === 'cc') return Math.abs(curveGap(X, dk, c.variant || curveVariant(X, dk)));
       const [a, b] = dk.l1;
       return Math.abs(0.5 * (sdAt(X, dk.l2[0], a, b) + sdAt(X, dk.l2[1], a, b)));
     }
+    case 'arclength':
+      return arcLengthAt(m, X, refs[0]);
     case 'hdistance':
     case 'vdistance': {
       const pq = pointPair(m, refs);
@@ -2066,7 +2222,7 @@ export function measureConstraint(c: SkConstraint, entities: SkEntity[]): number
       return Math.abs(radiusAt(X, rt)) * (c.type === 'diameter' ? 2 : 1);
     }
     case 'angle': {
-      const ll = twoLines(m, refs);
+      const ll = angleRays(m, refs);
       if (!ll) return 0;
       const [, dt, n1, n2] = crossDotAt(X, ll[0], ll[1]);
       if (!(n1 > 0 && n2 > 0)) return 0;

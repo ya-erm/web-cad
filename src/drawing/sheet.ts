@@ -157,7 +157,8 @@ export function viewPrims(v: DrawingView, proj: ProjectionData | undefined): Pri
   for (const e of proj.edges) {
     if (e.hidden && !v.showHidden) continue;
     const pts = e.pts.map((p) => toSheet(v, proj, p));
-    const style = e.hidden ? 'hidden' : 'visible';
+    // a cosmetic thread: thin (hidden ones — dashed as any hidden line)
+    const style = e.hidden ? 'hidden' : e.thin ? 'thin' : 'visible';
     if (pts.length === 2) out.push({ t: 'line', a: pts[0], b: pts[1], style });
     else out.push({ t: 'poly', pts, style });
   }

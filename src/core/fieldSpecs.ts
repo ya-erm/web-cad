@@ -26,9 +26,21 @@ export interface FieldSpec {
   accepts: SelToken[];
   /** Maximum number of selections (1 = single). */
   max?: number;
+  /** A parameter with a value for each selection (the same order): it loses the values of the selections removed. */
+  parallel?: string;
 }
 
 export type FieldSpecs = Partial<Record<FeatureType, Record<string, FieldSpec>>>;
+
+/** Keep the selections of field `key` that pass `keep`, with their values of the parallel parameter (`spec.parallel`). */
+export function keepRefs(params: Record<string, unknown>, key: string, keep: (r: SelRef) => boolean, spec?: FieldSpec) {
+  const refs = (params[key] as SelRef[] | undefined) ?? [];
+  const kept = refs.map((r, i) => (keep(r) ? i : -1)).filter((i) => i >= 0);
+  params[key] = kept.map((i) => refs[i]);
+  const values = spec?.parallel ? params[spec.parallel] : undefined;
+  // a selection with no value yet: '' (the default)
+  if (spec?.parallel && Array.isArray(values)) params[spec.parallel] = kept.map((i) => values[i] ?? '');
+}
 
 const PROFILE: SelToken[] = ['region', 'planarFace'];
 const AXIS: SelToken[] = ['sketchLine', 'linearEdge', 'circularEdge', 'cylFace', 'mate'];
@@ -61,9 +73,22 @@ export const FIELD_SPECS: FieldSpecs = {
     faces: { label: 'Faces and sketch regions', accepts: ['region', 'face'] },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
-  fillet: { edges: { label: 'Edges and faces to fillet', accepts: ['edge', 'face'] } },
+  fillet: {
+    edges: { label: 'Edges and faces to fillet', accepts: ['edge', 'face'] },
+    vertices: { label: 'Vertices with their own radius', accepts: ['vertex'], parallel: 'vertexRadii' },
+  },
   chamfer: { edges: { label: 'Edges and faces to chamfer', accepts: ['edge', 'face'] } },
   shell: { faces: { label: 'Faces to remove', accepts: ['face', 'part'] } },
+  deleteFace: { faces: { label: 'Faces to delete', accepts: ['face'] } },
+  moveFace: {
+    faces: { label: 'Faces to move', accepts: ['face'] },
+    direction: { label: 'Direction', accepts: DIRECTION, max: 1 },
+    axis: { label: 'Axis', accepts: AXIS, max: 1 },
+  },
+  replaceFace: {
+    faces: { label: 'Faces to replace', accepts: ['planarFace'] },
+    target: { label: 'Replace with', accepts: [...PLANE, 'mate'], max: 1 },
+  },
   draft: {
     neutral: { label: 'Neutral plane', accepts: PLANE, max: 1 },
     faces: { label: 'Faces to draft', accepts: ['face'] },
@@ -80,6 +105,19 @@ export const FIELD_SPECS: FieldSpecs = {
   circularPattern: {
     parts: { label: 'Parts to pattern', accepts: ['part'] },
     axis: { label: 'Axis', accepts: AXIS, max: 1 },
+  },
+  curvePattern: {
+    parts: { label: 'Parts to pattern', accepts: ['part'] },
+    path: { label: 'Path', accepts: ['sketchCurve', 'edge'] },
+  },
+  rib: {
+    profiles: { label: 'Sketch curves', accepts: ['sketchCurve'] },
+    parts: { label: 'Merge scope', accepts: ['part'] },
+  },
+  wrap: {
+    profiles: { label: 'Sketch regions to wrap', accepts: ['region'] },
+    target: { label: 'Cylindrical face to wrap onto', accepts: ['cylFace'], max: 1 },
+    parts: { label: 'Merge scope', accepts: ['part'] },
   },
   mirror: {
     parts: { label: 'Parts to mirror', accepts: ['part'] },
@@ -102,6 +140,7 @@ export const FIELD_SPECS: FieldSpecs = {
     toMate: { label: 'Destination mate connector', accepts: ['mate'], max: 1 },
   },
   deletePart: { parts: { label: 'Parts to delete', accepts: ['part'] } },
+  derived: { placeTo: { label: 'Location (mate connector)', accepts: ['mate'], max: 1 } },
   plane: {
     refs: { label: 'Entities', accepts: ['plane', 'planarFace', 'vertex', 'sketchPoint', 'origin', 'sketchLine', 'linearEdge'] },
   },

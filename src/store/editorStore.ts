@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
-import type { Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec3 } from '../core/types';
+import type { Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
 import type { BuildResult, MeasureResult } from '../kernel/protocol';
 import { defaultParams, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
@@ -20,6 +20,10 @@ export type SketchTool =
   | 'arcTangent'
   | 'arcCenter'
   | 'spline'
+  /** a cubic Bézier curve: start, two control points, end (a spline with tangent handles) */
+  | 'bezier'
+  /** a conic: start, end, the apex of its tangents, then ρ (a Bézier spline close to the conic) */
+  | 'conic'
   | 'point'
   | 'slot'
   /** circumscribed polygon: the construction circle passes through the vertices */
@@ -29,6 +33,8 @@ export type SketchTool =
   | 'ellipse'
   | 'fillet'
   | 'trim'
+  /** split a line / an arc at a point (Onshape Split) */
+  | 'split'
   | 'extend'
   | 'offset'
   | 'use'
@@ -65,6 +71,18 @@ export interface SketchPatternState {
   isNew: boolean;
   /** Sketch before the edit: restored on cancel, pushed to undo on accept. */
   base: SketchData;
+}
+
+/** A sketch Transform (Onshape) being set up: the entities, the move (expressions), the turn about `pivot`. */
+export interface SketchTransformState {
+  ids: string[];
+  dx: string;
+  dy: string;
+  angle: string;
+  /** The centre of the turn: the middle of the entities' bounding box. */
+  pivot: Vec2;
+  /** Copies moved, the originals stay. */
+  copy: boolean;
 }
 
 export interface Editing {
@@ -121,6 +139,7 @@ export interface EditorState {
   hover: SelRef | null;
   sketch: SketchSession | null;
   sketchPattern: SketchPatternState | null;
+  sketchTransform: SketchTransformState | null;
   showPlanes: boolean;
   showSketches: boolean;
   viewCmd: { id: number; cmd: ViewCommand } | null;
@@ -249,9 +268,15 @@ export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
   chamfer: 'edges',
   shell: 'faces',
   draft: 'neutral',
+  deleteFace: 'faces',
+  moveFace: 'faces',
+  replaceFace: 'faces',
   hole: 'points',
   linearPattern: 'parts',
   circularPattern: 'parts',
+  curvePattern: 'parts',
+  rib: 'profiles',
+  wrap: 'profiles',
   mirror: 'parts',
   boolean: 'tools',
   split: 'parts',
@@ -275,6 +300,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   hover: null,
   sketch: null,
   sketchPattern: null,
+  sketchTransform: null,
   showPlanes: true,
   showSketches: true,
   viewCmd: null,
@@ -392,12 +418,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
         }
       });
     });
-    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, selection: [], hover: null });
+    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, sketchTransform: null, selection: [], hover: null });
     if (keepOpen && e.draft.type !== 'sketch') get().startFeature(e.draft.type);
   },
 
   cancelEditing() {
-    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, hover: null });
+    set({ editing: null, activeField: null, sketch: null, sketchPattern: null, sketchTransform: null, hover: null });
   },
 
   setActiveField(key) {

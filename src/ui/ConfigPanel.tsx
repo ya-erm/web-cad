@@ -24,7 +24,15 @@ export interface ConfigurableParam {
 }
 
 /** Names of sketch dimensions in the configuration table: "Diameter 2: 10 mm". */
-const DIM_LABELS: Partial<Record<string, string>> = { distance: 'Distance', hdistance: 'Horizontal distance', vdistance: 'Vertical distance', radius: 'Radius', diameter: 'Diameter', angle: 'Angle' };
+const DIM_LABELS: Partial<Record<string, string>> = {
+  distance: 'Distance',
+  hdistance: 'Horizontal distance',
+  vdistance: 'Vertical distance',
+  radius: 'Radius',
+  diameter: 'Diameter',
+  angle: 'Angle',
+  arclength: 'Arc length',
+};
 
 /**
  * What of a feature a configuration can set: its dialog's expressions and checkboxes, a sketch's dimensions (numbered
@@ -36,9 +44,10 @@ export function configurableParams(f: Feature): ConfigurableParam[] {
     if ((row.kind === 'expr' || row.kind === 'check') && !out.some((p) => p.param === row.key))
       out.push({ param: row.key, label: row.label, kind: row.kind });
   if (f.type === 'sketch')
-    f.params.constraints.filter(isDimension).forEach((c, n) =>
-      out.push({ param: `${DIM}${c.id}`, label: `${t(DIM_LABELS[c.type] ?? 'Dimension')} ${n + 1}`, kind: 'expr', value: c.value }),
-    );
+    f.params.constraints.filter(isDimension).forEach((c, n) => {
+      // a driven dimension drives nothing: not configurable (the numbers stay those of all dimensions)
+      if (!c.driven) out.push({ param: `${DIM}${c.id}`, label: `${t(DIM_LABELS[c.type] ?? 'Dimension')} ${n + 1}`, kind: 'expr', value: c.value });
+    });
   out.push({ param: 'suppressed', label: 'Disabled', kind: 'check' });
   return out;
 }

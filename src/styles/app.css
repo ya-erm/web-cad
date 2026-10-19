@@ -1011,6 +1011,10 @@ textarea {
 .dim-label.over {
   color: var(--danger);
 }
+/* a driven (reference) dimension: grey, like Onshape */
+.dim-label.driven {
+  color: #8a9097;
+}
 .dim-input {
   position: absolute;
   width: 100px;

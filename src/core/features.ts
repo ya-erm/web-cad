@@ -14,10 +14,16 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   chamfer: 'Chamfer',
   shell: 'Shell',
   draft: 'Draft',
+  deleteFace: 'Delete face',
+  moveFace: 'Move face',
+  replaceFace: 'Replace face',
   hole: 'Hole',
   linearPattern: 'Linear pattern',
   circularPattern: 'Circular pattern',
+  curvePattern: 'Curve pattern',
   mirror: 'Mirror',
+  rib: 'Rib',
+  wrap: 'Wrap',
   boolean: 'Boolean',
   split: 'Split',
   transform: 'Transform',
@@ -79,6 +85,9 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
     }),
     shell: () => ({ faces: [], thickness: '2 mm', outward: false }),
     draft: () => ({ neutral: [], faces: [], angle: '3 deg', flip: false }),
+    deleteFace: () => ({ faces: [] }),
+    moveFace: () => ({ faces: [], moveType: 'offset', distance: '2 mm', flip: false, direction: [], axis: [], angle: '15 deg' }),
+    replaceFace: () => ({ faces: [], target: [], offset: '0 mm', flip: false }),
     hole: () => ({
       points: [],
       style: 'simple',
@@ -121,7 +130,22 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
       flip: false,
       op: 'new',
     }),
+    curvePattern: () => ({
+      patternType: 'part',
+      parts: [],
+      features: [],
+      faces: [],
+      path: [],
+      count: '4',
+      equalSpacing: true,
+      distance: '10 mm',
+      flip: false,
+      orient: true,
+      op: 'new',
+    }),
     mirror: () => ({ patternType: 'part', parts: [], features: [], faces: [], plane: [], op: 'new' }),
+    rib: () => ({ ...mergeDefaults, profiles: [], thickness: '3 mm', direction: 'parallel', flip: false, extend: true }),
+    wrap: () => ({ ...mergeDefaults, profiles: [], target: [], op: 'add', depth: '1 mm' }),
     boolean: () => ({ op: 'union', tools: [], targets: [], keepTools: false }),
     split: () => ({ parts: [], tool: [], keepTools: false }),
     transform: () => ({
@@ -145,7 +169,7 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
     plane: () => ({ planeType: 'offset', refs: [], offset: '10 mm', angle: '30 deg', flip: false, size: '' }),
     variable: () => ({ name: 'width', value: '10 mm', description: '', varType: 'length' }),
     import: () => ({ fileName: '', format: 'step', data: '' }),
-    derived: () => ({ studioId: '', parts: [] }),
+    derived: () => ({ studioId: '', parts: [], placeTo: [] }),
     helix: () => ({ axis: [], pitch: '5 mm', turns: '5', radius: '10 mm', leftHanded: false }),
     mateConnector: () => ({
       location: [],
@@ -211,6 +235,7 @@ export const isDimension = (c: SkConstraint) =>
   c.type === 'radius' ||
   c.type === 'diameter' ||
   c.type === 'angle' ||
+  c.type === 'arclength' ||
   c.type === 'offset';
 
 /** Evaluate all dimension expressions of a sketch. Invalid ones are omitted (constraint ignored). */
@@ -218,7 +243,8 @@ export function sketchDims(sk: SketchData, ctx: EvalContext): { dims: Record<str
   const dims: Record<string, number> = {};
   const errors: string[] = [];
   for (const c of sk.constraints) {
-    if (!isDimension(c) || c.value === undefined) continue;
+    // a driven dimension drives nothing: its value is not needed
+    if (!isDimension(c) || c.value === undefined || c.driven) continue;
     const v = tryEvaluate(c.value, c.type === 'angle' ? 'angle' : 'length', ctx);
     if (v === null) errors.push(c.id);
     else dims[c.id] = v;
