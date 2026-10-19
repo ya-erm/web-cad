@@ -63,4 +63,4 @@ The **Views** menu:
 | `F` | Zoom to fit |
 | `N` | View normal to |
 
-You can hide individual planes, sketches, and helices with the eye icon in the [feature list](feature-list), and parts in the [parts list](parts).
+You can hide the origin, individual planes, sketches, and helices with the eye icon in the [feature list](feature-list), and parts in the [parts list](parts).

@@ -79,9 +79,13 @@ function TopBar({ onBack }: { onBack: () => void }) {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
       />
-      <span className="save-state">{saving ? t('Saving…') : t('Saved')}</span>
-      <FolderState docId={doc.id} />
       <VersionsButton />
+      <FolderState docId={doc.id} />
+      {/* last, both words in one cell (the other one invisible): nothing moves when the state changes */}
+      <span className="save-state save-state-fixed" role="status">
+        <span className={saving ? '' : 'off'}>{t('Saving…')}</span>
+        <span className={saving ? 'off' : ''}>{t('Saved')}</span>
+      </span>
       <div className="spacer" />
       <button className="icon-btn" title={`${t('Help')} (F1)`} onClick={() => openHelp(contextHelpPage())}>
         <Icon name="help" size={18} />

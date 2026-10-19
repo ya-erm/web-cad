@@ -14,6 +14,7 @@ width: 350
 The **Default geometry** group (click its header to collapse it) contains the **Origin** and three planes: **Top**, **Front**, **Right**. In the graphics area each plane has its name written on it — in its corner along its edge, as in Onshape (seen from the back of the plane, the name still reads left to right).
 
 - Click a plane to select it; the eye icon hides or shows it.
+- The eye icon of the **Origin** hides or shows its axes in the graphics area; a hidden origin cannot be picked there, but a click on its row in the list still selects it.
 - Double-click a plane to start a [sketch](sketch) on it right away.
 - While the sketch dialog waits for a plane (the **Sketch plane** field is active), a click on **Top**, **Front**, **Right** or a [plane](plane) in the list puts the sketch on it. A plane from the list must come before the sketch.
 

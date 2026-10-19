@@ -107,10 +107,27 @@ export function PartsList() {
   // surfaces apart, after the parts (Onshape: Parts / Surfaces)
   const solids = parts.filter((p) => !p.surface);
   const surfaces = parts.filter((p) => p.surface);
+  const anyShown = parts.some((p) => !p.hidden);
   return (
     <div className="panel-section parts">
       <div className="panel-header">
         {t('Parts')} <span className="count">({solids.length})</span>
+        {parts.length > 0 && (
+          // all of them at once (surfaces too): hide while any is shown, else show all; one undo step
+          <span
+            className="header-eye"
+            title={anyShown ? t('Hide all') : t('Show all')}
+            onClick={() =>
+              useDoc.getState().update((d) =>
+                withStudio(d, (s) => {
+                  for (const p of parts) s.parts[p.id] = { ...(s.parts[p.id] ?? {}), hidden: anyShown };
+                }),
+              )
+            }
+          >
+            <Icon name={anyShown ? 'eye' : 'eyeOff'} size={14} />
+          </span>
+        )}
       </div>
       <div className="panel-body">
         {[...solids, ...surfaces].map((p, i) => {
@@ -127,7 +144,8 @@ export function PartsList() {
             <div
               key={p.id}
               className={'tree-item' + (sel ? ' selected' : '')}
-              onClick={() => ed().select(ref)}
+              // with a feature dialog open: into its active field when it takes parts (Merge scope, Boolean tools …)
+              onClick={() => ed().pickIntoField(ref, 'part') || ed().select(ref)}
               onMouseEnter={() => ed().setHover(ref)}
               onMouseLeave={() => ed().setHover(null)}
               onDoubleClick={() => {
@@ -164,10 +182,12 @@ export function PartsList() {
               )}
               <span
                 className={'eye' + (p.hidden ? ' off' : '')}
+                title={p.hidden ? t('Show') : t('Hide')}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPartMeta(p.id, { hidden: !p.hidden });
                 }}
+                onDoubleClick={(e) => e.stopPropagation()}
               >
                 <Icon name={p.hidden ? 'eyeOff' : 'eye'} size={14} />
               </span>

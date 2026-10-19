@@ -49,7 +49,8 @@ A selection field collects geometry: sketch regions, faces, edges, vertices, par
 - Clicking a suitable entity in the graphics area adds it to the active field; clicking it again removes it. Unsuitable entities are not highlighted and cannot be selected.
 - Single-entity fields (axis, plane, direction) replace the selection with each new click.
 - Selected entities are shown as "chips". Hover over a chip to highlight the entity; the ✕ on a chip removes it. Many regions of the same sketch are collected into one "… × N" chip.
-- If the field needs a part rather than a face, click any face or edge of that part.
+- If the field needs a part rather than a face, click any face or edge of that part — or the part's row in the [**Parts** list](parts). Planes and the origin can likewise be selected by clicking their rows in the [feature list](feature-list).
+- When a choice opens a new empty field (**End type: Up to face**, the **Merge with all** checkbox cleared), that field becomes active right away — just click a face or a part.
 
 ### Preselection {#preselection}
 

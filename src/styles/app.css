@@ -593,7 +593,7 @@ textarea {
 
 .editor {
   display: grid;
-  grid-template-rows: 40px 44px 1fr 30px;
+  grid-template-rows: 40px 42px 1fr 30px;
   height: 100%;
 }
 .topbar {
@@ -625,6 +625,16 @@ textarea {
 .save-state {
   color: var(--text-3);
   font-size: 12px;
+}
+.save-state-fixed {
+  display: inline-grid;
+}
+.save-state-fixed > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.save-state-fixed > span.off {
+  visibility: hidden;
 }
 .menu-wrap {
   position: relative;
@@ -690,9 +700,20 @@ textarea {
 .toolbar::-webkit-scrollbar {
   height: 0;
 }
+/* the tool buttons: 24 px icons (their own grid, crisp) in 32 px buttons (were 20 in 30), ~4.5 px off the bar's edges */
+.toolbar .icon-btn,
+.tb-more-panel .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+.toolbar .icon-btn > svg,
+.tb-more-panel .icon-btn > svg {
+  width: 24px;
+  height: 24px;
+}
 .tb-sep {
   width: 1px;
-  height: 26px;
+  height: 28px;
   background: var(--border);
   margin: 0 5px;
   flex: none;
@@ -802,6 +823,24 @@ textarea {
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
+/* hide / show all the parts, at the header's right end */
+.panel-header .header-eye {
+  margin-left: auto;
+  /* lined up with the rows' eyes below it (the header pads 10 px, the rows 8 − 4) */
+  margin-right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.panel-header .header-eye:hover {
+  color: var(--text);
+  background: rgba(30, 50, 80, 0.08);
+}
 .panel-header .count {
   color: var(--text-3);
   font-weight: 400;
@@ -861,14 +900,27 @@ textarea {
   flex: none;
   display: flex;
 }
+/* show / hide: a square button round the 14 px icon, 2 px off the row's top and bottom, 4 px off its right edge */
 .tree-item .eye {
   opacity: 0;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: -4px;
+  border-radius: 4px;
   color: var(--text-3);
+  cursor: pointer;
 }
 .tree-item:hover .eye,
 .tree-item .eye.off {
   opacity: 1;
+}
+.tree-item .eye:hover {
+  color: var(--text);
+  background: rgba(30, 50, 80, 0.08);
 }
 .tree-item .status-dot {
   width: 8px;
@@ -1744,7 +1796,7 @@ textarea {
 
 .editor-drawing { grid-template-rows: 40px 1fr 30px; }
 /* a version being viewed: its banner under the top bar */
-.editor.editor-viewing { grid-template-rows: 40px auto 44px 1fr 30px; }
+.editor.editor-viewing { grid-template-rows: 40px auto 42px 1fr 30px; }
 .editor-drawing.editor-viewing { grid-template-rows: 40px auto 1fr 30px; }
 
 .drawing-area {

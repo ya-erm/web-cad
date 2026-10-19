@@ -7,6 +7,7 @@ import type { BuildResult, MeasureResult } from '../kernel/protocol';
 import { defaultParams, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
 import { commitConfigured, configuredFeatures } from '../core/config';
+import { FIELD_SPECS, keepRefs, type SelToken } from '../core/fieldSpecs';
 import { activeStudio, effectiveRollback, featureIndex, useDoc, withStudio } from './docStore';
 
 export type SketchTool =
@@ -187,6 +188,11 @@ export interface EditorState {
   setSolve(info: SolveInfo | null): void;
 
   select(ref: SelRef, additive?: boolean): void;
+  /**
+   * A click on `ref` while a feature dialog's selection field is active: adds it to the field or removes it from there.
+   * With `token` (a row of the Parts or Feature list) only if the field accepts that kind; false — the field did not take it.
+   */
+  pickIntoField(ref: SelRef, token?: SelToken): boolean;
   setSelection(refs: SelRef[]): void;
   clearSelection(): void;
   setHover(ref: SelRef | null): void;
@@ -538,6 +544,21 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const exists = sel.some((r) => sameRef(r, ref));
     if (exists) set({ selection: sel.filter((r) => !sameRef(r, ref)) });
     else set({ selection: additive ? [...sel, ref] : [ref] });
+  },
+
+  pickIntoField(ref, token) {
+    const { editing, activeField: field } = get();
+    if (!editing || !field || editing.draft.type === 'sketch') return false;
+    const spec = FIELD_SPECS[editing.draft.type]?.[field];
+    if (token && !spec?.accepts.includes(token)) return false;
+    get().updateDraft((f) => {
+      const params = f.params as unknown as Record<string, SelRef[]>;
+      const cur = params[field] ?? [];
+      if (cur.some((r) => sameRef(r, ref))) keepRefs(params, field, (r) => !sameRef(r, ref), spec);
+      else if (spec?.max === 1) params[field] = [ref];
+      else params[field] = [...cur, ref];
+    });
+    return true;
   },
 
   setSelection(refs) {

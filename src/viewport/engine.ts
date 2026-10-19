@@ -6,7 +6,7 @@ import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRe
 import type { Draft } from 'immer';
 import type { MateConnectorRef, MateInference, PlaneFrame, SelRef, SkEntity, Vec3 } from '../core/types';
 import { STD_PLANES, frameFromNormal, toWorld, v3 } from '../core/math';
-import { adaptRef, FIELD_SPECS, keepRefs, type SelToken } from '../core/fieldSpecs';
+import { adaptRef, FIELD_SPECS, type SelToken } from '../core/fieldSpecs';
 import { computeRegions, type SketchRegion } from '../sketch/regions';
 import { arcAngles, entityMap, pointOf } from '../sketch/curves';
 import { isTextPart } from '../sketch/text';
@@ -627,6 +627,9 @@ export class Engine {
       }
       if (build.preview) this.addPreview(build);
     }
+    // the origin triad (an eye in the feature list hides it, and then it is not picked either)
+    const showOrigin = !hidden.has('origin');
+    for (const o of [this.scene.getObjectByName('origin'), this.pickScene.getObjectByName('origin-pick')]) if (o) o.visible = showOrigin;
     // default planes
     const size = this.defaultPlaneSize();
     if (ed.showPlanes) {
@@ -1942,17 +1945,7 @@ export class Engine {
       return;
     }
     if (ed.editing && ed.activeField && ed.editing.draft.type !== 'sketch') {
-      if (!ref) return;
-      const field = ed.activeField;
-      const spec = FIELD_SPECS[ed.editing.draft.type]?.[field];
-      ed.updateDraft((f) => {
-        const params = f.params as unknown as Record<string, SelRef[]>;
-        const cur = params[field] ?? [];
-        const exists = cur.some((r) => sameRef(r, ref));
-        if (exists) keepRefs(params, field, (r) => !sameRef(r, ref), spec);
-        else if (spec?.max === 1) params[field] = [ref];
-        else params[field] = [...cur, ref];
-      });
+      if (ref) ed.pickIntoField(ref);
       return;
     }
     if (!ref) {

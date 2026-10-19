@@ -149,7 +149,9 @@ export function FeatureTree() {
 
   const clickFeature = (e: React.MouseEvent, f: Feature) => {
     const edState = ed();
-    if (f.type === 'plane' && pickSketchPlane({ kind: 'feature', featureId: f.id })) return;
+    // (a plane built before the feature being edited: the later ones do not exist for it)
+    const before = !!edState.editing && indexOf(f.id) < edState.editing.index;
+    if (f.type === 'plane' && (pickSketchPlane({ kind: 'feature', featureId: f.id }) || (before && edState.pickIntoField({ kind: 'plane', planeId: f.id }, 'plane')))) return;
     if (f.type === 'sketch' && edState.editing && edState.activeField && edState.editing.draft.type !== 'sketch') {
       const spec = FIELD_SPECS[edState.editing.draft.type]?.[edState.activeField];
       if (spec?.accepts.includes('region')) {
@@ -390,7 +392,7 @@ export function FeatureTree() {
         key={id}
         className={'tree-item' + (hidden.has(id) ? ' hidden-item' : '') + (isSel ? ' selected' : '')}
         style={{ paddingLeft: 22 }}
-        onClick={() => pickSketchPlane({ kind: 'std', name: id }) || ed().select(ref)}
+        onClick={() => pickSketchPlane({ kind: 'std', name: id }) || ed().pickIntoField(ref, 'plane') || ed().select(ref)}
         onMouseEnter={() => ed().setHover(ref)}
         onMouseLeave={() => ed().setHover(null)}
         onDoubleClick={() => {
@@ -405,10 +407,12 @@ export function FeatureTree() {
         <span className="tree-name">{t(label)}</span>
         <span
           className={'eye' + (hidden.has(id) ? ' off' : '')}
+          title={hidden.has(id) ? t('Show') : t('Hide')}
           onClick={(e) => {
             e.stopPropagation();
             toggleHidden([id]);
           }}
+          onDoubleClick={(e) => e.stopPropagation()}
         >
           <Icon name={hidden.has(id) ? 'eyeOff' : 'eye'} size={14} />
         </span>
@@ -475,10 +479,12 @@ export function FeatureTree() {
         {canHide(f) && (
           <span
             className={'eye' + (hidden.has(f.id) ? ' off' : '')}
+            title={hidden.has(f.id) ? t('Show') : t('Hide')}
             onClick={(e) => {
               e.stopPropagation();
               toggleHidden([f.id]);
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
           >
             <Icon name={hidden.has(f.id) ? 'eyeOff' : 'eye'} size={14} />
           </span>
@@ -608,14 +614,25 @@ export function FeatureTree() {
         {showDefault && (
           <>
             <div
-              className={'tree-item' + (selection.some((r) => r.kind === 'origin') ? ' selected' : '')}
+              className={'tree-item' + (hidden.has('origin') ? ' hidden-item' : '') + (selection.some((r) => r.kind === 'origin') ? ' selected' : '')}
               style={{ paddingLeft: 22 }}
-              onClick={() => ed().select({ kind: 'origin' })}
+              onClick={() => ed().pickIntoField({ kind: 'origin' }, 'origin') || ed().select({ kind: 'origin' })}
             >
               <span className="tree-icon">
                 <Icon name="origin" size={16} />
               </span>
               <span className="tree-name">{t('Origin')}</span>
+              <span
+                className={'eye' + (hidden.has('origin') ? ' off' : '')}
+                title={hidden.has('origin') ? t('Show') : t('Hide')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleHidden(['origin']);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <Icon name={hidden.has('origin') ? 'eyeOff' : 'eye'} size={14} />
+              </span>
             </div>
             {planeItem('top', 'Top')}
             {planeItem('front', 'Front')}

@@ -794,10 +794,19 @@ export function FeatureDialog() {
   // Don't nag with "select …" errors before the user picked anything in the first field.
   const first = FIRST_FIELD[draft.type];
   const hasInput = !first || ((p[first] as unknown[] | undefined)?.length ?? 0) > 0;
-  const set = (key: string, v: unknown) =>
+  /** The selection fields shown with parameters `q` (of a "merge" row — its parts). */
+  const selKeys = (q: Record<string, unknown>) =>
+    rows.flatMap((r) => (r.when && !r.when(q) ? [] : r.kind === 'sel' ? [r.key] : r.kind === 'merge' && !q.mergeAll ? ['parts'] : []));
+  const set = (key: string, v: unknown) => {
+    const before = selKeys(p);
     update((f: Draft<Feature>) => {
       (f.params as unknown as Record<string, unknown>)[key] = v;
     });
+    // a choice that shows an empty selection field ("Up to face", "Merge with all" off …) makes it active, ready for a click
+    const next = { ...p, [key]: v };
+    const shown = selKeys(next).find((k) => !before.includes(k) && !(next[k] as unknown[] | undefined)?.length);
+    if (shown) useEditor.getState().setActiveField(shown);
+  };
 
   const renderRow = (row: Row, i: number) => {
     if (row.when && !row.when(p)) return null;

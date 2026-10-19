@@ -9,7 +9,8 @@ The **Parts** list is below the feature list. The header shows the number of par
 - Click to select a part (click again to deselect it). For a single selected part, the [measure panel](measure) shows the volume, surface area, mass, and center of mass.
 - When you hover over a part, it is highlighted in the graphics area.
 - Double-click to rename (`Enter` saves, `Esc` cancels).
-- The eye icon hides or shows the part.
+- The eye icon at the right of the row hides or shows the part: it appears on hover, and anywhere on the row's right end works.
+- The eye in the **Parts** header hides all the parts (surfaces too) while any is shown, and shows them all when all are hidden — one undo step.
 
 ## Context menu {#context-menu}
 
