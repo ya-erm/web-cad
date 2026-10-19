@@ -429,6 +429,29 @@ export class Engine {
     this.needsRender = true;
   }
 
+  private measureObj: THREE.Object3D | null = null;
+
+  /** The measure panel's distance: a dashed segment over the model with dots at its ends (none — taken away). */
+  setMeasureLine(points: [Vec3, Vec3] | null) {
+    if (this.measureObj) {
+      this.scene.remove(this.measureObj);
+      disposeObject(this.measureObj);
+      this.measureObj = null;
+    }
+    if (points) {
+      const g = new THREE.Group();
+      const [a, b] = points;
+      if (v3.dist(a, b) > 1e-9) g.add(fatSegments([...a, ...b], lineMaterial(0xe8590c, 2, { dashed: true, depthTest: false })));
+      const dots = new THREE.BufferGeometry();
+      dots.setAttribute('position', new THREE.Float32BufferAttribute([...a, ...b], 3));
+      g.add(new THREE.Points(dots, new THREE.PointsMaterial({ color: 0xe8590c, size: 7, sizeAttenuation: false, depthTest: false })));
+      g.renderOrder = 10;
+      this.scene.add(g);
+      this.measureObj = g;
+    }
+    this.requestRender();
+  }
+
   /** PNG data URL of the graphics area as it is now (agent API screenshots; no HTML labels). */
   snapshot(): string {
     this.render();

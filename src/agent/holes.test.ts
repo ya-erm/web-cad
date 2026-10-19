@@ -16,10 +16,59 @@ describe('ISO hole sizes', () => {
     expect(isoHole({ holeType: 'tapped', size: 'M8', pitch: '1' })).toMatchObject({ diameter: 7, thread: { designation: 'M8×1', pitch: 1 } });
     expect(isoHole({ holeType: 'clearance', size: 'M6' })).toMatchObject({ diameter: 6.6, cboreDiameter: 11, cboreDepth: 6.6, csinkAngle: 90 });
     expect(isoHole({ holeType: 'clearance', size: 'M6', fit: 'close' })).toMatchObject({ diameter: 6.4 });
+    // no clearance: as wide as the screw
+    expect(isoHole({ holeType: 'clearance', size: 'M2', fit: 'nominal' })).toMatchObject({ diameter: 2 });
+    expect(ansiHole({ holeType: 'clearance', size: '1/4', fit: 'nominal' })).toMatchObject({ diameter: 6.35 });
     expect(isoHole({ holeType: 'clearance', size: 'M10', fit: 'loose' })).toMatchObject({ diameter: 12, cboreDiameter: 18 });
     expect(isoHole({ holeType: 'tapped', size: 'M6', pitch: '0.5' })).toBe('M6 has no 0.5 mm pitch');
     expect(isoHole({ holeType: 'tapped', size: 'M7' })).toBe('Unknown ISO size "M7"');
   });
+});
+
+describe('Holes at circular edges', () => {
+  /** A 40 × 30 × 6 plate with its vertical edges rounded r 5: the arcs of its top face's corners. */
+  const plate = [
+    { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+    { op: 'extrude', depth: 6 },
+    { op: 'fillet', edges: { type: 'line', dir: 'z' }, radius: 5 },
+  ];
+  const corners = { type: 'circle', radius: 5, z: 6 };
+
+  it('drills every corner into the material, whichever way its arc runs; flipped — none', async () => {
+    const run = async (ops: unknown[]) => {
+      const s = await openHeadless(emptyDocument('Corner holes'), wasm);
+      const r = await s.run([...plate, ...ops] as never);
+      expect(r.failed).toEqual([]);
+      return r.model!.parts[0].volume!;
+    };
+    const solid = await run([]);
+    // one hole from a sketch point on the top face: what each corner hole must take
+    const one = solid - (await run([{ op: 'sketch', name: 'P', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [15, 10] }] }, { op: 'hole', sketch: 'P', diameter: 3, depth: 4 }]));
+    expect(one).toBeGreaterThan(Math.PI * 1.5 * 1.5 * 4);
+    const four = solid - (await run([{ op: 'hole', edges: corners, diameter: 3, depth: 4 }]));
+    expect(four).toBeCloseTo(4 * one, 3);
+    // the other way round: up out of the plate — only the hair the hole starts below its point
+    const s = await openHeadless(emptyDocument('Corner holes flipped'), wasm);
+    const flipped = await s.run([...plate, { op: 'hole', edges: corners, diameter: 3, depth: 4, flip: true }] as never);
+    expect(solid - (flipped.model?.parts[0].volume ?? solid)).toBeLessThan(one / 10);
+  }, 60000);
+
+  it('drills at a mate connector against its Z; flipping the connector turns the hole round', async () => {
+    const run = async (flip: boolean) => {
+      const s = await openHeadless(emptyDocument('Connector hole'), wasm);
+      const r = await s.run([
+        ...plate,
+        { op: 'mateConnector', name: 'MC', at: { face: { normal: 'z', pick: '+z' } }, flip },
+        { op: 'hole', mates: ['MC'], diameter: 3, depth: 4 },
+      ] as never);
+      expect(r.failed).toEqual([]);
+      return r.model!.parts[0].volume!;
+    };
+    const s0 = await openHeadless(emptyDocument('Plate'), wasm);
+    const solid = (await s0.run(plate as never)).model!.parts[0].volume!;
+    expect(solid - (await run(false))).toBeGreaterThan(Math.PI * 1.5 * 1.5 * 4);
+    expect(solid - (await run(true))).toBeLessThan(1);
+  }, 60000);
 });
 
 describe('ANSI (inch) hole sizes', () => {

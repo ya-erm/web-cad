@@ -17,7 +17,7 @@ import { buildStudio } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
-import { AgentError, derivedVariant, findDerivedSource, queryModel, runOps, summarize, type AgentKernel } from './runner';
+import { AgentError, derivedVariant, findDerivedSource, measureModel, queryModel, runOps, summarize, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -117,6 +117,7 @@ Methods:
   run(ops, {atomic?})               apply operations as ONE undo step; atomic (default) = nothing changes if a feature fails;
                                     assemblies: {"op":"assembly"}, insert, place, mate, group, relation… ({"op":"studio"} back)
   query({faces|edges|parts})        list matching faces / edges with geometry (to design queries)
+  measure({faces|edges|parts})      the measure panel: sizes of one; min / max distance, centre to centre, angle of two
   feature(name)                     raw feature JSON
   undo() / redo() / cancelEdit()
   view(name)                        iso | top | front | right | … | fit
@@ -203,6 +204,11 @@ export const webcadApi = {
   async query(q: { faces?: Faces; edges?: Edges; parts?: Parts }) {
     const { doc, studio } = current();
     return queryModel(studio, doc.units, agentKernel(studio, doc), q);
+  },
+
+  async measure(q: { faces?: Faces; edges?: Edges; parts?: Parts }) {
+    const { doc, studio } = current();
+    return measureModel(studio, doc.units, agentKernel(studio, doc), q);
   },
 
   feature(name: string): Feature {

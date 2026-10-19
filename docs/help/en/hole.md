@@ -9,10 +9,15 @@ Creates drilled holes — simple, counterbored or countersunk — at sketch poin
 1. Draw a sketch on a part face and place [points](sketch-point) at the centers of the future holes.
 2. Click **Hole**.
 3. Choose the **Hole style**: **Simple**, **Counterbore**, **Countersink** or **Counterbore and countersink**.
-4. Select sketch points (or circular edges — then the hole is placed at their center).
+4. Select sketch points — or circular edges (the hole goes to their center), or [mate connectors](mate-connector).
 5. Choose the **Termination** and set the **Diameter** and the other dimensions — or choose **Standard: ISO** and the fastener size, see [below](#standard). Click ✓ (`Enter`).
 
-The hole starts at the sketch plane and goes into the material — opposite to the sketch plane normal (for a circular edge — along its axis).
+## Direction {#direction}
+
+- From a sketch point a hole goes against the sketch plane's normal.
+- From a circular edge it goes along the edge's axis into the part's material. For example, the arcs of rounded corners on a top face give holes going down, whichever way each arc's axis points.
+- From a mate connector it goes against the connector's Z. Turn on **Flip primary axis** in the connector's dialog and that hole goes the other way.
+- The **Direction** button (under **Termination**) turns all the feature's holes round.
 
 ```figure
 image: ../images/hole-result.png
@@ -27,8 +32,9 @@ width: 480
 | Field | Description |
 |---|---|
 | **Hole style** | **Simple**, **Counterbore**, **Countersink** or **Counterbore and countersink** (like Onshape's Counterdrill): a counterbore with a countersink at its mouth — so a screw head does not catch a sharp edge, say. |
-| **Sketch points to place holes** | Sketch points or circular edges. |
+| **Sketch points to place holes** | Sketch points, circular edges or mate connectors, see [Direction](#direction). |
 | **Termination** | **Blind** or **Through all**. |
+| **Direction** | The button turns all the feature's holes the other way. |
 | **Diameter** | Hole diameter (default 5 mm). |
 | **Depth** | For **Blind** (default 10 mm). |
 | **Tip angle** | The cone at the bottom of a blind hole (default 118°, like a drill bit). |
@@ -43,7 +49,7 @@ width: 480
 
 With **Standard: ISO** the sizes come from the tables for metric fasteners M1.6–M64: the diameter fields are hidden and the resulting sizes are shown under the choices.
 
-- **Type: Clearance** — a hole for a screw to pass, ISO 273. **Fit**: **Close**, **Normal** or **Loose** (fine / medium / coarse), e.g. for M6 — 6.4 / 6.6 / 7 mm.
+- **Type: Clearance** — a hole for a screw to pass, ISO 273. **Fit**: **Close**, **Normal** or **Loose** (fine / medium / coarse), e.g. for M6 — 6.4 / 6.6 / 7 mm. **No clearance (nominal)** — a hole exactly as wide as the screw (M2 → 2 mm), e.g. for a printed part the screw goes into tight. ANSI has it too.
 - **Type: Tapped** — a hole for a tap (the drill by ISO 2306, for M6 — 5 mm) with a [cosmetic thread](#thread). **Pitch**: coarse (the default) or one of the fine ones of ISO 261; a fine pitch drills the major diameter minus the pitch and is designated M8×1.
 - **Counterbore** — a counterbore for an ISO 4762 socket head cap screw (by DIN 974-1), **Countersink** — a 90° countersink for an ISO 10642 countersunk screw, **Counterbore and countersink** — that counterbore with a 0.5 mm × 45° chamfer at its mouth.
 - Choosing a size sets the depths as Onshape does: the thread 2 diameters deep, the hole 3 pitches deeper. You can change them.

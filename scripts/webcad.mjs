@@ -21,6 +21,7 @@ Live (the app must be open in a browser tab served by \`npm run dev\` or \`npm r
   run <ops.json|-|'[…]'> [--keep-failed]
                                   apply ops (one undo step); by default nothing changes if a feature fails
   query '<json>'                  e.g. '{"edges":{"dir":"z"}}' — matching faces / edges with geometry
+  measure '<json>'                the same queries → the measure panel: distances (min / max / centres), angle, totals
   feature <name>                  raw feature JSON
   undo | redo | cancel-edit
   shot <out.png> [view]           screenshot of the graphics area (view: iso, top, front, right, fit…)
@@ -153,6 +154,8 @@ async function main() {
     }
     case 'query':
       return out(await call('query', readJsonArg(args[0])));
+    case 'measure':
+      return out(await call('measure', readJsonArg(args[0])));
     case 'feature':
       return out(await call('feature', args.join(' ')));
     case 'undo':

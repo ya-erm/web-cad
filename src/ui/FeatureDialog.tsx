@@ -10,6 +10,7 @@ import { derivableStudios, derivedSourceKey, parseVersionStudio, sourceStudio, v
 import { derivableVersions, snapshotStudios, versionDocument, type VersionedDocument } from '../store/versionSources';
 import { sourceContents, type SourceContents } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
+import { stepExpression } from './exprStep';
 import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
 import { FORMS, type Row } from './forms';
@@ -162,30 +163,60 @@ function ExprInput({ value, unit, onChange }: { value: string; unit: 'length' | 
         : unit === 'angle'
           ? `${formatNumber((v * 180) / Math.PI, 4)} deg`
           : formatNumber(v, 4);
+  // a step up / down (▲▼, the arrow keys): Shift ×10, Alt ×0.1; the latest text, so holding a button keeps counting
+  const latest = useRef(text);
+  latest.current = text;
+  const step = (dir: 1 | -1, e: { shiftKey: boolean; altKey: boolean }) => {
+    const nv = stepExpression(latest.current, dir, e.shiftKey ? 10 : e.altKey ? 0.1 : 1);
+    if (nv === null) return false;
+    latest.current = nv;
+    setText(nv);
+    if (ctx && tryEvaluate(nv, unit, ctx) !== null) onChange(nv);
+    return true;
+  };
+  const repeat = useRef<number | undefined>(undefined);
+  const stop = () => window.clearTimeout(repeat.current);
+  useEffect(() => stop, []);
+  const press = (dir: 1 | -1) => (e: React.MouseEvent) => {
+    // the field keeps the focus
+    e.preventDefault();
+    if (!step(dir, e)) return;
+    const mods = { shiftKey: e.shiftKey, altKey: e.altKey };
+    const again = (delay: number) => {
+      repeat.current = window.setTimeout(() => step(dir, mods) && again(70), delay);
+    };
+    again(400);
+  };
+  const steppable = stepExpression(text, 1) !== null;
   return (
-    <input
-      type="text"
-      className={v === null ? 'invalid' : ''}
-      value={text}
-      title={title}
-      onChange={(e) => {
-        setText(e.target.value);
-        if (ctx && tryEvaluate(e.target.value, unit, ctx) !== null) onChange(e.target.value);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    <span className="expr-field">
+      <input
+        type="text"
+        className={v === null ? 'invalid' : ''}
+        value={text}
+        title={title}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (ctx && tryEvaluate(e.target.value, unit, ctx) !== null) onChange(e.target.value);
+        }}
+        onKeyDown={(e) => {
           // nudge numeric values like Onshape
-          const m = /^(-?\d*\.?\d+)(.*)$/.exec(text.trim());
-          if (m) {
-            e.preventDefault();
-            const step = unit === 'angle' ? 1 : unit === 'number' ? 1 : 1;
-            const nv = `${formatNumber(parseFloat(m[1]) + (e.key === 'ArrowUp' ? step : -step), 6)}${m[2]}`;
-            setText(nv);
-            onChange(nv);
-          }
-        }
-      }}
-    />
+          if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && step(e.key === 'ArrowUp' ? 1 : -1, e)) e.preventDefault();
+        }}
+      />
+      <span className={'expr-step' + (steppable ? '' : ' off')} title={steppable ? t('Step up / down (Shift ×10, Alt ×0.1)') : t('An expression is not stepped')}>
+        <button type="button" tabIndex={-1} aria-label={t('Increase')} onMouseDown={press(1)} onMouseUp={stop} onMouseLeave={stop}>
+          <svg width="8" height="5" viewBox="0 0 8 5">
+            <path d="M1 4 L4 1 L7 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button type="button" tabIndex={-1} aria-label={t('Decrease')} onMouseDown={press(-1)} onMouseUp={stop} onMouseLeave={stop}>
+          <svg width="8" height="5" viewBox="0 0 8 5">
+            <path d="M1 1 L4 4 L7 1" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </span>
+    </span>
   );
 }
 
@@ -602,13 +633,14 @@ function HoleStandardField() {
                   value={p.fit ?? 'normal'}
                   onChange={(e) =>
                     set((q) => {
-                      q.fit = e.target.value as 'close' | 'normal' | 'loose';
+                      q.fit = e.target.value as 'close' | 'normal' | 'loose' | 'nominal';
                     })
                   }
                 >
                   <option value="close">{t('Close fit')}</option>
                   <option value="normal">{t('Normal fit')}</option>
                   <option value="loose">{t('Loose fit')}</option>
+                  <option value="nominal">{t('No clearance (nominal)')}</option>
                 </select>,
               )}
           {std && typeof std !== 'string' && (

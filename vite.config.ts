@@ -1,10 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Connect, type Plugin } from 'vite'
 
-/** The app's version shown in the status bar: the date and short hash of the commit it is built from. */
-function appVersion(): { date: string; sha: string } {
+/**
+ * The app's version shown in the status bar: the semver of package.json ("version", raised with
+ * `npm version minor|patch --no-git-tag-version`), and the date and short hash of the commit it is built from.
+ */
+function appVersion(): { version: string; date: string; sha: string } {
   const git = (args: string) => {
     try {
       return execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
@@ -12,7 +16,8 @@ function appVersion(): { date: string; sha: string } {
       return ''
     }
   }
-  return { date: git('log -1 --format=%cs') || new Date().toISOString().slice(0, 10), sha: git('rev-parse --short HEAD') || 'local' }
+  const version = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version ?? '0.0.0'
+  return { version, date: git('log -1 --format=%cs') || new Date().toISOString().slice(0, 10), sha: git('rev-parse --short HEAD') || 'local' }
 }
 
 /**

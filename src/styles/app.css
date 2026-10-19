@@ -1285,6 +1285,55 @@ textarea {
   border-color: var(--danger);
   background: #fff5f5;
 }
+/* a value field with small ▲▼ steppers at its right end, shown on hover and focus */
+.expr-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.fd-control .expr-field input[type='text'] {
+  padding-right: 18px;
+}
+.expr-step {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.expr-field:hover .expr-step,
+.expr-field:focus-within .expr-step {
+  opacity: 1;
+}
+.expr-step button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.expr-step button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.expr-step button:active {
+  background: var(--accent-soft);
+}
+.expr-step.off button {
+  color: var(--border-strong);
+  cursor: default;
+  background: transparent;
+}
 .fd-check {
   display: flex;
   align-items: center;
@@ -1558,6 +1607,24 @@ textarea {
 }
 .measure-panel .mrow span:first-child {
   color: var(--text-2);
+}
+/* a distance row: a click draws its segment on the model; the drawn one is marked */
+.measure-panel .mrow.mline {
+  cursor: pointer;
+  margin: 0 -4px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.measure-panel .mrow.mline:hover {
+  background: var(--hover);
+}
+.measure-panel .mrow.mline.active span:first-child::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  margin-right: 5px;
+  vertical-align: middle;
+  border-top: 2px dashed #e8590c;
 }
 .measure-panel .mrow span:last-child {
   font-weight: 600;
@@ -2284,6 +2351,16 @@ textarea {
 .help-brand {
   text-decoration: none;
   flex: none;
+}
+/* the version next to the name on the documents page */
+.brand-version {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-3);
+  letter-spacing: 0;
+  margin-left: 2px;
+  /* the brand centres its items: the version sits on the name's middle line */
+  line-height: 1;
 }
 .help-brand-sub {
   font-weight: 500;

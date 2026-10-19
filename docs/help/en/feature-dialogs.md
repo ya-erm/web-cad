@@ -63,7 +63,9 @@ You can enter a number or an expression in any numeric field:
 - `25 mm`, `1.5 in`, `30 deg`;
 - `#width / 2 + 1 mm`: with [variables](variables).
 
-An invalid expression is highlighted in red and is not applied. Hover over the field to see the evaluated value. The `↑` and `↓` keys increase and decrease the number by 1.
+An invalid expression is highlighted in red and is not applied. Hover over the field to see the evaluated value.
+
+Change the number with the ▲▼ arrows at the field's right end (they show on hover) or the `↑` and `↓` keys. Holding a button repeats the step; with `Shift` the step is 10 times bigger, with `Alt` 10 times smaller. The step suits the unit: 1 mm, 0.1 cm or inch, 1°; a decimal number with no unit (0.5, say) moves by 0.1. An expression such as `#w / 2` is not stepped.
 
 The arrows button next to the field (**Opposite direction**) flips the direction.
 

@@ -23,7 +23,8 @@ import type {
   SketchResult,
   ThreadResult,
 } from './protocol';
-import { resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePoint } from './refs';
+import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint } from './refs';
+import { angleBetween, centerDistance, maxDistance, type Center, type Direction } from './measure';
 import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
 import type { SelRef } from '../core/types';
 
@@ -250,8 +251,52 @@ export class StudioBuilder {
     const st = this.current;
     const items: MeasureResult['items'] = [];
     const shapes: R.AnyShape[] = [];
+    // per selection: its centre or axis, and its direction (a line's, a plane's normal) — for two of them
+    const centers: (Center | null)[] = [];
+    const dirs: (Direction | null)[] = [];
+    const perRef: R.AnyShape[][] = [];
+    const lengths: number[] = [];
+    const areas: number[] = [];
     let centerOfMass: Vec3 | undefined;
     for (const r of refs) {
+      const before = shapes.length;
+      let center: Center | null = null;
+      let dir: Direction | null = null;
+      if (r.kind === 'face') {
+        const { info } = resolveFace(st, r);
+        areas.push(info.area);
+        if (info.type === 'PLANE' && info.normal) dir = { kind: 'plane', dir: info.normal };
+        else if (info.type === 'SPHERE' && info.axisPoint) center = { kind: 'point', p: info.axisPoint };
+        else if (info.axis && (info.axisPoint || info.apex)) {
+          center = { kind: 'axis', p: (info.axisPoint ?? info.apex)!, dir: v3.norm(info.axis) };
+          dir = { kind: 'line', dir: info.axis };
+        }
+      } else if (r.kind === 'edge') {
+        const { info } = resolveEdge(st, r);
+        lengths.push(info.length);
+        if (info.dir) dir = { kind: 'line', dir: info.dir };
+        if (info.circleCenter) center = { kind: 'point', p: info.circleCenter };
+        if (info.circleCenter && info.axis) dir = { kind: 'plane', dir: info.axis };
+      } else if (r.kind === 'vertex' || r.kind === 'origin') center = { kind: 'point', p: resolvePoint(st, r) };
+      else if (r.kind === 'sketchEntity') {
+        try {
+          const ax = resolveAxis(st, r);
+          const edges = resolveCurveEdges(st, r);
+          if (edges.length === 1 && edges[0].geomType === 'LINE') dir = { kind: 'line', dir: ax.dir };
+          else center = { kind: 'point', p: ax.origin };
+        } catch {
+          /* a point, a spline */
+        }
+      } else if (r.kind === 'plane') {
+        // a plane (or a mate connector's XY): for the angle only
+        try {
+          dir = { kind: 'plane', dir: resolvePlaneRef(st, r).normal };
+        } catch {
+          /* not a plane */
+        }
+      }
+      centers.push(center);
+      dirs.push(dir);
       if (r.kind === 'part') {
         const p = st.parts.get(r.partId);
         if (!p) continue;
@@ -302,17 +347,24 @@ export class StudioBuilder {
         try {
           const edges = resolveCurveEdges(st, r);
           shapes.push(...edges);
-          if (refs.length === 1) items.push({ label: 'Length', value: edges.reduce((s, e) => s + e.length, 0), kind: 'length' });
+          const total = edges.reduce((s, e) => s + e.length, 0);
+          lengths.push(total);
+          if (refs.length === 1) items.push({ label: 'Length', value: total, kind: 'length' });
         } catch {
           const p = resolvePoint(st, r);
           shapes.push(R.makeVertex(p));
         }
       }
+      perRef.push(shapes.slice(before));
     }
     let points: [Vec3, Vec3] | undefined;
-    if (shapes.length === 2) {
+    const lines: NonNullable<MeasureResult['lines']> = [];
+    // two selections (each its shapes as one): the minimum and maximum distance, centre to centre, the angle
+    const single = (list: R.AnyShape[]): R.AnyShape | null => (list.length === 1 ? list[0] : list.length ? R.makeCompound(list.map((s) => s.clone())) : null);
+    const [s0, s1] = refs.length === 2 ? [single(perRef[0]), single(perRef[1])] : [null, null];
+    if (s0 && s1) {
       const oc = R.getOC();
-      const d = new oc.BRepExtrema_DistShapeShape(shapes[0].wrapped, shapes[1].wrapped);
+      const d = new oc.BRepExtrema_DistShapeShape(s0.wrapped, s1.wrapped);
       if (d.IsDone() && d.NbSolution() > 0) {
         const a = d.PointOnShape1(1);
         const b = d.PointOnShape2(1);
@@ -320,14 +372,29 @@ export class StudioBuilder {
           [a.X(), a.Y(), a.Z()],
           [b.X(), b.Y(), b.Z()],
         ];
-        items.push({ label: 'Minimum distance', value: d.Value(), kind: 'length' });
+        items.push({ label: 'Minimum distance', value: d.Value(), kind: 'length', line: 'min' });
+        lines.push({ key: 'min', points });
         const dv = v3.sub(points[1], points[0]);
         items.push({ label: 'ΔX', value: Math.abs(dv[0]), kind: 'length' });
         items.push({ label: 'ΔY', value: Math.abs(dv[1]), kind: 'length' });
         items.push({ label: 'ΔZ', value: Math.abs(dv[2]), kind: 'length' });
       }
       d.delete();
+      const far = maxDistance(s0, s1);
+      if (far && far.value > (points ? v3.dist(points[0], points[1]) : 0) + 1e-9) {
+        items.push({ label: 'Maximum distance', value: far.value, kind: 'length', line: 'max' });
+        lines.push({ key: 'max', points: far.points });
+      }
     }
+    if (refs.length === 2 && centers[0] && centers[1] && !(centers[0].kind === 'point' && refs[0].kind === 'vertex' && centers[1].kind === 'point' && refs[1].kind === 'vertex')) {
+      const c = centerDistance(centers[0], centers[1]);
+      items.push({ label: 'Center to center', value: c.value, kind: 'length', line: 'center' });
+      lines.push({ key: 'center', points: c.points });
+    }
+    if (refs.length === 2 && dirs[0] && dirs[1]) items.push({ label: 'Angle', value: angleBetween(dirs[0], dirs[1]), kind: 'angle' });
+    // several: their total length / area
+    if (refs.length > 1 && lengths.length === refs.length) items.push({ label: 'Total length', value: lengths.reduce((a, b) => a + b, 0), kind: 'length' });
+    if (refs.length > 1 && areas.length === refs.length) items.push({ label: 'Total area', value: areas.reduce((a, b) => a + b, 0), kind: 'area' });
     if (refs.length > 1 && refs.every((r) => r.kind === 'part')) {
       const parts = resolveParts(st, refs);
       let vol = 0;
@@ -338,7 +405,7 @@ export class StudioBuilder {
       }
       items.push({ label: 'Total volume', value: vol, kind: 'volume' });
     }
-    return { items, points, centerOfMass };
+    return { items, points, lines, centerOfMass };
   }
 
   projection(partIds: string[], orientation: ViewOrientation, withHidden: boolean): { edges: ProjectedEdge[]; bounds: [Vec2, Vec2] | null } {

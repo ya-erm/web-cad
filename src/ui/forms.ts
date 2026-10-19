@@ -255,6 +255,8 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
         ['throughAll', 'Through all'],
       ],
     },
+    // Onshape: the arrow by the termination — all the holes the other way round
+    { kind: 'flip', key: 'flip', label: 'Direction' },
     // Onshape: Standard (ISO) — type, size, fit / pitch; the diameters from the tables
     { kind: 'holeStandard' },
     { kind: 'expr', key: 'diameter', label: 'Diameter', unit: 'length', when: (p) => !isIso(p) },

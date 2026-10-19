@@ -10,6 +10,7 @@ import { projectText } from '../store/folderStore';
 import { fileVersions } from '../store/versions';
 import { Icon, type IconName } from './icons';
 import { t } from '../i18n';
+import { getEngine } from '../viewport/engineRef';
 
 export function ContextMenu() {
   const menu = useEditor((s) => s.contextMenu);
@@ -91,8 +92,16 @@ export function MeasurePanel() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const [res, setRes] = useState<MeasureResult | null>(null);
+  // the distance drawn on the model (minimum by default; a click on a row picks another)
+  const [shown, setShown] = useState('min');
+  useEffect(() => setShown('min'), [selection]);
   useEffect(() => {
-    if (!studio || editing || !selection.length || selection.length > 2) {
+    const line = res?.lines?.find((l) => l.key === shown) ?? res?.lines?.[0];
+    getEngine()?.setMeasureLine(line?.points ?? null);
+    return () => getEngine()?.setMeasureLine(null);
+  }, [res, shown]);
+  useEffect(() => {
+    if (!studio || editing || !selection.length || selection.length > 200) {
       setRes(null);
       return;
     }
@@ -130,7 +139,12 @@ export function MeasurePanel() {
   return (
     <div className="measure-panel">
       {res.items.map((it) => (
-        <div key={it.label} className="mrow">
+        <div
+          key={it.label}
+          className={'mrow' + (it.line ? ' mline' : '') + (it.line && it.line === shown ? ' active' : '')}
+          title={it.line ? t('Show on the model') : undefined}
+          onClick={it.line ? () => setShown(it.line!) : undefined}
+        >
           <span>{t(it.label)}</span>
           <span>{fmt(it.value, it.kind)}</span>
         </div>

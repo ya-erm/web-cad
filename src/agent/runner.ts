@@ -75,7 +75,7 @@ export function findDerivedSource(doc: { tabs: CadDocument['tabs']; units: CadDo
 /** The geometry kernel as seen by the runner (worker client in the browser, StudioBuilder in Node). */
 export interface AgentKernel {
   build(features: Feature[]): Promise<BuildResult>;
-  measure(refs: SelRef[]): Promise<{ label: string; value: number }[]>;
+  measure(refs: SelRef[]): Promise<{ label: string; value: number; kind?: string }[]>;
   /**
    * Derived: another Part Studio of the document by name (not one that uses Part Studio `forStudio` — a cycle),
    * built, with its parts; or a Part Studio of a saved version (`from.version` by name, of this document or of
@@ -878,7 +878,13 @@ class Runner {
       }
       case 'hole': {
         const p = defaultParams('hole');
-        p.points = this.sketchPoints(this.sketchFeature(op.sketch));
+        const elsewhere = op.edges !== undefined || !!op.mates?.length;
+        p.points = [
+          ...(op.sketch !== undefined || !elsewhere ? this.sketchPoints(this.sketchFeature(op.sketch)) : []),
+          ...(op.edges !== undefined ? await this.edges(op.edges) : []),
+          ...(op.mates ?? []).map((m) => this.mateRef(m)),
+        ];
+        if (op.flip) p.flip = true;
         p.diameter = this.expr(op.diameter, 'length', '5 mm');
         if (op.through) p.endType = 'throughAll';
         if (op.iso) {
@@ -1422,6 +1428,31 @@ export async function matchOnPart(
 }
 
 /** Faces / edges / parts matching a query, with their geometry (for exploring the model). */
+/**
+ * Measure (the app's measure panel) of the selections the queries match, in the document's units (angles in degrees):
+ * one — its sizes; two — the minimum / maximum distance, centre to centre, the angle; several — total length / area / volume.
+ */
+export async function measureModel(
+  studio: PartStudioTab,
+  units: Units,
+  kernel: AgentKernel,
+  q: { faces?: Faces; edges?: Edges; parts?: Parts },
+): Promise<Record<string, number>> {
+  const r = new Runner(structuredClone(studio) as PartStudioTab, units, kernel);
+  const refs = [...(q.parts !== undefined ? await r.parts(q.parts) : []), ...(q.faces !== undefined ? await r.faces(q.faces) : []), ...(q.edges !== undefined ? await r.edges(q.edges) : [])];
+  if (!refs.length) throw new AgentError('Nothing to measure: give faces, edges or parts');
+  const k = LENGTH_FACTOR[units.length];
+  const scale: Record<string, (v: number) => number> = {
+    length: (v) => v / k,
+    area: (v) => v / k ** 2,
+    volume: (v) => v / k ** 3,
+    angle: (v) => (v * 180) / Math.PI,
+  };
+  const out: Record<string, number> = {};
+  for (const it of await kernel.measure(refs)) out[it.label] = round((scale[it.kind ?? ''] ?? ((v: number) => v))(it.value));
+  return out;
+}
+
 export async function queryModel(
   studio: PartStudioTab,
   units: Units,

@@ -1,6 +1,6 @@
 # Measure
 
-There is no separate measure tool: select one or two entities in the graphics area (or a part in the [parts list](parts)), and a panel with the results appears in the bottom-right corner of the graphics area. The panel is hidden while a feature dialog or a sketch is open, and when more than two entities are selected.
+There is no separate measure tool: select entities in the graphics area (or a part in the [parts list](parts)), and a panel with the results appears in the bottom-right corner of the graphics area. The panel is hidden while a feature dialog or a sketch is open.
 
 ```figure
 image: ../images/measure-panel.png
@@ -18,10 +18,16 @@ width: 640
 | Edge | **Length**; for a circle or arc, also **Radius** and **Diameter** |
 | Vertex or origin | **X**, **Y**, **Z** coordinates |
 | Sketch curve | **Length** |
-| Any two entities | **Minimum distance** and its components **ΔX**, **ΔY**, **ΔZ** |
-| Two parts | **Total volume** in addition to the distance |
+| Any two entities | **Minimum distance** and its components **ΔX**, **ΔY**, **ΔZ**; **Maximum distance** — between the farthest points |
+| Two circles, arcs, cylindrical or spherical faces, vertices | **Center to center**: between the centres of circles and spheres, between the axes of cylinders |
+| Two edges, faces or planes | **Angle** — the acute angle between lines, between planes, or between a line and a plane. A circle's direction is its plane's normal, a cylinder's is its axis |
+| Several edges / faces / parts | **Total length** / **Total area** / **Total volume** |
 
 Lengths are shown in document units, angles in degrees.
+
+The minimum distance is drawn on the model as an orange dashed segment. Click the **Maximum distance** or **Center to center** row and the segment shows that distance instead; the row gets a dash mark.
+
+The maximum distance between straight edges and planar faces is exact (it is always between vertices); for curves and curved faces it is taken over their points, to a fraction of a percent.
 
 ## Steps {#steps}
 

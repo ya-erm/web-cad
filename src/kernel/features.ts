@@ -1355,7 +1355,10 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
   const dims = holeDims(ctx, f, big);
   const at = p.points.map((r) => {
     const { p: pt, n } = resolveHolePoint(ctx.st, r);
-    return { pt, drill: v3.neg(n) };
+    let drill = v3.neg(n);
+    // an edge or a vertex has no side of its own (a circle's axis may point either way): into the material
+    if ((r.kind === 'edge' || r.kind === 'vertex') && !materialAt(ctx.st, pt, drill, big) && materialAt(ctx.st, pt, n, big)) drill = n;
+    return { pt, drill: p.flip ? v3.neg(drill) : drill };
   });
   const tools = at.map((a) => holeTool(dims, a.pt, a.drill));
   const tool = tools.length === 1 ? tools[0] : compoundOf(tools);
@@ -1382,6 +1385,30 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
     });
   }
   return { tool, op: 'remove' };
+}
+
+/** Whether some part's material begins right at `p` going along `dir` (within a hair of it). */
+function materialAt(st: BuildState, p: Vec3, dir: Vec3, big: number): boolean {
+  const oc = R.getOC();
+  const tol = 1e-4 * Math.max(1, big * 1e-3);
+  const line = R.makeLine(p, v3.add(p, v3.scale(dir, big)));
+  for (const part of st.parts.values()) {
+    if (isSurface(part.shape)) continue;
+    const common = new oc.BRepAlgoAPI_Common(part.shape.wrapped, line.wrapped);
+    common.Build();
+    let near = false;
+    for (const x of R.iterTopo(common.Shape(), 'edge')) {
+      const e = R.cast(x) as R.Edge;
+      for (const u of [0, 1]) {
+        const q = e.pointAt(u);
+        if (Math.abs(v3.dot(v3.sub([q.x, q.y, q.z], p), dir)) < tol) near = true;
+        q.delete();
+      }
+    }
+    common.delete();
+    if (near) return true;
+  }
+  return false;
 }
 
 /**

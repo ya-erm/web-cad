@@ -181,7 +181,13 @@ export type AgentOp =
   | (Named & { op: 'replaceFace'; faces: Faces; with: PlaneSpec; offset?: Num; flip?: boolean })
   | (Named & {
       op: 'hole';
-      sketch: string;
+      /** The holes' places: a sketch's points (circle centres), and / or circular edges (their centres, drilled into the material). */
+      sketch?: string;
+      edges?: Edges;
+      /** Mate connectors (by name): drilled against their Z (a connector with `flip` turns its hole round). */
+      mates?: string[];
+      /** All the holes the other way round. */
+      flip?: boolean;
       /** Custom holes: the diameter (none with `iso`). */
       diameter?: Num;
       depth?: Num;
@@ -195,9 +201,10 @@ export type AgentOp =
       cboreDepth?: Num;
       csinkDiameter?: Num;
       /** ISO standard holes: "M6" — a clearance hole (fit: close / normal / loose), or tapped (the pitch: coarse by default). */
-      iso?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose'; pitch?: number; tapDepth?: Num };
+      /** `fit: "nominal"` — a clearance hole as wide as the screw (M2 → 2 mm), no clearance. */
+      iso?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose' | 'nominal'; pitch?: number; tapDepth?: Num };
       /** ANSI inch holes: "#10", "1/4" — clearance (ASME B18.2.8 fits) or tapped (UNC by default; `tpi` 28 — UNF). */
-      ansi?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose'; tpi?: number; tapDepth?: Num };
+      ansi?: { size: string; type?: 'clearance' | 'tapped'; fit?: 'close' | 'normal' | 'loose' | 'nominal'; tpi?: number; tapDepth?: Num };
     })
   | (Named & {
       op: 'linearPattern';

@@ -26,7 +26,7 @@ alt: Part Studio window: top bar, toolbar, feature list and parts list, graphics
 7. **View menu:** **Zoom to fit**, **View normal to**, [**Section view**](section-view), and the **Views** menu (standard views, perspective, plane and sketch visibility).
 8. **Variable table**: the button below the view menu, see [Variables and expressions](variables).
 9. **Measure panel**: shows length, area, volume, and distances for the selected entities. See [Measure](measure).
-10. **Bottom bar.** The **+** button adds a tab (**Part Studio** or **Drawing**), followed by the document tabs. On the right are the active tool hint, the sketch status, the model rebuild time, the document units, and the app version — the build date and short code (**dev** marks a run from the development server); quote it when reporting a bug.
+10. **Bottom bar.** The **+** button adds a tab (**Part Studio** or **Drawing**), followed by the document tabs. On the right are the active tool hint, the sketch status, the model rebuild time, the document units, and the app version in semver, e.g. **v0.14.0** (new features raise the middle number, fixes the last one) (**dev** marks a run from the development server). Its tooltip has the build date and short code; quote them when reporting a bug.
 
 While you create or edit a feature, its **dialog** is open in the top-left corner of the graphics area. See [Feature dialogs](feature-dialogs).
 

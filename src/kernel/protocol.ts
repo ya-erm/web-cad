@@ -257,8 +257,11 @@ export interface MeasureRequest {
 export interface MeasureResult {
   type: 'measure';
   reqId: number;
-  items: { label: string; value: number; kind: 'length' | 'area' | 'volume' | 'angle' | 'number' | 'mass' }[];
+  /** `line` — the row is a distance whose segment is in `lines` under that key (shown when the row is picked). */
+  items: { label: string; value: number; kind: 'length' | 'area' | 'volume' | 'angle' | 'number' | 'mass'; line?: string }[];
   points?: [Vec3, Vec3];
+  /** The segments of the distances: minimum, maximum, centre to centre. */
+  lines?: { key: string; points: [Vec3, Vec3] }[];
   centerOfMass?: Vec3;
 }
 

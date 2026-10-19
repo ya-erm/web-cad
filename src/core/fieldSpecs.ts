@@ -103,7 +103,7 @@ export const FIELD_SPECS: FieldSpecs = {
     faces: { label: 'Faces to draft', accepts: ['face'] },
   },
   hole: {
-    points: { label: 'Sketch points to place holes', accepts: ['sketchPoint', 'circularEdge'] },
+    points: { label: 'Sketch points to place holes', accepts: ['sketchPoint', 'circularEdge', 'mate'] },
     scope: { label: 'Merge scope', accepts: ['part'] },
   },
   linearPattern: {

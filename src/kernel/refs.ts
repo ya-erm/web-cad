@@ -286,6 +286,11 @@ export function resolveHolePoint(st: BuildState, ref: SelRef): { p: Vec3; n: Vec
     const { info } = resolveEdge(st, ref);
     if (info.circleCenter && info.axis) return { p: info.circleCenter, n: info.axis };
   }
+  // a mate connector (Onshape): at its origin, drilled against its Z (flip its primary axis to turn the hole round)
+  if (ref.kind === 'plane') {
+    const fr = resolvePlaneRef(st, ref);
+    return { p: fr.origin, n: fr.normal };
+  }
   fail('Select sketch points for hole locations');
 }
 

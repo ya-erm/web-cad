@@ -86,8 +86,9 @@ export function isoHole(p: Pick<HoleParams, 'holeType' | 'size' | 'fit' | 'pitch
   if (!s.pitches.includes(pitch)) return `${p.size} has no ${p.pitch} mm pitch`;
   const tapped = p.holeType === 'tapped';
   const fit = p.fit === 'close' ? 0 : p.fit === 'loose' ? 2 : 1;
-  // a tapped hole: its tap drill (fine pitches: major − pitch); the screw goes through a clearance hole
-  const diameter = tapped ? (pitch === coarse ? s.drill : round1(s.d - pitch)) : s.clearance[fit];
+  // a tapped hole: its tap drill (fine pitches: major − pitch); the screw goes through a clearance hole — or, with no
+  // clearance, one as wide as the screw (e.g. for a printed part)
+  const diameter = tapped ? (pitch === coarse ? s.drill : round1(s.d - pitch)) : p.fit === 'nominal' ? s.d : s.clearance[fit];
   const d = s.d;
   // DIN 974-1 for ISO 4762: the head with a clearance, as deep as the head is tall (= d) and a little more
   const cboreDiameter = round1(s.head + (d <= 6 ? 1 : d <= 16 ? 2 : d <= 20 ? 3 : 4));
@@ -186,7 +187,7 @@ export function ansiHole(p: Pick<HoleParams, 'holeType' | 'size' | 'fit' | 'pitc
   if ((p.style === 'counterbore' || p.style === 'counterdrill') && !s.cbore) return `No counterbore size for ${p.size}: use the custom sizes`;
   if (p.style === 'countersink' && !s.csink) return `No countersink size for ${p.size}: use the custom sizes`;
   const fit = p.fit === 'close' ? 0 : p.fit === 'loose' ? 2 : 1;
-  const diameter = (tapped ? thread.drill : s.clearance![fit]) * IN;
+  const diameter = (tapped ? thread.drill : p.fit === 'nominal' ? s.d : s.clearance![fit]) * IN;
   // the counterbore as deep as the normal clearance hole is wide: the head (as tall as d) a little below the surface
   const cbore = (s.cbore ?? 0) * IN;
   return {

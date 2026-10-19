@@ -10,6 +10,7 @@ import { ContextMenu } from './Overlays';
 import { AppSettingsButton } from './AppSettings';
 import { t, getLang } from '../i18n';
 import { openHelp } from '../help/context';
+import { APP_VERSION, appVersionTitle } from './version';
 
 function fmtDate(ts: number) {
   return new Date(ts).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', {
@@ -399,6 +400,9 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="docs-top">
         <div className="brand">
           <div className="brand-logo">◆</div> WebCAD
+          <span className="brand-version" title={appVersionTitle()}>
+            {APP_VERSION}
+          </span>
         </div>
         <div style={{ flex: 1 }} />
         {notice && (

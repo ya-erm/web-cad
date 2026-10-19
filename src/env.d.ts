@@ -1,2 +1,2 @@
-/** The commit the app is built from (vite.config.ts): its date and short hash. */
-declare const __APP_VERSION__: { date: string; sha: string };
+/** The app's version (vite.config.ts): the semver of package.json, the date and short hash of the commit it is built from. */
+declare const __APP_VERSION__: { version: string; date: string; sha: string };

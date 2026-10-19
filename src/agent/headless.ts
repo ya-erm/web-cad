@@ -12,7 +12,7 @@ import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/bui
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
-import { AgentError, derivedVariant, findDerivedSource, runOps, summarize, queryModel, type AgentKernel } from './runner';
+import { AgentError, derivedVariant, findDerivedSource, runOps, summarize, queryModel, measureModel, type AgentKernel } from './runner';
 import { studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
@@ -84,6 +84,8 @@ export interface HeadlessSession {
   /** The active Part Studio's model, or the active assembly. */
   state(): Promise<ModelSummary | { assembly: AssemblySummary }>;
   query(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<unknown>;
+  /** The measure panel's values of the matched selections (document units, degrees). */
+  measure(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<Record<string, number>>;
   /** The active Part Studio's parts, or the active assembly (with its product tree). */
   exportStep(): Promise<Uint8Array>;
   exportStl(binary?: boolean): Promise<Uint8Array>;
@@ -160,6 +162,7 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
       return { assembly: summarizeAssembly(session.doc, a, src, applySolve(structuredClone(a) as AssemblyTab, src)) };
     },
     query: (q) => queryModel(studioOf(session.doc), session.doc.units, kernelOf(session.doc, studioOf(session.doc)), q),
+    measure: (q) => measureModel(studioOf(session.doc), session.doc.units, kernelOf(session.doc, studioOf(session.doc)), q),
     async exportStep() {
       const a = assemblyOf(session.doc);
       if (a) {

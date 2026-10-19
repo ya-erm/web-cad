@@ -309,6 +309,10 @@ export interface FilletParams {
   pointRadii?: string[];
   /** Variable: the radius changes smoothly (level at the vertices: no kink between edges), not linearly. */
   smooth?: boolean;
+  /** Onshape Cross section: circular (none) or conic — touching the faces as a round one of `radius` would, `rho` full. */
+  crossSection?: 'circular' | 'conic';
+  /** Conic: 0…1 (0.5 — a parabola; less — flatter, more — fuller towards the corner). */
+  rho?: string;
 }
 
 export interface ChamferParams {
@@ -381,6 +385,11 @@ export interface HoleParams {
   /** Counterdrill (Onshape): a counterbore with a countersink at its mouth. */
   style: 'simple' | 'counterbore' | 'countersink' | 'counterdrill';
   endType: 'blind' | 'throughAll';
+  /**
+   * All the holes the other way round. By default a sketch point drills against its sketch's normal, a mate connector
+   * against its Z, an edge (a circle's centre) into the material.
+   */
+  flip?: boolean;
   diameter: string;
   depth: string;
   cboreDiameter: string;
@@ -401,8 +410,8 @@ export interface HoleParams {
   holeType?: 'clearance' | 'tapped';
   /** "M6"; ANSI: "#10", "1/4". */
   size?: string;
-  /** Clearance hole fit, ISO 273 / ASME B18.2.8: close, normal, loose. */
-  fit?: 'close' | 'normal' | 'loose';
+  /** Clearance hole fit, ISO 273 / ASME B18.2.8: close, normal, loose; nominal — as wide as the screw, no clearance. */
+  fit?: 'close' | 'normal' | 'loose' | 'nominal';
   /** Thread pitch, mm ("1.25"); ANSI: threads per inch ("28"); none — the coarse one. */
   pitch?: string;
   /** A tapped blind hole: how deep the thread goes (no deeper than the hole). */

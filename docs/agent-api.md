@@ -41,6 +41,7 @@ npm run agent -- run '[{"op":"setVariable","name":"w","value":60}]'
 status | docs | open <id|name> | create <name> | state | feature <name>
 run <ops.json | - | '[…]'> [--keep-failed]
 query '<json>'            {"faces":…} / {"edges":…} / {"parts":…}
+measure '<json>'          те же запросы → панель измерений (см. ниже)
 undo | redo | cancel-edit
 shot <out.png> [view]     view: iso, top, front, right, back, left, bottom, dimetric, trimetric, fit
 export <stl|step|webcad> <out>
@@ -97,7 +98,7 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `thicken` | `surfaces?` (`Parts`: поверхности целиком) и / или `faces?`, `thickness`, `flip?`, `boolean?` |
 | `moveFace` | `faces` и одно из: `offset` (плоские грани вдоль своих нормалей, + наружу), `translate: {"direction": AxisSpec, "distance"}`, `rotate: {"axis": AxisSpec, "angle"}`; все грани отверстия / кармана / бобышки двигаются целиком, отдельные плоские — каждая на свою новую плоскость, соседи удлиняются |
 | `replaceFace` | `faces` (плоские), `with` — `PlaneSpec`, `offset?` вдоль её нормали (в сторону, куда смотрят грани), `flip?` |
-| `hole` | `sketch` (точки эскиза или центры окружностей), `diameter`, `depth?`, `through?`, `style?` (`simple`/`counterbore`/`countersink`/`counterdrill` — цековка с зенковкой у входа), `cboreDiameter?`, `cboreDepth?`, `csinkDiameter?`, `csinkAngle?`, `csinkRecess?` (зенковка, утопленная в цилиндрическое углубление её диаметра); стандартное отверстие — `iso: {"size":"M6", "type"?: "clearance"\|"tapped", "fit"?: "close"\|"normal"\|"loose", "pitch"?: 1, "tapDepth"?}` вместо `diameter` (диаметры, цековка ISO 4762 и зенковка 90° — из таблиц; глубины по умолчанию — 2 d резьбы и на 3 шага глубже); дюймовое — `ansi: {"size":"1/4" (или "#10"), "type"?, "fit"?, "tpi"?: 28 (UNF; по умолчанию UNC), "tapDepth"?}` (ASME B18.2.8, B1.1, B18.3; зенковка 82°). У резьбового отверстия — косметическая резьба: `state` перечисляет её в `threads` (обозначение, начало, направление, длина, деталь) |
+| `hole` | `sketch` (точки эскиза или центры окружностей) и / или `edges?` (центры круговых рёбер, сверлятся в материал), `mates?` (имена соединителей: против их Z), `flip?` — все отверстия в другую сторону, `diameter`, `depth?`, `through?`, `style?` (`simple`/`counterbore`/`countersink`/`counterdrill` — цековка с зенковкой у входа), `cboreDiameter?`, `cboreDepth?`, `csinkDiameter?`, `csinkAngle?`, `csinkRecess?` (зенковка, утопленная в цилиндрическое углубление её диаметра); стандартное отверстие — `iso: {"size":"M6", "type"?: "clearance"\|"tapped", "fit"?: "close"\|"normal"\|"loose", "pitch"?: 1, "tapDepth"?}` вместо `diameter` (диаметры, цековка ISO 4762 и зенковка 90° — из таблиц; глубины по умолчанию — 2 d резьбы и на 3 шага глубже); дюймовое — `ansi: {"size":"1/4" (или "#10"), "type"?, "fit"?, "tpi"?: 28 (UNF; по умолчанию UNC), "tapDepth"?}` (ASME B18.2.8, B1.1, B18.3; зенковка 82°). У резьбового отверстия — косметическая резьба: `state` перечисляет её в `threads` (обозначение, начало, направление, длина, деталь) |
 | `linearPattern` | `features` (имена) или `parts`, `direction`, `distance`, `count`, `direction2?`, `distance2?`, `count2?`, `boolean?` |
 | `circularPattern` | `features` или `parts`, `axis`, `count`, `angle?` (360°) |
 | `mirror` | `features` или `parts`, `plane` |
@@ -184,6 +185,12 @@ Mate connector — локальная система координат. Тип�
 `edges` / `faces` / `parts` принимают один запрос, массив запросов (объединение) или `"all"`.
 Подобрать запрос помогает `npm run agent -- query '{"edges":{"z":10}}'` — он возвращает найденные
 элементы с геометрией (тип, точки, радиус, длина, площадь).
+
+`measure` с теми же запросами возвращает значения панели измерений в единицах документа (углы в градусах):
+у одного элемента — его размеры (`Volume`, `Area`, `Length`, `Radius`…); у двух — `Minimum distance` (и `ΔX`…),
+`Maximum distance`, `Center to center` (окружности, сферы, оси цилиндров), `Angle` (острый, между прямыми и
+плоскостями); у нескольких — `Total length` / `Total area` / `Total volume`. Например:
+`npm run agent -- measure '{"faces":[{"normal":"z","pick":"+z"},{"normal":"x","pick":"+x"}]}'`.
 
 ### Произвольные фичи: подстановки
 
@@ -299,7 +306,7 @@ Part Studio. Всё по-прежнему применяется одним ша
 ## `window.webcad`
 
 Те же методы доступны на странице: `documents()`, `open(idOrName)`, `create(name)`, `state()`,
-`run(ops, {atomic})`, `query(q)`, `feature(name)`, `undo()`, `redo()`, `cancelEdit()`,
+`run(ops, {atomic})`, `query(q)`, `measure(q)`, `feature(name)`, `undo()`, `redo()`, `cancelEdit()`,
 `view(name)`, `section({plane, offset?, flip?} | null)` (сечение по top / front / right),
 `screenshot({view})` (PNG data URL), `export(format)` (`{fileName, mime, base64}`), `help()`.
 Из CLI: `npm run agent -- call section '{"plane":"front","offset":5}'`.
