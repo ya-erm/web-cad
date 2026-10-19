@@ -317,6 +317,15 @@ const ICONS = {
       <path d="M9 12 V8.5 M7.5 10 L9 8.5 L10.5 10" stroke={BLUE} {...THIN} />
     </>
   ),
+  // Blue sheets closing round a volume: a solid (grey) inside, the check badge.
+  enclose: (
+    <>
+      {obox(3, 9, 12, 10, 4.5, 4.5, GREY_SHADE)}
+      <polygon points="3,9 7.5,4.5 19.5,4.5 15,9" fill={BLUE_FILL} stroke={BLUE} />
+      <polygon points="15,9 19.5,4.5 19.5,14.5 15,19" fill="none" stroke={BLUE} {...THIN} />
+      {badge('check')}
+    </>
+  ),
   // A grey block whose top face (blue) is taken away: the remove badge.
   deleteFace: (
     <>

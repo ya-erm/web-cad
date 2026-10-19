@@ -46,6 +46,13 @@ An opened version is shown instead of the workspace, with a yellow banner under 
 
 The arrow in the header goes back to the list of versions. While a version is open for viewing, the comparison is with the workspace you will return to.
 
+```figure
+image: ../images/versions-compare.jpg
+alt: V1 compared with the workspace: Fillet R2 was added
+caption: Save V1, add a fillet, then compare with the workspace. The + beside Fillet R2 identifies the feature added after V1. The panel lists changes; it does not colour-code the model.
+width: 460
+```
+
 ## Restoring {#restore}
 
 **Restore this version** (in the panel or on the viewing banner) makes the workspace what the chosen version has: all tabs and units. The document's name does not change. Before that the current state goes to the history (**Autosave · before a version was restored**), and the restore itself is one undo step: `Ctrl+Z` brings everything back at once.

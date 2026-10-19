@@ -25,4 +25,10 @@ The **Target** is the plate and the **Tool** is a 14 mm diameter cylinder. **Kee
 | **Subtract** | The **Tools** are subtracted from each part in **Targets**. The tools are deleted unless the **Keep tools** checkbox is on. |
 | **Intersect** | Only the common volume of the **Tools** (at least two) remains — in the first part; if there is no common volume, the message "Parts do not intersect" appears. |
 
+## Surfaces {#surfaces}
+
+- **Union** of [surfaces](offset-surface#surfaces) sews them into one along the edges where they meet (the edges must match — after [trimming against each other](split#trim), say). Surfaces combine with surfaces only, parts with parts.
+- **Subtract** a part from a surface: the surface in **Targets**, the part in **Tools**. What lies outside the part is left of the surface: a cylinder cuts a round hole in a sheet, say.
+- A surface is not a tool of Subtract or Intersect: trim a surface with another one by [Split](split#trim).
+
 > **Tip.** If a body is created by a feature, it is easier to choose the **Add**, **Remove** or **Intersect** operation right in that feature — see [Feature dialogs](feature-dialogs#operation).

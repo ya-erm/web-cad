@@ -12,6 +12,13 @@ Moves and turns the selected sketch entities by exact values, or makes a moved c
 4. Turn on **Copy** to leave the original entities in place and add moved copies.
 5. ✓ or `Enter` applies, ✕ or `Esc` cancels. Afterwards the moved entities (or the copies) are selected. The whole action is one sketch undo step.
 
+```figure
+image: ../images/sketch-transform.jpg
+alt: Preview of a translated and rotated rectangle copy
+caption: The original 20 × 10 mm rectangle is selected in orange. Blue shows the future copy: Move X = 30 mm, Move Y = 15 mm, Rotation angle = 30°. Copy keeps the original entities in place; ✓ applies the result.
+width: 900
+```
+
 ## How it works {#how}
 
 - **Move.** The entities' points are carried over, the constraints among them stay, dimension labels move with them, fixed entities are fixed at the new place. Constraints that tie the selected entities to unselected ones (coincidences, dimensions to other entities and so on) are removed — they would hold the entities back; a message tells how many were removed.

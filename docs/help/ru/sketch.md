@@ -21,7 +21,7 @@ alt: Режим эскиза: панель инструментов эскиза
 ```
 
 1. **Завершить эскиз** (`Enter`).
-2. Инструменты рисования: [линия](sketch-line), [прямоугольники](sketch-rectangle), [окружности](sketch-circle), [дуги](sketch-arc), [сплайн](sketch-spline), [точка](sketch-point), [паз](sketch-slot), [многоугольник](sketch-polygon), [эллипс](sketch-ellipse).
+2. Инструменты рисования: [линия](sketch-line), [прямоугольники](sketch-rectangle), [окружности](sketch-circle), [дуги](sketch-arc), [сплайн](sketch-spline), [точка](sketch-point), [паз](sketch-slot), [многоугольник](sketch-polygon), [эллипс](sketch-ellipse), [текст](sketch-text).
 3. Инструменты правки: [скругление](sketch-fillet), [обрезка](sketch-trim), [удлинение](sketch-extend), [смещение](sketch-offset), [проецирование (Use)](sketch-use).
 4. [Размер](sketch-dimensions), [зеркало](sketch-mirror), [линейный и круговой массив](sketch-pattern).
 5. [Вспомогательная геометрия](#construction) (`Q`).

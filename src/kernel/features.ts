@@ -20,6 +20,7 @@ import { frozenValues, solveSketch } from '../sketch/solver';
 import { projectGeometry, updateUsedEntity } from '../sketch/useGeometry';
 import { computeRegions } from '../sketch/regions';
 import { expandPatterns } from '../sketch/patterns';
+import { expandTexts } from '../sketch/text';
 import {
   bboxOf,
   compoundOf,
@@ -36,6 +37,7 @@ import {
   shapesTouch,
   simplified,
   solidsOf,
+  splitPieces,
   sweepFace,
   translated,
   type Shape3D,
@@ -63,7 +65,7 @@ import { adoptThreads, removePart, setPart, setSurface, type BuildState, type Pa
 import { isoHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
 import { wrapRegion } from './wrap';
-import { allPlanar, deleteFaces, encloses, facePlane, moveFeature, movePlanarFace, reachOf, type Motion, type Plane as FacePlane } from './faceOps';
+import { allPlanar, deleteFaces, encloses, facePlane, moveFeature, movePlanarFace, offsetCylinder, reachOf, type Motion, type Plane as FacePlane } from './faceOps';
 
 export interface FeatureOutput {
   /** Tool body used (for preview colouring). */
@@ -240,8 +242,8 @@ function buildSketch(ctx: Ctx, f: FeatureOf<'sketch'>): FeatureOutput {
     entities = res.entities;
     ok = res.ok;
   }
-  // pattern copies are derived from the solved seed geometry
-  entities = expandPatterns(entities, f.params.patterns, ctx.ec);
+  // pattern copies are derived from the solved seed geometry, the letters of texts — from their solved points
+  entities = expandTexts(expandPatterns(entities, f.params.patterns, ctx.ec));
   const regions = computeRegions(entities);
   ctx.st.sketches.set(f.id, { featureId: f.id, frame, entities, regions, ok, name: f.name });
   if (lostUse) return { warning: 'Some projected (Use) geometry could not be found' };
@@ -356,9 +358,47 @@ function upToDistance(ctx: Ctx, ref: SelRef | undefined, pf: ProfileFace, dir: V
   return v3.dot(v3.sub(pt, pf.frame.origin), dir);
 }
 
+/** Extrude as a surface (Onshape: Surface): sketch curves, open or closed, swept along their sketch's normal. */
+function buildExtrudeSurface(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  const refs = (p.curves ?? []).filter((r) => r.kind === 'sketchEntity');
+  if (!refs.length) fail('Select sketch curves to extrude into a surface');
+  const big = sceneExtent(st);
+  const oc = R.getOC();
+  const faces: R.Face[] = [];
+  for (const r of refs) {
+    if (r.kind !== 'sketchEntity') continue;
+    const n = getSketch(st, r.sketchId).frame.normal;
+    const dir = p.flip ? v3.neg(n) : n;
+    let start = 0;
+    let end = 0;
+    if (p.endType === 'blind') end = len(ctx, p.depth, 'Depth');
+    else if (p.endType === 'symmetric') [start, end] = [-len(ctx, p.depth, 'Depth') / 2, len(ctx, p.depth, 'Depth') / 2];
+    else if (p.endType === 'throughAll') end = big;
+    else fail('A surface extrudes to a depth or through all (not up to a face)');
+    if (p.secondEnd && p.endType !== 'symmetric') {
+      if (p.endType2 === 'blind') start = -len(ctx, p.depth2, 'Second depth');
+      else if (p.endType2 === 'throughAll') start = -big;
+      else fail('A surface extrudes to a depth or through all (not up to a face)');
+    }
+    if (Math.abs(end - start) < 1e-9) fail('Extrude depth must not be zero');
+    for (const e of resolveCurveEdges(st, r)) {
+      const moved = Math.abs(start) > 1e-12 ? R.cast(R.translate(e.wrapped, v3.scale(dir, start))) : e;
+      const mk = new oc.BRepPrimAPI_MakePrism(moved.wrapped, new oc.gp_Vec(...v3.scale(dir, end - start)), false, true);
+      for (const x of R.iterTopo(mk.Shape(), 'face')) faces.push(R.cast(x) as R.Face);
+      mk.delete();
+    }
+  }
+  if (!faces.length) fail('Select sketch curves to extrude into a surface');
+  setSurface(st, newPartId(st, `${ctx.fid}.0`), sewFaces(faces));
+  return {};
+}
+
 function buildExtrude(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
   const p = f.params;
   const st = ctx.st;
+  if (p.bodyType === 'surface') return buildExtrudeSurface(ctx, f);
   const profiles = resolveProfiles(st, p.profiles);
   if (!profiles.length) fail('Select sketch regions or planar faces to extrude');
   const big = sceneExtent(st);
@@ -445,13 +485,10 @@ function draftSides(solid: Shape3D, frame: PlaneFrame, dir: Vec3, angleRad: numb
   return res;
 }
 
-function buildRevolve(ctx: Ctx, f: FeatureOf<'revolve'>): FeatureOutput {
-  const p = f.params;
-  const st = ctx.st;
-  const profiles = resolveProfiles(st, p.profiles);
-  if (!profiles.length) fail('Select sketch regions or planar faces to revolve');
+/** A revolve's axis, its direction (turned for a negative angle), start angle and sweep (degrees, 0…360]. */
+function revolveAngles(ctx: Ctx, p: FeatureOf<'revolve'>['params']) {
   if (!p.axis[0]) fail('Select a revolve axis');
-  const axis = resolveAxis(st, p.axis[0]);
+  const axis = resolveAxis(ctx.st, p.axis[0]);
   let dir = p.flip ? v3.neg(axis.dir) : axis.dir;
   let start = 0;
   let sweep = 360;
@@ -478,7 +515,40 @@ function buildRevolve(ctx: Ctx, f: FeatureOf<'revolve'>): FeatureOutput {
     sweep = -sweep;
     start = -start;
   }
-  sweep = Math.min(sweep, 360);
+  return { axis, dir, start, sweep: Math.min(sweep, 360) };
+}
+
+/** Revolve as a surface (Onshape: Surface): sketch curves and edges, open or closed, turned about the axis. */
+function buildRevolveSurface(ctx: Ctx, f: FeatureOf<'revolve'>): FeatureOutput {
+  const st = ctx.st;
+  const edges = (f.params.curves ?? []).flatMap((r) => resolveCurveEdges(st, r));
+  if (!edges.length) fail('Select sketch curves or edges to revolve into a surface');
+  const { axis, dir, start, sweep } = revolveAngles(ctx, f.params);
+  const oc = R.getOC();
+  const ax = new oc.gp_Ax1(new oc.gp_Pnt(...axis.origin), new oc.gp_Dir(...dir));
+  // off the axis line: an edge lying on it would turn into nothing
+  const offAxis = (q: Vec3) => v3.len(v3.cross(v3.sub(q, axis.origin), dir)) > 1e-7 * Math.max(1, v3.len(q));
+  const faces: R.Face[] = [];
+  for (const e of edges) {
+    if (![e.startPoint, e.pointAt(0.5), e.endPoint].some((q) => offAxis(q.toTuple() as Vec3))) continue;
+    const moved = Math.abs(start) > 1e-9 ? R.cast(R.rotate(e.wrapped, start, axis.origin, dir)) : e;
+    const mk = new oc.BRepPrimAPI_MakeRevol(moved.wrapped, ax, (sweep * Math.PI) / 180, false);
+    for (const x of R.iterTopo(mk.Shape(), 'face')) faces.push(R.cast(x) as R.Face);
+    mk.delete();
+  }
+  ax.delete();
+  if (!faces.length) fail('Select sketch curves or edges to revolve into a surface');
+  setSurface(st, newPartId(st, `${ctx.fid}.0`), sewFaces(faces));
+  return {};
+}
+
+function buildRevolve(ctx: Ctx, f: FeatureOf<'revolve'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  if (p.bodyType === 'surface') return buildRevolveSurface(ctx, f);
+  const profiles = resolveProfiles(st, p.profiles);
+  if (!profiles.length) fail('Select sketch regions or planar faces to revolve');
+  const { axis, dir, start, sweep } = revolveAngles(ctx, p);
   const tools = profiles.map((pf) => {
     let face: R.Face = pf.face;
     if (Math.abs(start) > 1e-9) face = R.cast(R.rotate(face.wrapped, start, axis.origin, dir)) as R.Face;
@@ -522,13 +592,45 @@ function chainWire(edges: R.Edge[]): R.Wire {
   return R.assembleWire(ordered.map((o) => o.e.clone()));
 }
 
+/** Edges grouped by shared end points into connected chains, each an ordered wire. */
+function wireChains(edges: R.Edge[]): R.Wire[] {
+  const ends = edges.map((e) => [e.startPoint.toTuple(), e.endPoint.toTuple()] as Vec3[]);
+  const root = edges.map((_, i) => i);
+  const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i])));
+  const near = (a: Vec3, b: Vec3) => v3.dist(a, b) < 1e-5 * Math.max(1, v3.len(a));
+  for (let i = 0; i < edges.length; i++)
+    for (let j = i + 1; j < edges.length; j++)
+      if (ends[i].some((a) => ends[j].some((b) => near(a, b)))) root[find(j)] = find(i);
+  const groups = new Map<number, R.Edge[]>();
+  edges.forEach((e, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), e]));
+  return [...groups.values()].map(chainWire);
+}
+
+/** Sweep as a surface (Onshape: Surface): chains of profile curves, open or closed, swept along the path. */
+function buildSweepSurface(ctx: Ctx, f: FeatureOf<'sweep'>, spine: R.Wire): FeatureOutput {
+  const st = ctx.st;
+  const p = f.params;
+  const edges = (p.curves ?? []).flatMap((r) => resolveCurveEdges(st, r));
+  if (!edges.length) fail('Select sketch curves or edges to sweep into a surface');
+  const cfg = { frenet: !p.keepOrientation, transitionMode: 'round' as const };
+  const faces: R.Face[] = [];
+  for (const w of wireChains(edges)) {
+    const [shell] = R.genericSweep(w, spine, cfg, true) as [Shape3D, R.Wire, R.Wire];
+    for (const x of R.iterTopo(shell.wrapped, 'face')) faces.push(R.cast(x) as R.Face);
+  }
+  setSurface(st, newPartId(st, `${ctx.fid}.0`), sewFaces(faces));
+  return {};
+}
+
 function buildSweep(ctx: Ctx, f: FeatureOf<'sweep'>): FeatureOutput {
   const p = f.params;
-  const profiles = resolveProfiles(ctx.st, p.profiles);
-  if (!profiles.length) fail('Select profiles to sweep');
+  const surface = p.bodyType === 'surface';
+  const profiles = surface ? [] : resolveProfiles(ctx.st, p.profiles);
+  if (!surface && !profiles.length) fail('Select profiles to sweep');
   if (!p.path.length) fail('Select a sweep path');
   const edges = p.path.flatMap((r) => resolveCurveEdges(ctx.st, r));
   const spine = chainWire(edges);
+  if (surface) return buildSweepSurface(ctx, f, spine);
   const tool = fuseAll(profiles.map((pf) => sweepFace(pf.face, spine, p.keepOrientation)));
   recordTool(ctx.st, ctx.fid, tool, p.op);
   applyBodyOp(ctx.st, ctx.fid, tool, p.op, p);
@@ -954,6 +1056,30 @@ function buildDeleteFace(ctx: Ctx, f: FeatureOf<'deleteFace'>): FeatureOutput {
   return {};
 }
 
+/** Enclose (Onshape): surfaces that close a volume between them sewn into a solid — a new part. */
+function buildEnclose(ctx: Ctx, f: FeatureOf<'enclose'>): FeatureOutput {
+  const p = f.params;
+  const st = ctx.st;
+  const parts = resolveParts(st, p.surfaces);
+  if (!parts.length) fail('Select the surfaces to enclose a volume');
+  if (parts.some((x) => !isSurface(x.shape))) fail('Select surfaces (not solid parts) to enclose a volume');
+  const faces = parts.flatMap((x) => topologyOf(x.shape).faces);
+  let solid: Shape3D;
+  try {
+    solid = R.makeSolid(faces) as Shape3D;
+  } catch {
+    fail('The surfaces do not close a volume: their edges must meet');
+  }
+  const props = R.measureShapeVolumeProperties(solid);
+  const vol = props.volume;
+  props.delete();
+  if (!(Math.abs(vol) > 1e-9)) fail('The surfaces do not close a volume: their edges must meet');
+  if (vol < 0) solid = R.cast(solid.wrapped.Reversed()) as Shape3D;
+  setPart(st, newPartId(st, `${ctx.fid}.0`), solid);
+  if (!p.keep) for (const x of parts) removePart(st, x.id);
+  return {};
+}
+
 /** Offset surface (Onshape): a surface body from faces, offset along their normals (0 — a copy of them). */
 function buildOffsetSurface(ctx: Ctx, f: FeatureOf<'offsetSurface'>): FeatureOutput {
   const p = f.params;
@@ -1016,9 +1142,31 @@ function buildMoveFace(ctx: Ctx, f: FeatureOf<'moveFace'>): FeatureOutput {
   const dist = p.moveType === 'offset' ? len(ctx, p.distance, 'Distance') * sign : 0;
   for (const { part, faces } of groups.values()) {
     let res: Shape3D;
-    if (!motion) {
+    if (!motion && !allPlanar(part.shape, faces)) {
+      // offset of a hole's / boss's wall: its radius changes (one cylinder at a time, planar faces as below)
+      res = part.shape;
+      const planar = faces.filter((i) => topologyOf(part.shape).faceInfo[i].type === 'PLANE');
+      const round = faces.filter((i) => !planar.includes(i)).map((i) => topologyOf(part.shape).faceInfo[i]);
+      if (planar.length)
+        res = toPlanes(res, planar, (i) => {
+          const pl = facePlane(part.shape, i);
+          return { to: { p: v3.add(pl.p, v3.scale(pl.n, dist)), n: pl.n }, reach: Math.abs(dist) };
+        });
+      for (const info of round) {
+        // found again in the shape as it is now (the earlier steps rebuilt it): the same cylinder
+        const topo = topologyOf(res);
+        const onAxis = (x: typeof info) => {
+          if (!x.axis || !x.axisPoint || !info.axis || !info.axisPoint) return false;
+          const a = v3.norm(info.axis);
+          const off = v3.sub(x.axisPoint, info.axisPoint);
+          return Math.abs(Math.abs(v3.dot(v3.norm(x.axis), a)) - 1) < 1e-9 && v3.len(v3.sub(off, v3.scale(a, v3.dot(off, a)))) < 1e-6;
+        };
+        const k = topo.faceInfo.findIndex((x) => x.type === info.type && x.radius !== undefined && Math.abs(x.radius - (info.radius ?? 0)) < 1e-6 && onAxis(x));
+        if (k < 0) fail('Only planar and cylindrical faces can be offset');
+        res = offsetCylinder(res, k, dist);
+      }
+    } else if (!motion) {
       // offset: each planar face along its own normal
-      if (!allPlanar(part.shape, faces)) fail('Only planar faces can be offset: move holes and bosses with Translate or Rotate');
       res = toPlanes(part.shape, faces, (i) => {
         const pl = facePlane(part.shape, i);
         return { to: { p: v3.add(pl.p, v3.scale(pl.n, dist)), n: pl.n }, reach: Math.abs(dist) };
@@ -1096,7 +1244,8 @@ interface HoleDims {
   depth: number;
   tip: number;
   cbore?: { R: number; depth: number };
-  csink?: { R: number; angle: number };
+  /** `recess`: a cylinder of the countersink's diameter that deep above its cone. */
+  csink?: { R: number; angle: number; recess?: number };
   thread?: ThreadSpec & { depth: number };
 }
 
@@ -1117,7 +1266,10 @@ function holeDims(ctx: Ctx, f: FeatureOf<'hole'>, big: number): HoleDims {
   if (p.style === 'countersink') {
     const R = (std ? std.csinkDiameter : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
     if (R <= R0) fail('Countersink diameter must exceed the hole diameter');
-    d.csink = { R, angle: std ? std.csinkAngle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle') };
+    // a cylindrical recess of its diameter above the cone (the countersink sunk deeper)
+    const recess = p.csinkRecess ? len(ctx, p.csinkRecess, 'Recess depth') : 0;
+    if (recess < 0) fail('Recess depth must not be negative');
+    d.csink = { R, angle: std ? std.csinkAngle / DEG : ang(ctx, p.csinkAngle, 'Countersink angle'), recess };
   } else if (p.style === 'counterdrill' && d.cbore) {
     // a countersink at the counterbore's mouth (Onshape Counterdrill); ISO: a 0.5 mm × 45° chamfer of it
     const R = (std ? std.cboreDiameter + 1 : len(ctx, p.csinkDiameter, 'Countersink diameter')) / 2;
@@ -1148,7 +1300,10 @@ function holeTool(d: HoleDims, p0: Vec3, drill: Vec3): Shape3D {
     pts.push([d.cbore.R, eps], [d.cbore.R, -d.cbore.depth], [R0, -d.cbore.depth]);
   } else if (d.csink) {
     const h = (d.csink.R - R0) / Math.tan(d.csink.angle / 2);
-    pts.push([d.csink.R + eps * Math.tan(d.csink.angle / 2), eps], [R0, -h]);
+    const r = d.csink.recess ?? 0;
+    // with a recess: straight down its depth, then the cone
+    if (r > 1e-9) pts.push([d.csink.R, eps], [d.csink.R, -r], [R0, -r - h]);
+    else pts.push([d.csink.R + eps * Math.tan(d.csink.angle / 2), eps], [R0, -h]);
   } else {
     pts.push([R0, eps]);
   }
@@ -1184,7 +1339,7 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
   if (dims.thread) {
     const th = dims.thread;
     // the thread starts below a counterbore / countersink, where the hole has its own diameter
-    const start = dims.cbore ? dims.cbore.depth : dims.csink ? (dims.csink.R - dims.R0) / Math.tan(dims.csink.angle / 2) : 0;
+    const start = dims.cbore ? dims.cbore.depth : dims.csink ? (dims.csink.recess ?? 0) + (dims.csink.R - dims.R0) / Math.tan(dims.csink.angle / 2) : 0;
     at.forEach((a, i) => {
       // as far as there is material around the hole (a through hole: to where it comes out)
       const run = materialRun(ctx.st, a.pt, a.drill, (dims.R0 + th.major / 2) / 2, start, start + th.depth);
@@ -1535,19 +1690,32 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
   const st = ctx.st;
   const tools = resolveParts(st, p.tools);
   if (!tools.length) fail('Select tool parts');
+  const surfaces = tools.filter((t) => isSurface(t.shape)).length;
+  if (surfaces && p.op !== 'union') fail('Tools must be parts: split a surface with another surface');
+  if (surfaces && surfaces < tools.length) fail('Surfaces combine with surfaces and parts with parts');
   if (p.op === 'union') {
     if (tools.length < 2) fail('Select at least two parts to union');
-    const acc = fuseAll(tools.map((t) => t.shape));
     tools.slice(1).forEach((t) => {
       adoptThreads(st, t.id, tools[0].id);
       removePart(st, t.id);
     });
-    replacePart(st, tools[0].id, acc, ctx.fid);
+    // surfaces: sewn into one along the edges where they meet (Onshape: Union of surfaces)
+    if (surfaces) setPart(st, tools[0].id, sewFaces(tools.flatMap((t) => t.shape.faces)));
+    else replacePart(st, tools[0].id, fuseAll(tools.map((t) => t.shape)), ctx.fid);
   } else if (p.op === 'subtract') {
     const targets = resolveParts(st, p.targets).filter((t) => !tools.some((x) => x.id === t.id));
     if (!targets.length) fail('Select target parts');
     const tool = fuseAll(tools.map((t) => t.shape));
-    for (const t of targets) replacePart(st, t.id, simplified(t.shape.cut(tool)), ctx.fid);
+    for (const t of targets) {
+      if (!isSurface(t.shape)) {
+        replacePart(st, t.id, simplified(t.shape.cut(tool)), ctx.fid);
+        continue;
+      }
+      // a surface (a lone face too — in a compound) keeps what lies outside the tools; none left — it is gone
+      const cut = (R.makeCompound([t.shape.clone()]) as Shape3D).cut(tool);
+      if (cut.faces.length) setPart(st, t.id, cut);
+      else removePart(st, t.id);
+    }
     if (!p.keepTools) tools.forEach((t) => removePart(st, t.id));
   } else {
     if (tools.length < 2) fail('Select at least two parts to intersect');
@@ -1566,22 +1734,49 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
 function buildSplit(ctx: Ctx, f: FeatureOf<'split'>): FeatureOutput {
   const p = f.params;
   const st = ctx.st;
-  const parts = resolveParts(st, p.parts);
+  const ref = p.tool[0];
+  if (!ref) fail('Select a plane, face or surface to split with');
+  // a surface (the whole body) or a face used as it is; a plane, mate connector or planar face — its whole plane
+  const toolPart = ref.kind === 'part' ? st.parts.get(ref.partId) : undefined;
+  if (ref.kind === 'part' && (!toolPart || !isSurface(toolPart.shape))) fail('Split with a surface, not a part: select a face of the part');
+  const asFace = ref.kind === 'face' && (p.trim || ref.sig.type !== 'PLANE');
+  const parts = resolveParts(st, p.parts).filter((x) => x.id !== toolPart?.id);
   if (!parts.length) fail('Select parts to split');
-  if (!p.tool[0]) fail('Select a plane or planar face to split with');
-  const fr = resolvePlaneRef(st, p.tool[0]);
-  const plane = frameToPlane(fr);
   let splitAny = false;
+  const fr = toolPart || asFace ? null : resolvePlaneRef(st, ref);
+  const toolShape = toolPart ? toolPart.shape : asFace ? resolveFace(st, ref).face : null;
   for (const part of parts) {
-    const res = part.shape.split(plane);
-    const pos = res.positive ? solidsOf(res.positive) : [];
-    const neg = res.negative ? solidsOf(res.negative) : [];
-    if (!pos.length || !neg.length) continue;
+    let pieces: Shape3D[];
+    if (fr && !isSurface(part.shape)) {
+      const res = part.shape.split(frameToPlane(fr));
+      const pos = res.positive ? solidsOf(res.positive) : [];
+      const neg = res.negative ? solidsOf(res.negative) : [];
+      if (!pos.length || !neg.length) continue;
+      pieces = [compoundOf(pos), ...neg];
+    } else if (fr) {
+      // a surface by a plane: a face of the plane over the part, the side the normal points to first
+      const [lo, hi] = bboxOf(part.shape);
+      const c = v3.scale(v3.add(lo, hi), 0.5);
+      const at = v3.sub(c, v3.scale(fr.normal, v3.dot(v3.sub(c, fr.origin), fr.normal)));
+      const h = v3.dist(lo, hi) + 1;
+      const corner = (a: number, b: number) => v3.add(at, v3.add(v3.scale(fr.xDir, a * h), v3.scale(fr.yDir, b * h)));
+      const sheet = R.makePolygon([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]);
+      const side = (s: Shape3D) => {
+        const [a, b] = bboxOf(s);
+        return v3.dot(v3.sub(v3.scale(v3.add(a, b), 0.5), fr.origin), fr.normal);
+      };
+      pieces = splitPieces(part.shape, sheet);
+      pieces.sort((a, b) => side(b) - side(a));
+    } else pieces = splitPieces(part.shape, toolShape!);
+    if (pieces.length < 2) continue;
     splitAny = true;
-    replacePart(st, part.id, compoundOf(pos), ctx.fid);
-    neg.forEach((s, i) => setPart(st, newPartId(st, `${part.id}~${ctx.fid}.${i}`), s));
+    const surface = isSurface(part.shape);
+    if (surface) setPart(st, part.id, pieces[0]);
+    else replacePart(st, part.id, pieces[0], ctx.fid);
+    pieces.slice(1).forEach((s, i) => (surface ? setSurface : setPart)(st, newPartId(st, `${part.id}~${ctx.fid}.${i}`), s));
   }
   if (!splitAny) fail('The split tool does not intersect the selected parts');
+  if (toolPart && !p.keepTools) removePart(st, toolPart.id);
   return {};
 }
 
@@ -1872,6 +2067,8 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildReplaceFace(ctx, feature);
     case 'offsetSurface':
       return buildOffsetSurface(ctx, feature);
+    case 'enclose':
+      return buildEnclose(ctx, feature);
     case 'hole':
       return buildHole(ctx, feature);
     case 'linearPattern':

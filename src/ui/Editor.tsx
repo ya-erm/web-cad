@@ -28,6 +28,11 @@ import { Icon } from './icons';
 import { t } from '../i18n';
 import { AppSettingsItems } from './AppSettings';
 import { VersionBanner, VersionsButton } from './VersionsPanel';
+
+/** The build's commit (none: a dev server started before the version was defined — restart it). */
+const BUILD = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : { date: '', sha: '' };
+/** The app's version in the status bar: the build's commit date and hash ("dev" — the development server). */
+const APP_VERSION = [BUILD.date, BUILD.sha, import.meta.env.DEV ? 'dev' : ''].filter(Boolean).join(' · ');
 import { contextHelpPage, openHelp } from '../help/context';
 
 /** A document that is a file of a folder on the computer: its file, or a button to allow writing it again. */
@@ -265,6 +270,9 @@ function BottomBar() {
         )}
         {building ? <div className="spinner" /> : build && <span>{Math.round(build.timeMs)} ms</span>}
         <span>{doc.units.length}</span>
+        <span className="app-version" title={`${t('App version')}: ${APP_VERSION}${import.meta.env.DEV ? ` (${t('development server')})` : ''}`}>
+          {APP_VERSION}
+        </span>
       </div>
     </div>
   );

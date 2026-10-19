@@ -8,7 +8,7 @@ export type Vec3 = [number, number, number];
 // Sketch
 // ---------------------------------------------------------------------------
 
-export type SkEntityType = 'point' | 'line' | 'circle' | 'arc' | 'ellipse' | 'spline';
+export type SkEntityType = 'point' | 'line' | 'circle' | 'arc' | 'ellipse' | 'spline' | 'text';
 
 interface SkEntityBase {
   id: string;
@@ -71,7 +71,23 @@ export interface SkSpline extends SkEntityBase {
   h1?: string;
 }
 
-export type SkEntity = SkPoint | SkLine | SkCircle | SkArc | SkEllipse | SkSpline;
+/** Fonts of sketch text (bundled, SIL OFL): Inter, Inter SemiBold, JetBrains Mono. */
+export type SkFont = 'sans' | 'sansBold' | 'mono';
+
+/**
+ * Onshape Text: a line of text laid out from `p1` (the start of its baseline) along the direction square to
+ * p1 → p2 (to its right); |p2 − p1| is the height of its capital letters. The glyph outlines are derived
+ * geometry (lines and Bézier spans, like pattern copies) — they make regions; the solver sees only the two points.
+ */
+export interface SkText extends SkEntityBase {
+  type: 'text';
+  text: string;
+  font: SkFont;
+  p1: string;
+  p2: string;
+}
+
+export type SkEntity = SkPoint | SkLine | SkCircle | SkArc | SkEllipse | SkSpline | SkText;
 export type SkCurve = SkLine | SkCircle | SkArc | SkEllipse | SkSpline;
 
 export type ConstraintType =
@@ -214,6 +230,10 @@ export interface MergeScope {
 }
 
 export interface ExtrudeParams extends MergeScope {
+  /** Onshape: Solid (regions → a solid) or Surface (sketch curves, open or not → a surface body). None — solid. */
+  bodyType?: 'solid' | 'surface';
+  /** Surface: the sketch curves to extrude. */
+  curves?: SelRef[];
   op: BoolOp;
   profiles: SelRef[];
   endType: 'blind' | 'symmetric' | 'throughAll' | 'upToFace';
@@ -233,6 +253,10 @@ export interface ExtrudeParams extends MergeScope {
 }
 
 export interface RevolveParams extends MergeScope {
+  /** Onshape: Solid (regions) or Surface (sketch curves and edges, open or not → a surface body). None — solid. */
+  bodyType?: 'solid' | 'surface';
+  /** Surface: the curves to revolve. */
+  curves?: SelRef[];
   op: BoolOp;
   profiles: SelRef[];
   axis: SelRef[];
@@ -243,6 +267,10 @@ export interface RevolveParams extends MergeScope {
 }
 
 export interface SweepParams extends MergeScope {
+  /** Onshape: Solid (regions) or Surface (sketch curves and edges, open or not → a surface body). None — solid. */
+  bodyType?: 'solid' | 'surface';
+  /** Surface: the profile curves. */
+  curves?: SelRef[];
   op: BoolOp;
   profiles: SelRef[];
   path: SelRef[];
@@ -291,6 +319,13 @@ export interface DeleteFaceParams {
   faces: SelRef[];
   /** None — on (heal). */
   heal?: boolean;
+}
+
+/** Onshape Enclose: surfaces that close a volume between them sewn into a solid (a new part). */
+export interface EncloseParams {
+  surfaces: SelRef[];
+  /** The surfaces stay (by default they are used up). */
+  keep: boolean;
 }
 
 /** Onshape Offset surface: a surface body offset from faces (0 — a copy of them). */
@@ -345,6 +380,8 @@ export interface HoleParams {
   cboreDepth: string;
   csinkDiameter: string;
   csinkAngle: string;
+  /** Countersink: a cylindrical recess of the countersink's diameter this deep above the cone (none / 0 — no recess). */
+  csinkRecess?: string;
   tipAngle: string;
   scopeAll: boolean;
   scope: SelRef[];
@@ -456,10 +493,14 @@ export interface BooleanParams {
   keepTools: boolean;
 }
 
+/** Split parts or surfaces with a plane, a face or a surface (a planar face — its whole plane unless `trim`). */
 export interface SplitParams {
   parts: SelRef[];
   tool: SelRef[];
+  /** A surface tool stays (otherwise it is used up). */
   keepTools: boolean;
+  /** A planar face splits only within its edges (Onshape: Trim to face boundaries). */
+  trim?: boolean;
 }
 
 /**
@@ -603,6 +644,7 @@ export interface FeatureParamsMap {
   moveFace: MoveFaceParams;
   replaceFace: ReplaceFaceParams;
   offsetSurface: OffsetSurfaceParams;
+  enclose: EncloseParams;
   hole: HoleParams;
   linearPattern: LinearPatternParams;
   circularPattern: CircularPatternParams;

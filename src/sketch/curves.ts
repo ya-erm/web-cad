@@ -253,6 +253,8 @@ export type BBox = [number, number, number, number];
 export function entityPrim(ent: SkEntity, map: EntityMap, perSpan = 16): Prim | null {
   switch (ent.type) {
     case 'point':
+    // a text is drawn and cut by its letters (derived lines and Bézier spans), not by itself
+    case 'text':
       return null;
     case 'line':
       return { kind: 'seg', a: pointOf(map, ent.p1), b: pointOf(map, ent.p2) };

@@ -10,6 +10,10 @@ Builds ribs from sketch curves, like Onshape's Rib: each curve becomes a wall of
 2. Click **Rib** and select the sketch curves.
 3. Set the **Thickness** and the **Rib direction**, click ✓ (`Enter`).
 
+![Triangular gusset joins the bracket base to its wall](../images/rib-result.png)
+
+A 40 × 30 mm base, 5 mm thick, with a 30 mm high wall. A line on **Front** runs from the wall to the base. A **4 mm** rib **parallel to the sketch plane** fills the corner and merges with the bracket.
+
 ## Options {#options}
 
 | Field | Description |

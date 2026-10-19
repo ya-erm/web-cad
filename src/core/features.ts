@@ -18,6 +18,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   moveFace: 'Move face',
   replaceFace: 'Replace face',
   offsetSurface: 'Offset surface',
+  enclose: 'Enclose',
   hole: 'Hole',
   linearPattern: 'Linear pattern',
   circularPattern: 'Circular pattern',
@@ -88,6 +89,7 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
     draft: () => ({ neutral: [], faces: [], angle: '3 deg', flip: false }),
     deleteFace: () => ({ faces: [], heal: true }),
     offsetSurface: () => ({ faces: [], distance: '0 mm', flip: false }),
+    enclose: () => ({ surfaces: [], keep: false }),
     moveFace: () => ({ faces: [], moveType: 'offset', distance: '2 mm', flip: false, direction: [], axis: [], angle: '15 deg' }),
     replaceFace: () => ({ faces: [], target: [], offset: '0 mm', flip: false }),
     hole: () => ({
@@ -100,6 +102,7 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
       cboreDepth: '4 mm',
       csinkDiameter: '10 mm',
       csinkAngle: '90 deg',
+      csinkRecess: '0 mm',
       tipAngle: '118 deg',
       scopeAll: true,
       scope: [],

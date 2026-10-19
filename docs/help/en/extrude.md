@@ -34,6 +34,17 @@ width: 600
 | **Second end position** | Also extrudes to the opposite side of the sketch plane; the second direction has its own **End type** (**Blind**, **Up to face**, **Through all**) and **Depth**. Not available for **Symmetric**. |
 | **Merge with all** / **Merge scope** | For **Add**, **Remove**, **Intersect**: the parts to apply the operation to. |
 
+## Surface {#surface}
+
+The **Solid / Surface** switch at the top of the dialog. As a **Surface** the extrude takes **Sketch curves** instead of regions — open ones too (a line, a polyline, an arc): a [surface](offset-surface#surfaces) "Surface N" with no thickness comes out. The end is **Blind**, **Symmetric** or **Through all** (and a second end); thin walls, draft and Booleans do not apply to a surface. Surfaces can be [thickened](thicken) or [enclosed into a solid](enclose).
+
+```figure
+image: ../images/extrude-surface-result.png
+alt: Surface from an open polyline extruded 20 mm
+caption: An open three-segment polyline extruded 20 mm in Surface mode makes three connected faces without thickness. Apply Thicken afterwards to make a solid wall.
+width: 650
+```
+
 ## Tips {#tips}
 
 - **Remove** + **Through all** is a quick way to make a through cut. For round holes, [Hole](hole) is more convenient.

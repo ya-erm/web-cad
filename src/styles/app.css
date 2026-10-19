@@ -1467,6 +1467,10 @@ textarea {
   padding: 0 12px;
   color: var(--text-2);
 }
+.status .app-version {
+  color: var(--text-3);
+  font-size: 11px;
+}
 .status .sk-state {
   font-weight: 600;
 }

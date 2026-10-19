@@ -9,6 +9,12 @@ A direct edit, like Onshape's Delete face with Heal: the selected faces are remo
 1. Select faces and click **Delete face** (or click the button and select the faces).
 2. Click ✓ (`Enter`).
 
+| Before: Ø8 mm through hole | After deleting with healing |
+|---|---|
+| ![Plate with a hole left of centre](../images/direct-before.png) | ![The hole filled with material](../images/delete-face-after.png) |
+
+Select the **inside wall of the hole**, rather than the plate's top face. Outside dimensions remain 40 × 30 × 10 mm.
+
 ## What can be deleted {#what}
 
 | Selection | Result |
@@ -29,6 +35,10 @@ The boundary of the selected faces must close in loops over the faces around it 
 ## Without healing {#no-heal}
 
 Clear **Heal** and the selected faces simply go: the part becomes a [surface](offset-surface#surfaces) of the faces left (as Delete face without Heal in Onshape). That opens a part up, say, to build on its faces and [thicken](thicken) the shell afterwards.
+
+![Block with its top face removed](../images/open-surface-result.png)
+
+The top was deleted without healing. This is an open surface **with no wall thickness**. For a hollow solid with thick walls use [Shell](shell).
 
 ## See also {#see-also}
 

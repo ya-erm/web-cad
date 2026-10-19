@@ -17,6 +17,13 @@ Example: a motor is modelled in the first Part Studio and a mount is designed in
 7. If needed, choose a **Location (mate connector)** — a [mate connector](mate-connector) of the current Part Studio, see [below](#location).
 8. Click ✓ (`Enter`). The parts appear in the **Parts** list with their names and colours from the source, the sketches in the graphics area.
 
+```figure
+image: ../images/derived-dialog.jpg
+alt: Derived dialog with Motor as its source
+caption: The source is this document’s current state, Part Studio Motor. Checked parts are linked; sketches are selected separately. Choose a saved version instead of the current state for a fixed snapshot.
+width: 350
+```
+
 ## Versions and other documents {#versions}
 
 Parts can come not only from the document's current state but from a saved [version](versions) — of this document or another one (as in Onshape: the parts of other documents are derived through their versions). In the **Source** field this document's versions are grouped under **Versions of this document**, other documents' versions under their names. When no document has versions, there is no **Source** field.
@@ -41,6 +48,13 @@ Without a location, the parts and sketches stand where they stand in the source.
 - The **Derived** feature is an ordinary history feature: edit it (double-click — another source or other parts), suppress, delete, undo and redo it.
 - The link is one way: operations of the current Part Studio do not change the source. To change a derived part, change it in its source.
 - References to the faces and edges of derived parts hold across rebuilds as long as the source part keeps its identity (it is not deleted or re-created by another feature).
+
+```figure
+image: ../images/derived-result.png
+alt: Blue source motor and orange mounting plate
+caption: Motor is linked into Mount, where a separate 60 × 60 × 5 mm plate is built on its top face. Four holes are projected with Use and continue through the plate.
+width: 700
+```
 
 ## Errors {#errors}
 

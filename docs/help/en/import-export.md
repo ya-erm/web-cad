@@ -27,10 +27,10 @@ width: 460
 
 On an [assembly](assembly) tab, **Export** opens **Export assembly**: the same formats, for the instances where they stand in the assembly — the selected ones, or every shown instance when nothing is selected.
 
-- **STEP** — with the product tree, as Onshape writes it: the assembly is a product whose components are the instances (“Pin <1>”, “Pin <2>”…); each part is written once — with its name, color and exact geometry — and every instance places it; a [sub-assembly](assembly#subassemblies) is a product of its own inside. Other CAD systems open it as an assembly.
+- **STEP** — with the product tree, as Onshape writes it: the assembly is a product whose components are the instances (“Pin <1>”, “Pin <2>”…); each part is written once — with its name, color and exact geometry — and every instance places it; a [sub-assembly](assembly-subassemblies#subassemblies) is a product of its own inside. Other CAD systems open it as an assembly.
 - **STL** — all instances as one mesh; **OBJ** and **3MF** — one object per instance.
 
-An open [exploded view](assembly#exploded) does not affect the export: the instances are written where the assembly places them.
+An open [exploded view](assembly-exploded#exploded) does not affect the export: the instances are written where the assembly places them.
 
 ## Exporting a sketch to DXF {#export-dxf}
 

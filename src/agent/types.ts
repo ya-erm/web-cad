@@ -6,7 +6,7 @@
 // Angles are numbers in degrees or expression strings ("30 deg"). World axes follow Onshape:
 // Top = XY plane (normal +Z), Front = XZ (sketch y = +Z), Right = YZ (sketch x = +Y, y = +Z).
 
-import type { BoolOp, FeatureType } from '../core/types';
+import type { BoolOp, FeatureType, SkFont } from '../core/types';
 
 export type Num = number | string;
 export type Pt2 = [Num, Num];
@@ -89,7 +89,13 @@ export type Shape =
   | { type: 'slot'; from: Pt2; to: Pt2; r: Num; construction?: boolean }
   /** r: radius of the construction circle — through the vertices, or with `inscribed` touching the sides (half the across-flats size). */
   | { type: 'polygon'; c?: Pt2; r: Num; sides: number; rotation?: number; inscribed?: boolean; construction?: boolean }
-  | { type: 'point'; at: Pt2 };
+  | { type: 'point'; at: Pt2 }
+  /**
+   * A line of text (Onshape Text): its baseline from `at` (default the origin), capital letters `height` tall,
+   * turned by `rotation` degrees; fonts: `sans` (Inter, default), `sansBold` (Inter SemiBold), `mono` (JetBrains Mono).
+   * Its letters are regions: `regions: "auto"` takes the letters without their counters (the inside of "O").
+   */
+  | { type: 'text'; text: string; at?: Pt2; height: Num; rotation?: number; font?: SkFont; construction?: boolean };
 
 /** Which closed regions of a sketch to use: 'auto' skips islands inside holes. */
 export type Regions = 'auto' | 'all' | Pt2[];
@@ -104,6 +110,8 @@ export type AgentOp =
       op: 'extrude';
       sketch?: string;
       regions?: Regions;
+      /** A surface (Onshape: Surface) from the sketch's curves (open ones too) instead of a solid from its regions. */
+      surface?: boolean;
       depth?: Num;
       end?: 'blind' | 'symmetric' | 'throughAll' | { upToFace: FaceQuery };
       flip?: boolean;
@@ -111,7 +119,26 @@ export type AgentOp =
       draft?: Num;
       thin?: Num;
     })
-  | (Named & { op: 'revolve'; sketch?: string; regions?: Regions; axis: AxisSpec; angle?: Num; boolean?: BoolOp })
+  /** `surface` — a surface from the sketch's curves (open ones too; those on the axis are skipped) instead of a solid. */
+  | (Named & { op: 'revolve'; sketch?: string; regions?: Regions; surface?: boolean; axis: AxisSpec; angle?: Num; boolean?: BoolOp })
+  /**
+   * Sweep a sketch's regions (`surface` — its curves, open or closed, into a surface) along a path: the curves of
+   * another sketch or model edges, one chain; `keepOrientation` — the profile keeps its turn along the path.
+   */
+  | (Named & {
+      op: 'sweep';
+      sketch?: string;
+      regions?: Regions;
+      surface?: boolean;
+      path: { sketch: string } | { edges: Edges };
+      keepOrientation?: boolean;
+      boolean?: BoolOp;
+    })
+  /**
+   * Onshape Split: parts or surfaces (`parts`) cut by `tool` — a plane (a planar face: its whole plane unless `trim`),
+   * any face, or a surface body (`{ surface }`, used up unless `keepTools`). The first piece keeps the name.
+   */
+  | (Named & { op: 'split'; parts: Parts; tool: PlaneSpec | { surface: PartQuery }; trim?: boolean; keepTools?: boolean })
   /** `tangentPropagation: false` — only the selected edges, not the edges tangent to them (by default it runs on). */
   | (Named & {
       op: 'fillet';
@@ -139,6 +166,8 @@ export type AgentOp =
   | (Named & { op: 'deleteFace'; faces: Faces; heal?: boolean })
   /** Onshape Offset surface: a surface body offset from faces along their normals (0 — a copy; + out of the material). */
   | (Named & { op: 'offsetSurface'; faces: Faces; distance?: Num; flip?: boolean })
+  /** Onshape Enclose: surfaces (by name) that close a volume sewn into a solid; `keep` — the surfaces stay. */
+  | (Named & { op: 'enclose'; surfaces: Parts; keep?: boolean })
   /** Thicken surfaces (by name) or faces into solids, `thickness` along their normals (`flip` — the other way). */
   | (Named & { op: 'thicken'; surfaces?: Parts; faces?: Faces; thickness: Num; flip?: boolean; boolean?: BoolOp })
   /**
@@ -158,6 +187,8 @@ export type AgentOp =
       /** counterdrill — a counterbore with a countersink at its mouth (cbore… and csink… sizes). */
       style?: 'simple' | 'counterbore' | 'countersink' | 'counterdrill';
       csinkAngle?: Num;
+      /** countersink: a cylindrical recess of its diameter this deep above the cone. */
+      csinkRecess?: Num;
       cboreDiameter?: Num;
       cboreDepth?: Num;
       csinkDiameter?: Num;

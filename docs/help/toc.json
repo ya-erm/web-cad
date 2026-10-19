@@ -43,6 +43,7 @@
         { "id": "sketch-slot", "icon": "slot", "title": { "ru": "Паз", "en": "Slot" } },
         { "id": "sketch-polygon", "icon": "polygon", "title": { "ru": "Многоугольник", "en": "Polygon" } },
         { "id": "sketch-ellipse", "icon": "ellipse", "title": { "ru": "Эллипс", "en": "Ellipse" } },
+        { "id": "sketch-text", "icon": "sketchText", "title": { "ru": "Текст", "en": "Text" } },
         { "id": "sketch-fillet", "icon": "sketchFillet", "title": { "ru": "Скругление в эскизе", "en": "Sketch fillet" } },
         { "id": "sketch-trim", "icon": "trim", "title": { "ru": "Обрезка", "en": "Trim" } },
         { "id": "sketch-extend", "icon": "extend", "title": { "ru": "Удлинение", "en": "Extend" } },
@@ -103,6 +104,7 @@
         { "id": "replace-face", "icon": "replaceFace", "title": { "ru": "Заменить грань", "en": "Replace face" } },
         { "id": "delete-face", "icon": "deleteFace", "title": { "ru": "Удалить грань", "en": "Delete face" } },
         { "id": "offset-surface", "icon": "offsetSurface", "title": { "ru": "Смещение поверхности", "en": "Offset surface" } },
+        { "id": "enclose", "icon": "enclose", "title": { "ru": "Сшить в тело", "en": "Enclose" } },
         { "id": "hole", "icon": "hole", "title": { "ru": "Отверстие", "en": "Hole" } },
         { "id": "linear-pattern", "icon": "linearPattern", "title": { "ru": "Линейный массив", "en": "Linear pattern" } },
         { "id": "circular-pattern", "icon": "circularPattern", "title": { "ru": "Круговой массив", "en": "Circular pattern" } },
@@ -123,7 +125,18 @@
     {
       "id": "assemblies",
       "title": { "ru": "Сборки", "en": "Assemblies" },
-      "pages": [{ "id": "assembly", "icon": "assembly", "title": { "ru": "Сборка", "en": "Assembly" } }]
+      "pages": [{
+        "id": "assembly", "icon": "assembly", "title": { "ru": "Сборка", "en": "Assembly" },
+        "children": [
+          {"id":"assembly-instances","icon":"assembly","title":{"ru":"Экземпляры и фиксация","en":"Instances and fixing"}},
+          {"id":"assembly-movement","icon":"assembly","title":{"ru":"Перемещение и триада","en":"Moving instances and the triad"}},
+          {"id":"assembly-mates","icon":"assembly","title":{"ru":"Сопряжения","en":"Mates"}},
+          {"id":"assembly-subassemblies","icon":"assembly","title":{"ru":"Подсборки","en":"Sub-assemblies"}},
+          {"id":"assembly-motion","icon":"assembly","title":{"ru":"Движение, группы и связи","en":"Motion, groups and relations"}},
+          {"id":"assembly-exploded","icon":"assembly","title":{"ru":"Разнесённые виды","en":"Exploded views"}},
+          {"id":"assembly-bom","icon":"assembly","title":{"ru":"Спецификация сборки","en":"Bill of materials"}}
+        ]
+      }]
     },
     {
       "id": "drawings",

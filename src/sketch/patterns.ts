@@ -174,6 +174,9 @@ function instanceEntities(p: SkPattern, map: EntityMap, inst: PatternInstance, s
         });
         break;
       }
+      case 'text':
+        out.push(pt(e.p1, owner), pt(e.p2, owner), { id: owner, type: 'text', text: e.text, font: e.font, p1: cid(e.p1), p2: cid(e.p2), ...cons });
+        break;
     }
   }
   return out;

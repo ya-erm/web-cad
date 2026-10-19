@@ -4,7 +4,8 @@
 
 import { setOC } from 'replicad';
 import opencascade from 'replicad-opencascadejs';
-import type { AssemblyTab, CadDocument, Feature, PartStudioTab, ProjectVersion, SelRef } from '../core/types';
+import type { AssemblyTab, CadDocument, Feature, PartStudioTab, ProjectVersion, SelRef, SkFont } from '../core/types';
+import { FONT_FILES, fontsLoaded, registerFont } from '../sketch/text';
 import { buildDerivedSources, setVersionSnapshot, sourceUnits } from '../core/derived';
 import { docId, uid } from '../core/ids';
 import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/build';
@@ -19,12 +20,21 @@ import type { AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } fr
 
 let ocReady: Promise<void> | null = null;
 
-/** Load the OpenCascade WASM once (path to replicad_single.wasm). */
+/** Load the OpenCascade WASM once (path to replicad_single.wasm), and the fonts of sketch text. */
 export function initOpenCascade(wasmPath: string): Promise<void> {
   if (!ocReady)
     ocReady = (async () => {
       const oc = await opencascade({ locateFile: () => wasmPath } as never);
       setOC(oc);
+      if (!fontsLoaded()) {
+        // Node only (the app's types have no Node): the font files next to the module
+        const fsModule = 'node:fs/promises';
+        const { readFile } = (await import(/* @vite-ignore */ fsModule)) as { readFile(p: URL): Promise<Uint8Array> };
+        for (const [k, url] of Object.entries(FONT_FILES)) {
+          const buf = await readFile(url);
+          registerFont(k as SkFont, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+        }
+      }
     })();
   return ocReady;
 }

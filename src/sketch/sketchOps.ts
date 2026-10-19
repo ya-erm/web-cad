@@ -1,6 +1,6 @@
 // Pure editing operations on sketch data (used with immer drafts).
 
-import type { ConstraintType, SkArc, SkConstraint, SkEntity, SkLine, SkPoint, SkSpline, SketchData, Vec2 } from '../core/types';
+import type { ConstraintType, SkArc, SkConstraint, SkEntity, SkFont, SkLine, SkPoint, SkSpline, SkText, SketchData, Vec2 } from '../core/types';
 import { uid } from '../core/ids';
 import { arcAngles, entityMap, intersectEntities, naturalHandles, pointOf, type EntityMap } from './curves';
 import { cleanPatterns, copyId, isCopyId, parseCopyId } from './patterns';
@@ -125,6 +125,20 @@ export function addBezier(d: SketchData, p0: Vec2, c1: Vec2, c2: Vec2, p3: Vec2,
   const h0 = addSplineHandle(d, s.id, 'h0', c1);
   const h1 = addSplineHandle(d, s.id, 'h1', c2);
   return { ...s, h0, h1 };
+}
+
+/**
+ * A line of text (Onshape Text) from the start of its baseline `p1`; `p2` is the top of its box's left side —
+ * |p2 − p1| is the height of its capital letters, and the text runs square to p1 → p2, to its right.
+ */
+export function addText(d: SketchData, p1: Vec2, p2: Vec2, text: string, font: SkFont = 'sans', construction = false) {
+  const id = uid('t');
+  const a = addPoint(d, p1, id);
+  const b = addPoint(d, p2, id);
+  const e: SkText = { id, type: 'text', text, font, p1: a, p2: b };
+  if (construction) e.construction = true;
+  d.entities.push(e);
+  return { id, p1: a, p2: b };
 }
 
 /**
@@ -750,6 +764,11 @@ export function copyEntities(
           const nh = addSplineHandle(d, s.id, k, xf(P(h)));
           if (nh) map.set(h, nh);
         }
+        break;
+      }
+      case 'text': {
+        const t = addText(d, xf(P(e.p1)), xf(P(e.p2)), e.text, e.font, cons);
+        map.set(e.id, t.id).set(e.p1, t.p1).set(e.p2, t.p2);
         break;
       }
     }

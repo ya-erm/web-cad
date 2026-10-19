@@ -51,17 +51,20 @@ const POINT: SelToken[] = ['sketchPoint', 'vertex', 'origin', 'circularEdge', 'm
 export const FIELD_SPECS: FieldSpecs = {
   extrude: {
     profiles: { label: 'Faces and sketch regions to extrude', accepts: PROFILE },
+    curves: { label: 'Sketch curves', accepts: ['sketchCurve'] },
     upTo: { label: 'Up to', accepts: ['planarFace', 'plane', 'vertex', 'sketchPoint'], max: 1 },
     upTo2: { label: 'Up to', accepts: ['planarFace', 'plane', 'vertex', 'sketchPoint'], max: 1 },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
   revolve: {
     profiles: { label: 'Faces and sketch regions to revolve', accepts: PROFILE },
+    curves: { label: 'Sketch curves and edges', accepts: ['sketchCurve', 'edge'] },
     axis: { label: 'Revolve axis', accepts: AXIS, max: 1 },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
   sweep: {
     profiles: { label: 'Faces and sketch regions to sweep', accepts: PROFILE },
+    curves: { label: 'Sketch curves and edges', accepts: ['sketchCurve', 'edge'] },
     path: { label: 'Path', accepts: ['sketchCurve', 'edge'] },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
@@ -74,6 +77,7 @@ export const FIELD_SPECS: FieldSpecs = {
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
   offsetSurface: { faces: { label: 'Faces to offset', accepts: ['face'] } },
+  enclose: { surfaces: { label: 'Surfaces to enclose', accepts: ['part'] } },
   fillet: {
     edges: { label: 'Edges and faces to fillet', accepts: ['edge', 'face'] },
     vertices: { label: 'Vertices with their own radius', accepts: ['vertex'], parallel: 'vertexRadii' },
@@ -129,8 +133,8 @@ export const FIELD_SPECS: FieldSpecs = {
     targets: { label: 'Targets', accepts: ['part'] },
   },
   split: {
-    parts: { label: 'Parts to split', accepts: ['part'] },
-    tool: { label: 'Split tool', accepts: PLANE, max: 1 },
+    parts: { label: 'Parts and surfaces to split', accepts: ['part'] },
+    tool: { label: 'Split tool: plane, face or surface', accepts: [...PLANE, 'face', 'part'], max: 1 },
   },
   transform: {
     parts: { label: 'Parts to transform', accepts: ['part'] },

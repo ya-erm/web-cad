@@ -28,7 +28,8 @@ import { derivesFrom, sourceStudio, versionSnapshot, versionStudioId } from '../
 import { ISO_SIZES, ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
-import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot } from '../sketch/sketchOps';
+import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
+import { expandTexts, FONT_FILES } from '../sketch/text';
 import type {
   AgentOp,
   AxisName,
@@ -202,7 +203,8 @@ class Runner {
       return { id: s.featureId, name: `${d.name} / ${s.name}`, entities: s.entities };
     }
     const sk = this.sketchFeature(name);
-    return { id: sk.id, name: sk.name, entities: sk.params.entities };
+    // texts: with their letters (their regions)
+    return { id: sk.id, name: sk.name, entities: expandTexts(sk.params.entities) };
   }
 
   // ----- values -------------------------------------------------------------
@@ -642,6 +644,18 @@ class Runner {
         case 'point':
           addPoint(d, P(sh.at));
           return;
+        case 'text': {
+          if (typeof sh.text !== 'string' || !sh.text.trim()) throw new AgentError(`${where}: give the text`);
+          const h = this.mm(sh.height, `${where} height`);
+          if (!(h > 0)) throw new AgentError(`${where}: height must be positive`);
+          const font = sh.font ?? 'sans';
+          if (!(font in FONT_FILES)) throw new AgentError(`${where}: font is one of ${Object.keys(FONT_FILES).join(', ')}`);
+          const o = P(sh.at);
+          const a = (((sh.rotation ?? 0) + 90) * Math.PI) / 180;
+          const t = addText(d, o, [o[0] + h * Math.cos(a), o[1] + h * Math.sin(a)], sh.text, font, cons);
+          if (typeof sh.height === 'string') addConstraint(d, 'distance', [t.p1, t.p2], { value: sh.height });
+          return;
+        }
         default:
           throw new AgentError(`Unknown shape type "${(sh as { type: string }).type}"`);
       }
@@ -693,9 +707,12 @@ class Runner {
         return;
       }
       case 'extrude': {
-        const sk = await this.profileSketch(op.sketch);
         const p = defaultParams('extrude');
-        p.profiles = this.regions(sk, op.regions);
+        if (op.surface) {
+          // the sketch's curves, swept into a surface
+          p.bodyType = 'surface';
+          p.curves = this.sketchCurves(this.sketchFeature(op.sketch));
+        } else p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
         p.depth = this.expr(op.depth, 'length', '10 mm');
         p.flip = !!op.flip;
         if (op.boolean) p.op = op.boolean;
@@ -716,9 +733,11 @@ class Runner {
         return;
       }
       case 'revolve': {
-        const sk = await this.profileSketch(op.sketch);
         const p = defaultParams('revolve');
-        p.profiles = this.regions(sk, op.regions);
+        if (op.surface) {
+          p.bodyType = 'surface';
+          p.curves = this.sketchCurves(this.sketchFeature(op.sketch));
+        } else p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
         const ax = await this.axis(op.axis);
         p.axis = [ax.ref];
         p.flip = ax.flip;
@@ -728,6 +747,28 @@ class Runner {
         }
         if (op.boolean) p.op = op.boolean;
         this.add('revolve', op.name, p);
+        return;
+      }
+      case 'sweep': {
+        const p = defaultParams('sweep');
+        if (op.surface) {
+          p.bodyType = 'surface';
+          p.curves = this.sketchCurves(this.sketchFeature(op.sketch));
+        } else p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
+        p.path = 'sketch' in op.path ? this.sketchCurves(this.sketchFeature(op.path.sketch)) : await this.edges(op.path.edges);
+        if (op.keepOrientation) p.keepOrientation = true;
+        if (op.boolean) p.op = op.boolean;
+        this.add('sweep', op.name, p);
+        return;
+      }
+      case 'split': {
+        const p = defaultParams('split');
+        p.parts = await this.parts(op.parts);
+        const tool = op.tool;
+        p.tool = typeof tool === 'object' && 'surface' in tool ? await this.parts(tool.surface) : [await this.planeRef(tool)];
+        if (op.trim) p.trim = true;
+        if (op.keepTools) p.keepTools = true;
+        this.add('split', op.name, p);
         return;
       }
       case 'fillet': {
@@ -782,6 +823,13 @@ class Runner {
         p.distance = this.expr(op.distance, 'length', p.distance);
         if (op.flip) p.flip = true;
         this.add('offsetSurface', op.name, p);
+        return;
+      }
+      case 'enclose': {
+        const p = defaultParams('enclose');
+        p.surfaces = await this.parts(op.surfaces);
+        if (op.keep) p.keep = true;
+        this.add('enclose', op.name, p);
         return;
       }
       case 'thicken': {
@@ -842,6 +890,7 @@ class Runner {
         p.cboreDepth = this.expr(op.cboreDepth, 'length', p.cboreDepth);
         p.csinkDiameter = this.expr(op.csinkDiameter, 'length', p.csinkDiameter);
         p.csinkAngle = this.expr(op.csinkAngle, 'angle', p.csinkAngle);
+        if (op.csinkRecess !== undefined) p.csinkRecess = this.expr(op.csinkRecess, 'length', '0 mm');
         this.add('hole', op.name, p);
         return;
       }

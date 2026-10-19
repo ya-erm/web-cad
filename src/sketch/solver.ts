@@ -243,6 +243,10 @@ function entityVars(m: Model, e: SkEntity): number[] {
       if (e.h0) pushPt(e.h0);
       if (e.h1) pushPt(e.h1);
       break;
+    case 'text':
+      pushPt(e.p1);
+      pushPt(e.p2);
+      break;
   }
   return out;
 }

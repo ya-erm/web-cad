@@ -8,6 +8,7 @@ import { frameFromNormal, STD_PLANES, toWorld, v3 } from '../core/math';
 import { arcAngles, entityMap, pointOf, sampleEntity, splineSamples } from '../sketch/curves';
 import type { WorldGeom } from '../sketch/useGeometry';
 import { findRegion, type SketchRegion } from '../sketch/regions';
+import { textOfPart } from '../sketch/text';
 import type { EdgeInfo, FaceInfo } from './protocol';
 import { relativeTo } from './sigs';
 import { bboxDiag, bboxOf, fail, regionToFace } from './geom';
@@ -215,6 +216,8 @@ function sketchEntityEdge(sketch: SketchState, ent: SkEntity, map: Map<string, S
     }
     case 'point':
       fail('A point is not a curve');
+    case 'text':
+      fail('Select the letters of the text, not the text itself');
   }
 }
 
@@ -225,6 +228,11 @@ export function resolveCurveEdges(st: BuildState, ref: SelRef): R.Edge[] {
     const curve = st.curves.get(ref.sketchId);
     if (curve) return curve.wire.edges;
     const { sketch, ent, map } = sketchEntity(st, ref);
+    // a text: the curves of its letters
+    if (ent.type === 'text')
+      return sketch.entities
+        .filter((e) => e.type !== 'point' && !e.construction && textOfPart(e.id) === ent.id)
+        .map((e) => sketchEntityEdge(sketch, e, map));
     return [sketchEntityEdge(sketch, ent, map)];
   }
   fail('Expected an edge or a sketch curve');

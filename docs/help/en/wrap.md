@@ -12,6 +12,10 @@ Rolls sketch regions onto a cylindrical face without stretching, like Onshape's 
 4. In **Cylindrical face to wrap onto**, select the shaft's or hole's face.
 5. Set the **Depth**, click ✓ (`Enter`).
 
+![Relief with a circular opening follows the cylinder curvature](../images/wrap-result.png)
+
+A Ø40 mm cylinder, 40 mm high, and **Front** offset 20 mm towards its front surface. The sketch contains a 16 × 20 mm rectangle with a Ø8 mm circle inside. Select the region **between the rectangle and circle**, choose **Emboss**, depth **2 mm**. The inner circle stays at the original cylinder surface.
+
 ## How a region lies {#mapping}
 
 The sketch plane must run along the cylinder's axis (parallel to it). The region rolls on from the line where the cylinder is nearest to the plane: the distance across the axis becomes an arc as long on the surface, the distance along the axis stays as it is. So the region keeps its sizes on the surface: a 10 × 20 mm rectangle on a shaft of radius 20 mm goes 10 mm round it (half a radian) and stands 20 mm tall. Holes in regions (a ring round a circle, say) are kept.

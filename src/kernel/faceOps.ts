@@ -269,6 +269,50 @@ export function moveFeature(shape: Shape3D, selected: number[], motion: Motion):
   return simplified(material ? healed.fuse(moved) : healed.cut(moved));
 }
 
+/**
+ * A full cylindrical face (a hole's wall, a boss's side — its pieces with it) offset by `d` along its normal (out of
+ * the material): its radius changes, between the faces it meets across its axis. A hole narrows (d > 0) or widens.
+ */
+export function offsetCylinder(shape: Shape3D, face: number, d: number): Shape3D {
+  const t = topologyOf(shape);
+  const set = withPieces(shape, [face]);
+  const info = t.faceInfo[face];
+  if (info.type !== 'CYLINDRE' || !info.axis || !info.axisPoint || info.radius === undefined) fail('Only planar and cylindrical faces can be offset');
+  const a = v3.norm(info.axis);
+  const r = info.radius;
+  // where it starts and ends along its axis: its circles, square to the axis
+  let v0 = Infinity;
+  let v1 = -Infinity;
+  for (const e of new Set(set.flatMap((i) => t.faceInfo[i].edges ?? []))) {
+    const ei = t.edgeInfo[e];
+    if (ei.seam) continue;
+    if (ei.type !== 'CIRCLE' || !ei.axis || Math.abs(Math.abs(v3.dot(v3.norm(ei.axis), a)) - 1) > 1e-6)
+      fail('A cylindrical face changes its radius between faces square to its axis only');
+    for (const q of [ei.start, ei.circleCenter ?? ei.start]) {
+      const v = v3.dot(v3.sub(q, info.axisPoint), a);
+      v0 = Math.min(v0, v);
+      v1 = Math.max(v1, v);
+    }
+  }
+  const h = v1 - v0;
+  if (!(h > 1e-9)) fail('The cylindrical face has no length along its axis');
+  // all the way round (a hole, a boss), not a part of it (a fillet)
+  const area = set.reduce((s, i) => s + t.faceInfo[i].area, 0);
+  if (Math.abs(area - 2 * Math.PI * r * h) > 0.01 * area) fail('Only full cylinders (holes, bosses) change their radius: offset a fillet with Fillet');
+  // the face looks away from its axis (a boss) or towards it (a hole)
+  const p = t.edgeInfo[(t.faceInfo[face].edges ?? []).find((e) => !t.edgeInfo[e].seam) ?? 0].start;
+  const radial = v3.sub(v3.sub(p, info.axisPoint), v3.scale(a, v3.dot(v3.sub(p, info.axisPoint), a)));
+  const n = t.faces[face].normalAt(p);
+  const out = n.x * radial[0] + n.y * radial[1] + n.z * radial[2] > 0 ? 1 : -1;
+  n.delete();
+  const r2 = r + out * d;
+  if (!(r2 > 1e-9)) fail('The offset would close the hole: a smaller distance');
+  const base = v3.add(info.axisPoint, v3.scale(a, v0));
+  const ring = (R.makeCylinder(Math.max(r, r2), h, base, a) as Shape3D).cut(R.makeCylinder(Math.min(r, r2), h, base, a) as Shape3D);
+  // out of the material: material comes; into it: material goes
+  return simplified(d > 0 ? shape.fuse(ring) : shape.cut(ring));
+}
+
 /** Whether a set of faces encloses a feature of its own (a whole hole, pocket or boss). */
 export function encloses(shape: Shape3D, set: number[]): boolean {
   return !!enclosed(shape, withPieces(shape, set));

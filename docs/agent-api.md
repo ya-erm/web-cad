@@ -84,17 +84,20 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `variable` | `name`, `value`, `type?` (`length`/`angle`/`number`/`any`), `description?` |
 | `setVariable` | `name`, `value` |
 | `sketch` | `plane?` (по умолчанию `top`), `shapes` (см. ниже), `name?`, `use?` — рёбра модели (EdgeQuery / список / `"all"`), спроецированные на эскиз фиксированной связанной геометрией (Use): они следуют за источником |
-| `extrude` | `sketch?` (по умолчанию последний), `regions?`, `depth?` (10 мм), `end?` (`blind` / `symmetric` / `throughAll` / `{"upToFace": FaceQuery}`), `flip?`, `boolean?` (`new`/`add`/`remove`/`intersect`), `draft?`, `thin?` |
-| `revolve` | `sketch?`, `regions?`, `axis`, `angle?` (без него — полный оборот), `boolean?` |
+| `extrude` | `sketch?` (по умолчанию последний), `regions?`, `depth?` (10 мм), `end?` (`blind` / `symmetric` / `throughAll` / `{"upToFace": FaceQuery}`), `flip?`, `boolean?` (`new`/`add`/`remove`/`intersect`), `draft?`, `thin?`; `surface: true` — поверхность из кривых эскиза (в том числе незамкнутых) вместо тела |
+| `revolve` | `sketch?`, `regions?`, `axis`, `angle?` (без него — полный оборот), `boolean?`; `surface: true` — поверхность из кривых эскиза (кривые на самой оси пропускаются) |
+| `sweep` | `sketch?` (профиль), `regions?`, `path` — `{"sketch":"Path"}` или `{"edges": EdgeQuery}` (одна цепочка), `keepOrientation?`, `boolean?`; `surface: true` — поверхность из кривых профиля (замкнутая кривая — трубка без торцов) |
+| `split` | `parts` (`Parts`: детали и поверхности), `tool` — `PlaneSpec` (плоская грань режет всей плоскостью, с `trim: true` — в своих границах; неплоская грань — в своих) или `{"surface": PartQuery}` (расходуется, если нет `keepTools: true`); первая часть сохраняет имя, при плоскости — со стороны её нормали |
 | `fillet` | `edges`, `radius`, `tangentPropagation?` (`false` — только выбранные рёбра, без касательных к ним; по умолчанию цепочка целиком), `vertices?` `[{"at":[x,y,z],"radius":1}]` — переменное скругление: свой радиус в вершинах (ближайшая вершина модели к `at`; в остальных — `radius`), `smooth?` — плавный переход вместо линейного |
 | `chamfer` | `edges`, `distance`, `tangentPropagation?` (как у `fillet`), `type?` (`equal` / `twoDistances` + `distance2` / `distanceAngle` + `angle`), `flip?` — первое расстояние от другой грани |
 | `shell` | `faces` (удаляемые грани), `thickness`, `outward?` |
 | `deleteFace` | `faces` — грани отверстия / кармана / бобышки целиком или скругление / фаска между плоскими гранями; разрыв закрывают соседние грани (Onshape Delete face с Heal); `heal: false` — грани просто удаляются, деталь становится поверхностью |
 | `offsetSurface` | `faces`, `distance?` (0 — копия граней; + наружу из материала), `flip?`; результат — поверхность «Surface N» (в `state` у неё `surface: true`, без объёма) |
+| `enclose` | `surfaces` (`Parts`: поверхности, замыкающие объём), `keep?`; результат — твёрдая деталь |
 | `thicken` | `surfaces?` (`Parts`: поверхности целиком) и / или `faces?`, `thickness`, `flip?`, `boolean?` |
 | `moveFace` | `faces` и одно из: `offset` (плоские грани вдоль своих нормалей, + наружу), `translate: {"direction": AxisSpec, "distance"}`, `rotate: {"axis": AxisSpec, "angle"}`; все грани отверстия / кармана / бобышки двигаются целиком, отдельные плоские — каждая на свою новую плоскость, соседи удлиняются |
 | `replaceFace` | `faces` (плоские), `with` — `PlaneSpec`, `offset?` вдоль её нормали (в сторону, куда смотрят грани), `flip?` |
-| `hole` | `sketch` (точки эскиза или центры окружностей), `diameter`, `depth?`, `through?`, `style?` (`simple`/`counterbore`/`countersink`/`counterdrill` — цековка с зенковкой у входа), `cboreDiameter?`, `cboreDepth?`, `csinkDiameter?`, `csinkAngle?`; стандартное отверстие — `iso: {"size":"M6", "type"?: "clearance"\|"tapped", "fit"?: "close"\|"normal"\|"loose", "pitch"?: 1, "tapDepth"?}` вместо `diameter` (диаметры, цековка ISO 4762 и зенковка 90° — из таблиц; глубины по умолчанию — 2 d резьбы и на 3 шага глубже). У резьбового отверстия — косметическая резьба: `state` перечисляет её в `threads` (обозначение, начало, направление, длина, деталь) |
+| `hole` | `sketch` (точки эскиза или центры окружностей), `diameter`, `depth?`, `through?`, `style?` (`simple`/`counterbore`/`countersink`/`counterdrill` — цековка с зенковкой у входа), `cboreDiameter?`, `cboreDepth?`, `csinkDiameter?`, `csinkAngle?`, `csinkRecess?` (зенковка, утопленная в цилиндрическое углубление её диаметра); стандартное отверстие — `iso: {"size":"M6", "type"?: "clearance"\|"tapped", "fit"?: "close"\|"normal"\|"loose", "pitch"?: 1, "tapDepth"?}` вместо `diameter` (диаметры, цековка ISO 4762 и зенковка 90° — из таблиц; глубины по умолчанию — 2 d резьбы и на 3 шага глубже). У резьбового отверстия — косметическая резьба: `state` перечисляет её в `threads` (обозначение, начало, направление, длина, деталь) |
 | `linearPattern` | `features` (имена) или `parts`, `direction`, `distance`, `count`, `direction2?`, `distance2?`, `count2?`, `boolean?` |
 | `circularPattern` | `features` или `parts`, `axis`, `count`, `angle?` (360°) |
 | `mirror` | `features` или `parts`, `plane` |
@@ -104,7 +107,7 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 | `plane` | `from` (плоскость/грань), `offset` |
 | `mateConnector` | `at`: `"origin"` / `{"vertex":[x,y,z], "parallelTo"?: FaceQuery}` (ближайшая вершина) / `{"face": FaceQuery, "point"?: "start"\|"mid"\|"end"}` (центр плоской грани, точка на оси цилиндра, конуса или тора, центр сферы) / `{"edge": EdgeQuery, "point"?: "start"\|"mid"\|"end"\|"center", "parallelTo"?: FaceQuery}` (например центр отверстия, параллельно грани) / `{"sketch":"Sketch 3","point":0}` / `{"mate":"MC1"}`; `between?` — второе расположение того же вида (начало посередине между `at` и `between`); `owner?` — деталь-владелец (`PartQuery`; по умолчанию деталь из `at`), соединитель движется вместе с ней в последующих `transform`; `primaryAxis?` и `secondaryAxis?` (`AxisSpec`), `flip?`, `reorient?` (`"x"`/`"y"`), `rotation?`, `offset?` `[dx, dy, dz]` по своим осям |
 | `transform` | `parts`, `from`, `to` — имена mate connector: деталь перемещается так, что `from` совпадает с `to`; `copy?` |
-| `boolean` | `type` (`union`/`subtract`/`intersect`), `targets`, `tools`, `keepTools?` |
+| `boolean` | `type` (`union`/`subtract`/`intersect`), `targets`, `tools`, `keepTools?`; `union` поверхностей сшивает их по общим рёбрам, `subtract` детали из поверхности (поверхность в `targets`) оставляет её часть вне детали |
 | `deletePart` | `parts` |
 | `part` | `part`, `name?`, `color?` (`#rrggbb`), `hidden?` |
 | `feature` | `type`, `params` — любая фича с «сырыми» параметрами (sweep, loft, thicken, draft, split, transform, helix…) |
@@ -130,6 +133,7 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 {"type":"slot", "from":[0,0], "to":[30,0], "r":4}
 {"type":"polygon", "c":[0,0], "r":10, "sides":6, "rotation":90}   // r — окружность через вершины, 3…50 сторон
 {"type":"polygon", "c":[0,0], "r":"6.5 mm", "sides":6, "inscribed":true}   // окружность касается сторон: «под ключ» 13 мм
+{"type":"text", "text":"WebCAD", "at":[0,0], "height":10, "font":"sansBold", "rotation":0}   // строка от начала базовой линии, height — высота прописных; шрифты sans (Inter), sansBold, mono (JetBrains Mono); буквы — области (regions "auto" — без внутренних просветов «О»)
 {"type":"point", "at":[15,15]}          // для отверстий
 ```
 

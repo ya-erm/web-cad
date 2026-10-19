@@ -13,6 +13,10 @@ Copies parts or features along a curve — a line, an arc or a chain of edges an
 
 The first instance is the original: the path is measured from its start, so it is handy for the original part or feature to stand at the start of the path. Each copy goes where the path's start point would get to and turns as the curve turns.
 
+![Six rectangular parts along an arc, viewed from above](../images/curve-pattern-result.png)
+
+The 12 × 5 × 8 mm seed sits at the start of a radius 40 mm, 120° arc. Set **Instance count to 6**, with **Equal spacing** and **Turn with the path** enabled. Neighbours turn by 24°; the first and last sit at the ends. Turn off **Turn with the path** to keep every rectangle aligned with the seed.
+
 ## Options {#options}
 
 | Field | Description |

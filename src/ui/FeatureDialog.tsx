@@ -33,6 +33,7 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   moveFace: 'moveFace',
   replaceFace: 'replaceFace',
   offsetSurface: 'offsetSurface',
+  enclose: 'enclose',
   hole: 'hole',
   linearPattern: 'linearPattern',
   circularPattern: 'circularPattern',

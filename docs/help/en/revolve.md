@@ -31,6 +31,12 @@ width: 480
 | **Second angle** | For **Two directions** (default 45°). |
 | **Merge with all** / **Merge scope** | The parts to apply the operation to (except for **New**). |
 
+## Surface {#surface}
+
+The **Solid / Surface** switch at the top of the dialog. As a **Surface** the revolve takes **Sketch curves and edges** instead of regions, open ones too: a line, a polyline, an arc, part edges. A [surface](offset-surface#surfaces) "Surface N" with no thickness comes out. Curves lying on the axis itself are skipped, so the axis can be an ordinary line of the same sketch. The revolve types and angles are the same as for a solid; Booleans do not apply to a surface.
+
+For example, a line from (0, 20) to (10, 20) and a line from (10, 20) to (10, 0) on the **Front** plane, axis Z. A **Full** revolve gives an upturned cup with no thickness: a disc of radius 10 mm and a wall 20 mm high, area 2π·10·20 + π·10² ≈ 1570.8 mm².
+
 ## Tips {#tips}
 
 - You can draw the axis in the same sketch as a construction line (`Q`) — it does not interfere with the regions.

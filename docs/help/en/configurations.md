@@ -17,6 +17,13 @@ A configuration makes **variants** of one model, as in Onshape: say, a "Small" a
 
 The first option is the **default** one. There can be several inputs (say, "Size" and "Lid"); when two inputs set the same parameter, the lower one wins.
 
+```figure
+image: ../images/configurations-panel.jpg
+alt: Size table with Small and Large options controlling extrusion depth
+caption: The Size list input controls the depth of Height: Small is 10 mm, Large is 25 mm. Large is selected (blue row). Select the Small radio button to make the model shorter without redrawing the sketch.
+width: 520
+```
+
 ## Variable input {#variable}
 
 A list gives a few options known in advance, a **variable** takes any value: say, the length of a profile chosen when it goes into an assembly.
@@ -42,7 +49,7 @@ When the Part Studio has a configuration, its inputs appear above the feature li
 
 The variant is chosen for the whole Part Studio: its parts are built, its variables computed and its exports made in that variant; assemblies and drawings show the parts in the **chosen** variant by default.
 
-**An assembly instance's own variant.** For an instance of a part in an assembly to take another variant, select it: its panel has a **Configuration** section with a list per input — **As in the Part Studio (…)** or a specific option (a variable has a value field; empty — as in the Part Studio). So one assembly can hold, say, a small and a large plate from the same Part Studio; the [bill of materials](assembly#bom) counts them as different rows and adds the option to the name: "Plate (Large)", "Profile (#len = 500 mm)". Mates and exports use the instance's part in its own variant.
+**An assembly instance's own variant.** For an instance of a part in an assembly to take another variant, select it: its panel has a **Configuration** section with a list per input — **As in the Part Studio (…)** or a specific option (a variable has a value field; empty — as in the Part Studio). So one assembly can hold, say, a small and a large plate from the same Part Studio; the [bill of materials](assembly-bom#bom) counts them as different rows and adds the option to the name: "Plate (Large)", "Profile (#len = 500 mm)". Mates and exports use the instance's part in its own variant.
 
 **A drawing view's own variant.** Select a view on the sheet or in the **Views** list — its **View properties** get the same **Configuration** section. The views projected with it take the chosen variant too (as with the scale); the isometric view is chosen on its own. The list of views adds the variant to the name: "Front · 1:2 · Large". So one sheet can show, say, the small and the large plates.
 

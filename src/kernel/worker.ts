@@ -6,6 +6,7 @@ import wasmUrl from 'replicad-opencascadejs/wasm?url';
 import { setOC } from 'replicad';
 import { StudioBuilder, assemblyStepOf, errorMessage, placedShape, stepOf, stlOf } from './build';
 import { transferablesOf } from './meshing';
+import { loadFonts } from '../sketch/text';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -18,7 +19,8 @@ const builderFor = (key: string) => {
 };
 
 const ready = (async () => {
-  const oc = await opencascade({ locateFile: () => wasmUrl });
+  // the fonts of sketch text come with the kernel (without them — no letters, the rest builds)
+  const [oc] = await Promise.all([opencascade({ locateFile: () => wasmUrl }), loadFonts().catch(() => undefined)]);
   setOC(oc);
   self.postMessage({ type: 'ready' } satisfies WorkerResponse);
 })();

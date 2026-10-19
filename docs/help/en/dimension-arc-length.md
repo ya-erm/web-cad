@@ -13,6 +13,13 @@ Sets the length of an arc — along the arc itself, not its chord. The text is m
 
 The dimension line is an arc concentric with the dimensioned one and passing through the text, with extension lines from the arc's ends and arrows at its ends.
 
+```figure
+image: ../images/dimension-arc-length.jpg
+alt: Radius 20 mm quarter-circle with an arc length dimension of 31.416 mm
+caption: Radius 20 mm and angle 90° give an arc length of 31.416 mm. Select both endpoints, then the arc, and place the label outside. The arc symbol before the value distinguishes this from the chord distance.
+width: 520
+```
+
 ## How it works {#how}
 
 - The arc length is the radius times its angle (the arc runs counterclockwise from its first end to the second).

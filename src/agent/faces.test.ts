@@ -92,6 +92,23 @@ describe('Move face', () => {
     expect(sharp.model!.parts[0].volume).toBeCloseTo(40 * 30 * 16, 2);
   }, 60000);
 
+  it('changes the radius of a hole and of a boss', async () => {
+    const hole = await block([
+      topSketch([{ type: 'point', at: [-8, 0] }]),
+      { op: 'hole', sketch: 'S', diameter: 6, through: true },
+      // the hole's wall 1 mm out of the material: ⌀6 → ⌀4
+      { op: 'moveFace', faces: { type: 'cylinder' }, offset: 1 },
+    ]);
+    expect(hole.model.parts[0].volume).toBeCloseTo(BLOCK - Math.PI * 4 * 10, 3);
+    const boss = await block([
+      topSketch([{ type: 'circle', c: [8, 0], d: 8 }]),
+      { op: 'extrude', sketch: 'S', depth: 5, boolean: 'add' },
+      // the boss's side 1 mm out: ⌀8 → ⌀10
+      { op: 'moveFace', faces: { type: 'cylinder' }, offset: 1 },
+    ]);
+    expect(boss.model.parts[0].volume).toBeCloseTo(BLOCK + Math.PI * 25 * 5, 3);
+  }, 60000);
+
   it('moves a whole hole or boss; tilts a planar face', async () => {
     const hole = await block([
       topSketch([{ type: 'point', at: [8, 0] }]),

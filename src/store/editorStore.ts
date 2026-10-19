@@ -31,6 +31,8 @@ export type SketchTool =
   /** inscribed polygon: the construction circle touches the sides */
   | 'polygonInscribed'
   | 'ellipse'
+  /** a line of text (Onshape Text): the start of its baseline, then the height of its capitals */
+  | 'text'
   | 'fillet'
   | 'trim'
   /** split a line / an arc at a point (Onshape Split) */
@@ -68,6 +70,8 @@ export interface SketchSession {
    * the picks make it, and the tool stays on for the next one.
    */
   constraint?: ConstraintType;
+  /** A text just placed by the Text tool: the sketch dialog puts the cursor into its field. */
+  editText?: string;
 }
 
 /** A sketch pattern being created / edited (the pattern itself lives in the sketch data). */
@@ -277,6 +281,7 @@ export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
   moveFace: 'faces',
   replaceFace: 'faces',
   offsetSurface: 'faces',
+  enclose: 'surfaces',
   hole: 'points',
   linearPattern: 'parts',
   circularPattern: 'parts',

@@ -34,6 +34,7 @@ width: 480
 | **Tip angle** | The cone at the bottom of a blind hole (default 118°, like a drill bit). |
 | **Counterbore diameter**, **Counterbore depth** | For **Counterbore** and **Counterbore and countersink** (default 9 and 4 mm). The counterbore diameter must be larger than the hole diameter. |
 | **Countersink diameter**, **Countersink angle** | For **Countersink** and **Counterbore and countersink** (default 10 mm and 90°). With both, the countersink is wider than the counterbore and ends above its floor. |
+| **Recess depth** | For **Countersink**: a cylindrical recess of the countersink's diameter above its cone — the countersink sunk that deep (default 0 — no recess). A seat for a countersunk head set below the surface. |
 | **Standard** | **Custom** — the sizes from the fields above; **ISO** — from the standards' tables, see [below](#standard). |
 | **Tapped depth** | For a **Blind** tapped hole: how deep the thread goes (no deeper than the hole). |
 | **Merge with all** / **Merge scope** | The parts to cut the holes from: all parts or only the selected ones. |
@@ -46,6 +47,36 @@ With **Standard: ISO** the sizes come from the tables for metric fasteners M1.6�
 - **Type: Tapped** — a hole for a tap (the drill by ISO 2306, for M6 — 5 mm) with a [cosmetic thread](#thread). **Pitch**: coarse (the default) or one of the fine ones of ISO 261; a fine pitch drills the major diameter minus the pitch and is designated M8×1.
 - **Counterbore** — a counterbore for an ISO 4762 socket head cap screw (by DIN 974-1), **Countersink** — a 90° countersink for an ISO 10642 countersunk screw, **Counterbore and countersink** — that counterbore with a 0.5 mm × 45° chamfer at its mouth.
 - Choosing a size sets the depths as Onshape does: the thread 2 diameters deep, the hole 3 pitches deeper. You can change them.
+
+```figure
+image: ../images/iso-hole-dialog.jpg
+alt: Hole dialog: ISO tapped M6, 1 mm pitch, through all
+caption: Choose ISO → Tapped → M6 → 1 mm pitch. The 5 mm tap drill is filled in automatically (the hint below the fields). This example uses Through all, so there is no separate thread depth field.
+width: 350
+```
+
+## What a tapped ISO hole looks like {#appearance}
+
+The screenshots show a 24 × 20 × 16 mm block with **ISO → Tapped → M6**, 1 mm pitch, **Through all**.
+
+| Normal view | Section through the hole axis |
+|---|---|
+| ![M6 hole with a thin circle showing the thread major diameter](../images/iso-tapped-solid.png) | ![M6 hole section with cosmetic thread lines](../images/iso-tapped-section.png) |
+
+The hole uses a **Ø5 mm tap drill**. The thin Ø6 mm circle at the mouth and thin lines in the section are **cosmetic**: helical thread turns are not modelled. To inspect your own hole this way, enable [Section view](section-view) and place its plane through the hole axis.
+
+## Entrance styles and sections {#cuts}
+
+The same block and **M6** fastener size, with **Type → Clearance**, **Fit → Normal**, **Through all**. The main bore is **Ø6.6 mm** in every row; only **Hole style** changes. The normal view shows the entrance; the section exposes the cut profile.
+
+| Hole style | In the model | In section |
+|---|---|---|
+| **Simple** — no head recess | ![Simple M6 clearance hole](../images/iso-clearance-solid.png) | ![Straight cylindrical channel in section](../images/iso-clearance-section.png) |
+| **Counterbore** — Ø11 mm cylindrical recess, 6.6 mm deep | ![Cylindrical counterbore entrance](../images/iso-counterbore-solid.png) | ![Counterbore step with a flat floor](../images/iso-counterbore-section.png) |
+| **Countersink** — 90° conical recess for a countersunk head | ![Conical countersink entrance](../images/iso-countersink-solid.png) | ![Countersink cone meets the cylindrical bore](../images/iso-countersink-section.png) |
+| **Counterbore and countersink** — counterbore with a 0.5 mm × 45° entrance chamfer | ![Counterbore with a chamfer at its mouth](../images/iso-counterdrill-solid.png) | ![Entrance chamfer, cylindrical recess and main bore](../images/iso-counterdrill-section.png) |
+
+Choose **Hole style** at the top of the dialog. **ISO** supplies sizes for the chosen fastener. For your own diameters and depths, switch **Standard → Custom**.
 
 ## Cosmetic thread {#thread}
 

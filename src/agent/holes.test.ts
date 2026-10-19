@@ -75,6 +75,23 @@ describe('Counterbore and countersink together (counterdrill)', () => {
   }, 60000);
 });
 
+describe('Countersink sunk in a recess', () => {
+  it('goes straight down the recess, then the cone, then the hole', async () => {
+    const s = await openHeadless(emptyDocument('Recess'), wasm);
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 40 }] },
+      { op: 'extrude', depth: 20 },
+      { op: 'sketch', name: 'P', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [0, 0] }] },
+      { op: 'hole', sketch: 'P', diameter: 6, through: true, style: 'countersink', csinkDiameter: 12, csinkAngle: 90, csinkRecess: 4 },
+    ]);
+    expect(r.failed).toEqual([]);
+    // ⌀12 × 4 recess, a 90° cone 3 tall from ⌀12 to ⌀6, the ⌀6 hole through the 13 left
+    const cone = (Math.PI / 3) * 3 * (36 + 18 + 9);
+    const removed = Math.PI * 36 * 4 + cone + Math.PI * 9 * 13;
+    expect(r.model!.parts[0].volume!).toBeCloseTo(40 * 40 * 20 - removed, 2);
+  }, 60000);
+});
+
 describe('Standard holes', () => {
   it('drills tapped and clearance holes by ISO, with cosmetic threads that follow patterns and moves', async () => {
     const s = await openHeadless(emptyDocument('ISO holes'), wasm);

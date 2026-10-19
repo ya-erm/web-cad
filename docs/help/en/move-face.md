@@ -11,6 +11,17 @@ A direct edit, like Onshape's Move face: faces of a part are offset, translated 
 3. For a translation choose the **Direction**, for a rotation the **Axis**.
 4. Set the **Distance** or **Angle** (the button next to it flips the direction), click ✓ (`Enter`).
 
+## Example: move a hole {#example}
+
+| Before | Translate 20 mm along X |
+|---|---|
+| ![Ø8 mm hole left of centre](../images/direct-before.png) | ![The hole moved to the right](../images/move-face-after.png) |
+
+1. Select the cylindrical wall of the through hole.
+2. In **Move face**, choose **Translate**.
+3. For **Direction**, select a straight plate edge along X and set **Distance** to 20 mm. Flip the direction if needed.
+4. Accept: the diameter and depth stay the same and the former position is healed.
+
 ## Types {#types}
 
 | Type | What happens |
@@ -26,9 +37,9 @@ What moves depends on the selection:
 
 ## Limitations {#limits}
 
-- **Offset** works for planar faces only; move holes and bosses with **Translate** or **Rotate**, all their faces selected.
+- **Offset** works for planar faces and for the cylindrical walls of holes and bosses: a cylinder changes its radius (an offset out of the material narrows a hole and thickens a boss). Its ends must lie on faces square to its axis. Move holes and bosses with **Translate** or **Rotate**, all their faces selected.
 - A separate face moving along its normal may border on walls along that normal — planar or cylindrical (a rounded vertical corner, a hole in the face): they extend with it. To tilt a face or put it on a slanted plane, all the faces around it must be planar.
-- Offsetting a cylindrical face (changing a hole's radius) is not supported yet.
+- Only full cylinders change their radius; change partial ones (fillets) with [Fillet](fillet).
 
 ## See also {#see-also}
 

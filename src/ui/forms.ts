@@ -34,11 +34,20 @@ const OPS: [string, string][] = [
   ['intersect', 'Intersect'],
 ];
 const isOp = (p: P) => p.op !== 'new';
+/** Extrude as a surface (sketch curves → a surface body). */
+const isSurfaceBody = (p: P) => p.bodyType === 'surface';
 /** A hole of a standard: its diameters come from the tables. */
 const isIso = (p: P) => p.standard === 'iso';
 /** A hole with a counterbore / a countersink (both: counterdrill). */
 const hasCbore = (p: P) => p.style === 'counterbore' || p.style === 'counterdrill';
 const hasCsink = (p: P) => p.style === 'countersink' || p.style === 'counterdrill';
+
+/** Split: what its tool is — a surface body, a planar face (its plane unless trimmed) or something else. */
+function toolKind(p: P): 'part' | 'planarFace' | null {
+  const r = (p.tool as SelRef[] | undefined)?.[0];
+  if (r?.kind === 'part') return 'part';
+  return r?.kind === 'face' && r.sig.type === 'PLANE' ? 'planarFace' : null;
+}
 
 /** Kind of a mate connector location, for its "which point" choices. */
 function locationKind(p: P, key = 'location'): 'line' | 'circle' | 'axis' | null {
@@ -48,10 +57,22 @@ function locationKind(p: P, key = 'location'): 'line' | 'circle' | 'axis' | null
   return null;
 }
 
+/** Onshape creation type: Solid (regions) or Surface (curves). */
+const BODY_TYPE: Row = {
+  kind: 'segmented',
+  key: 'bodyType',
+  options: [
+    ['solid', 'Solid'],
+    ['surface', 'Surface'],
+  ],
+};
+
 export const FORMS: Partial<Record<FeatureType, Row[]>> = {
   extrude: [
-    { kind: 'segmented', key: 'op', options: OPS },
-    { kind: 'sel', key: 'profiles' },
+    BODY_TYPE,
+    { kind: 'segmented', key: 'op', options: OPS, when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'profiles', when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'curves', when: isSurfaceBody },
     {
       kind: 'select',
       key: 'endType',
@@ -66,10 +87,10 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'sel', key: 'upTo', when: (p) => p.endType === 'upToFace' },
     { kind: 'expr', key: 'depth', label: 'Depth', unit: 'length', flipKey: 'flip', when: (p) => p.endType === 'blind' || p.endType === 'symmetric' },
     { kind: 'flip', key: 'flip', label: 'Opposite direction', when: (p) => p.endType !== 'blind' && p.endType !== 'symmetric' },
-    { kind: 'check', key: 'thin', label: 'Thin' },
-    { kind: 'expr', key: 'thickness', label: 'Thickness', unit: 'length', flipKey: 'thinFlip', when: (p) => !!p.thin },
-    { kind: 'check', key: 'draft', label: 'Draft' },
-    { kind: 'expr', key: 'draftAngle', label: 'Draft angle', unit: 'angle', flipKey: 'draftFlip', when: (p) => !!p.draft },
+    { kind: 'check', key: 'thin', label: 'Thin', when: (p) => !isSurfaceBody(p) },
+    { kind: 'expr', key: 'thickness', label: 'Thickness', unit: 'length', flipKey: 'thinFlip', when: (p) => !!p.thin && !isSurfaceBody(p) },
+    { kind: 'check', key: 'draft', label: 'Draft', when: (p) => !isSurfaceBody(p) },
+    { kind: 'expr', key: 'draftAngle', label: 'Draft angle', unit: 'angle', flipKey: 'draftFlip', when: (p) => !!p.draft && !isSurfaceBody(p) },
     { kind: 'check', key: 'secondEnd', label: 'Second end position', when: (p) => p.endType !== 'symmetric' },
     {
       kind: 'select',
@@ -84,11 +105,13 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     },
     { kind: 'sel', key: 'upTo2', when: (p) => !!p.secondEnd && p.endType2 === 'upToFace' && p.endType !== 'symmetric' },
     { kind: 'expr', key: 'depth2', label: 'Depth', unit: 'length', when: (p) => !!p.secondEnd && p.endType2 === 'blind' && p.endType !== 'symmetric' },
-    { kind: 'merge', when: isOp },
+    { kind: 'merge', when: (p) => isOp(p) && !isSurfaceBody(p) },
   ],
   revolve: [
-    { kind: 'segmented', key: 'op', options: OPS },
-    { kind: 'sel', key: 'profiles' },
+    BODY_TYPE,
+    { kind: 'segmented', key: 'op', options: OPS, when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'profiles', when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'curves', when: isSurfaceBody },
     { kind: 'sel', key: 'axis' },
     {
       kind: 'select',
@@ -103,14 +126,16 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     },
     { kind: 'expr', key: 'angle', label: 'Angle', unit: 'angle', flipKey: 'flip', when: (p) => p.revolveType !== 'full' },
     { kind: 'expr', key: 'angle2', label: 'Second angle', unit: 'angle', when: (p) => p.revolveType === 'two' },
-    { kind: 'merge', when: isOp },
+    { kind: 'merge', when: (p) => isOp(p) && !isSurfaceBody(p) },
   ],
   sweep: [
-    { kind: 'segmented', key: 'op', options: OPS },
-    { kind: 'sel', key: 'profiles' },
+    BODY_TYPE,
+    { kind: 'segmented', key: 'op', options: OPS, when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'profiles', when: (p) => !isSurfaceBody(p) },
+    { kind: 'sel', key: 'curves', when: isSurfaceBody },
     { kind: 'sel', key: 'path' },
     { kind: 'check', key: 'keepOrientation', label: 'Keep profile orientation' },
-    { kind: 'merge', when: isOp },
+    { kind: 'merge', when: (p) => isOp(p) && !isSurfaceBody(p) },
   ],
   loft: [
     { kind: 'segmented', key: 'op', options: OPS },
@@ -178,6 +203,10 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'sel', key: 'faces' },
     { kind: 'expr', key: 'distance', label: 'Distance', unit: 'length', flipKey: 'flip' },
   ],
+  enclose: [
+    { kind: 'sel', key: 'surfaces' },
+    { kind: 'check', key: 'keep', label: 'Keep surfaces' },
+  ],
   moveFace: [
     {
       kind: 'segmented',
@@ -231,6 +260,8 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'expr', key: 'cboreDepth', label: 'Counterbore depth', unit: 'length', when: (p) => hasCbore(p) && !isIso(p) },
     { kind: 'expr', key: 'csinkDiameter', label: 'Countersink diameter', unit: 'length', when: (p) => hasCsink(p) && !isIso(p) },
     { kind: 'expr', key: 'csinkAngle', label: 'Countersink angle', unit: 'angle', when: (p) => hasCsink(p) && !isIso(p) },
+    // a cylindrical recess above a countersink (0 — none); ISO too
+    { kind: 'expr', key: 'csinkRecess', label: 'Recess depth', unit: 'length', when: (p) => p.style === 'countersink' },
     { kind: 'check', key: 'scopeAll', label: 'Merge with all' },
     { kind: 'sel', key: 'scope', when: (p) => !p.scopeAll },
   ],
@@ -383,6 +414,8 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
   split: [
     { kind: 'sel', key: 'parts' },
     { kind: 'sel', key: 'tool' },
+    { kind: 'check', key: 'trim', label: 'Trim to face boundaries', when: (p) => toolKind(p) === 'planarFace' },
+    { kind: 'check', key: 'keepTools', label: 'Keep tools', when: (p) => toolKind(p) === 'part' },
   ],
   transform: [
     {

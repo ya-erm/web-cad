@@ -6,6 +6,7 @@ import { FIELD_SPECS } from '../core/fieldSpecs';
 import { configuredFeatures, pruneConfiguration, setConfigured } from '../core/config';
 import { ConfigChooser } from './ConfigPanel';
 import { computeRegions } from '../sketch/regions';
+import { isTextCounter } from '../sketch/text';
 import { uid } from '../core/ids';
 import { useEditor, sameRef, type ContextMenuItem } from '../store/editorStore';
 import { activeStudio, effectiveRollback, useDoc, withStudio } from '../store/docStore';
@@ -119,12 +120,13 @@ export function FeatureTree() {
     });
 
   // ---------------------------------------------------------------- selection
-  /** Region refs of a sketch (Onshape: picking a sketch in the list picks all its regions). */
+  /** Region refs of a sketch (Onshape: picking a sketch in the list picks all its regions — letters without their counters). */
   const sketchRegionRefs = (sketchId: string): SelRef[] => {
     const sk = useEditor.getState().build?.sketches.find((x) => x.featureId === sketchId);
     if (!sk) return [];
     try {
-      return computeRegions(sk.entities).map((r) => ({ kind: 'region' as const, sketchId, key: r.key }));
+      const regions = computeRegions(sk.entities);
+      return regions.filter((r) => !isTextCounter(r, regions)).map((r) => ({ kind: 'region' as const, sketchId, key: r.key }));
     } catch {
       return [];
     }

@@ -36,6 +36,13 @@ Like Onshape's variable fillet: along an edge the radius goes from its value at 
 
 A vertex removed from the selection takes its radius with it. The radius at every vertex must be greater than zero.
 
+```figure
+image: ../images/variable-fillet-result.png
+alt: Vertical edge fillet with radius varying from 1 to 7 mm
+caption: A 20 × 20 × 20 mm block: radius 1 mm at the lower vertex and 7 mm at the upper one. The blend widens towards the top. Select one vertical edge and both endpoints in Variable radius mode to reproduce it.
+width: 650
+```
+
 ## Tips {#tips}
 
 - The message "Fillet failed: radius may be too large" usually means the radius is larger than the adjacent faces — reduce it.

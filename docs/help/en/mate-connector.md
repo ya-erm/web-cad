@@ -96,4 +96,4 @@ A mate connector belongs to a part: when a [Transform](transform) further down t
 
 You can hide a mate connector with the eye icon in the [feature list](feature-list).
 
-In an [assembly](assembly#mates), a part's mate connectors show on its instances and serve as anchors for mates.
+In an [assembly](assembly-mates#mates), a part's mate connectors show on its instances and serve as anchors for mates.

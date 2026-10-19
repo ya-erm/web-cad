@@ -95,7 +95,7 @@ Select the entities first, then press the key. For details, see [Constraints](sk
 | Keys | Action |
 |---|---|
 | `I` | [Insert](assembly#create) parts from a Part Studio |
-| `J` | New [mate](assembly#mates) |
+| `J` | New [mate](assembly-mates#mates) |
 | `Del` | Delete the selected instances |
 
 ## Help {#help}

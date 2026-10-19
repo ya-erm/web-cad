@@ -43,10 +43,12 @@ import {
   moveEntities,
   splitEntity,
   addBezier,
+  addText,
   conicControls,
   conicRho,
   type Snap,
 } from '../sketch/sketchOps';
+import { expandTexts, loadFonts, onFontLoaded, textOfPart, textOutline } from '../sketch/text';
 import { arrowTriangle, dimensionGeometry } from '../sketch/dimensions';
 import { CONSTRAINT_GLYPH_SVG } from '../ui/constraintGlyphs';
 import { refKey, useEditor, type SketchTool, type SketchTransformState } from '../store/editorStore';
@@ -210,10 +212,16 @@ export class SketchEditor {
     this.sidesLabel.className = 'infer-label poly-sides';
     this.sidesLabel.style.display = 'none';
     engine.container.appendChild(this.sidesLabel);
+    // the letters of texts are drawn once their font is there
+    this.offFonts = onFontLoaded(() => this.renderSketch(true));
+    loadFonts().catch(() => useEditor.getState().showToast(t('The fonts of sketch text could not be loaded'), 'error'));
   }
+
+  private offFonts: () => void;
 
   dispose() {
     this.deactivate();
+    this.offFonts();
     this.dimInput.remove();
     this.inferLabel.remove();
     this.sidesLabel.remove();
@@ -364,6 +372,7 @@ export class SketchEditor {
       slot: 'Click two centers, then the width.',
       polygon: 'Click the center, then a vertex; then move the cursor or type a number to set the sides (3–50) and click.',
       polygonInscribed: 'Click the center, then the middle of a side; then move the cursor or type a number to set the sides (3–50) and click.',
+      text: 'Click the start of the baseline, then the height of the capital letters; then type the text in the sketch dialog.',
       ellipse: 'Click the center, the major axis end and a point for the minor radius.',
       fillet: 'Click a corner where two lines meet.',
       trim: 'Click the piece of a curve to remove.',
@@ -505,7 +514,8 @@ export class SketchEditor {
     this.dirSnap = null;
     const map = this.map();
     const rawHit = this.hitEntity(x, y, exclude);
-    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' ? rawHit : null;
+    // nothing snaps onto the letters of a text (only to its points)
+    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' && rawHit.type !== 'text' ? rawHit : null;
     if (hit && hit.type === 'point') {
       const e = map.get(hit.id);
       if (e && e.type === 'point') return { kind: 'point', id: e.id, pos: [e.x, e.y] };
@@ -1191,6 +1201,32 @@ export class SketchEditor {
         this.showPolySides(x, y);
         return;
       }
+      case 'text': {
+        // Onshape Text: a corner of its box (the start of the baseline), then its height; then type the text
+        if (this.tool.k !== 'multi') {
+          this.tool = { k: 'multi', pts: [{ pos, snap }] };
+          this.updatePreview();
+          return;
+        }
+        const a = this.tool.pts[0];
+        const h = Math.abs(pos[1] - a.pos[1]);
+        if (h < 1e-9) return;
+        const up = pos[1] > a.pos[1];
+        let id = '';
+        this.change((d) => {
+          const tx = addText(d, [a.pos[0], up ? a.pos[1] : pos[1]], [a.pos[0], up ? pos[1] : a.pos[1]], t('Text'), 'sans', cons);
+          id = tx.id;
+          // the snapped first click holds the baseline's start (a box drawn downwards: its top)
+          applySnap(d, up ? tx.p1 : tx.p2, a.snap);
+        });
+        this.endTool();
+        ed.setSketchTool('select');
+        if (id) {
+          ed.setSketchSelection([id]);
+          useEditor.setState((s) => (s.sketch ? { sketch: { ...s.sketch, editText: id } } : {}));
+        }
+        return;
+      }
       case 'circle3pt':
       case 'arc3pt':
       case 'arcCenter':
@@ -1748,6 +1784,8 @@ export class SketchEditor {
         case 'spline':
           // the tangent handles move with the curve
           return [...ent.pts, ...[ent.h0, ent.h1].filter((h): h is string => !!h && map.has(h))];
+        case 'text':
+          return [ent.p1, ent.p2];
       }
     };
     if (e.type === 'circle') {
@@ -2427,7 +2465,7 @@ export class SketchEditor {
     this.clear(this.pickRoot);
     this.clearLabels();
     const ctx = this.evalCtx();
-    const all = expandPatterns(d.entities, d.patterns, ctx);
+    const all = expandTexts(expandPatterns(d.entities, d.patterns, ctx));
     const map = entityMap(all);
     const reg = this.engine.registry;
     // highlight the geometry of a hovered constraint / dimension
@@ -2459,6 +2497,22 @@ export class SketchEditor {
     const ptIds: number[] = [];
     const ptByColor = new Map<number, Vec2[]>();
     for (const e of all) {
+      // the letters and box of a text: drawn in its colour and picked as the text itself
+      const text = textOfPart(e.id);
+      if (text) {
+        if (e.type === 'point') continue;
+        const color = this.statusColor(text, !!e.construction);
+        const emphasized = color === COLORS.selected || color === COLORS.hover;
+        const key = `${color}|${!!e.construction}|${emphasized}`;
+        const g = groups.get(key) ?? { color, construction: !!e.construction, width: emphasized ? 3 : 1.8, segs: [] };
+        const segs = polylineSegments(entityPolyline(e, map));
+        g.segs.push(...segs);
+        groups.set(key, g);
+        const id = reg.alloc({ t: 'edit', id: text, entType: 'text', priority: 38, radius: 6 });
+        pickSegs.push(...segs);
+        for (let i = 0; i < segs.length / 3; i++) pickIds.push(id);
+        continue;
+      }
       const copy = isCopyId(e.id);
       if (e.type === 'point') {
         const owner = e.owner ? map.get(e.owner) : undefined;
@@ -2816,6 +2870,11 @@ export class SketchEditor {
         case 'spline': {
           const p = pointOf(map, e.pts[Math.floor(e.pts.length / 2)]);
           return { p, n: [0, 1] };
+        }
+        case 'text': {
+          const a = pointOf(map, e.p1);
+          const b = pointOf(map, e.p2);
+          return { p: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n: [-1, 0] };
         }
       }
     } catch {
@@ -3225,6 +3284,13 @@ export class SketchEditor {
       case 'multi': {
         const P = [...st.pts.map((p) => p.pos), c];
         switch (this.toolName) {
+          case 'text': {
+            // the box up (or down) to the cursor, with the letters of the default text
+            const h = Math.abs(P[1][1] - P[0][1]);
+            if (h > 1e-9) for (const pl of textOutline(t('Text'), 'sans', [P[0][0], Math.min(P[0][1], P[1][1])], h)) poly(pl);
+            else seg(P[0], P[1]);
+            break;
+          }
           case 'circle3pt':
           case 'arc3pt':
             if (P.length === 2) seg(P[0], P[1]);

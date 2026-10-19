@@ -1,6 +1,19 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { execSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Connect, type Plugin } from 'vite'
+
+/** The app's version shown in the status bar: the date and short hash of the commit it is built from. */
+function appVersion(): { date: string; sha: string } {
+  const git = (args: string) => {
+    try {
+      return execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    } catch {
+      return ''
+    }
+  }
+  return { date: git('log -1 --format=%cs') || new Date().toISOString().slice(0, 10), sha: git('rev-parse --short HEAD') || 'local' }
+}
 
 /**
  * Agent bridge: command-line agents POST /__webcad/rpc {method, args, tab?}; every open WebCAD
@@ -207,6 +220,7 @@ export default defineConfig({
   // relative base: the build can be served from any folder of any static server
   base: './',
   plugins: [react(), offline(), agentBridge()],
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   worker: { format: 'es' },
   // Full-page HMR reloads would drop unsaved sketch edits; reload manually instead.
   server: { hmr: false },

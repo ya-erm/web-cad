@@ -58,6 +58,53 @@ export function sewFaces(faces: R.Face[]): Shape3D {
   return out;
 }
 
+/**
+ * `target` split by `tool` (faces, OCCT Splitter) into pieces: a solid's solids, or a surface's faces grouped into
+ * sheets — faces stay together across their shared edges except where the edge lies on the tool (the cut).
+ */
+export function splitPieces(target: Shape3D, tool: R.AnyShape): Shape3D[] {
+  const oc = R.getOC();
+  const sp = new oc.BRepAlgoAPI_Splitter();
+  const args = new oc.NCollection_List_TopoDS_Shape();
+  args.Append(target.wrapped);
+  const tools = new oc.NCollection_List_TopoDS_Shape();
+  tools.Append(tool.wrapped);
+  sp.SetArguments(args);
+  sp.SetTools(tools);
+  sp.Build(new oc.Message_ProgressRange());
+  const done = sp.IsDone();
+  const res = done ? R.cast(sp.Shape()) : null;
+  sp.delete();
+  args.delete();
+  tools.delete();
+  if (!res) fail('Split failed');
+  if (!isSurface(target)) return solidsOf(res);
+  const faces = [...R.iterTopo(res.wrapped, 'face')].map((x) => R.cast(x) as R.Face);
+  // union-find of faces over the edges they share off the tool
+  const root = faces.map((_, i) => i);
+  const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i])));
+  const seen = new Map<number, { e: R.Edge; face: number }[]>();
+  const onTool = (e: R.Edge) => {
+    const v = R.makeVertex(e.pointAt(0.5));
+    const d = R.measureDistanceBetween(v, tool);
+    v.delete();
+    return d < 1e-5;
+  };
+  faces.forEach((f, fi) => {
+    for (const e of f.edges) {
+      const bucket = seen.get(e.hashCode) ?? [];
+      const other = bucket.find((b) => b.e.isSame(e) && b.face !== fi);
+      if (!other) {
+        bucket.push({ e, face: fi });
+        seen.set(e.hashCode, bucket);
+      } else if (find(other.face) !== find(fi) && !onTool(e)) root[find(fi)] = find(other.face);
+    }
+  });
+  const groups = new Map<number, R.Face[]>();
+  faces.forEach((f, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), f]));
+  return [...groups.values()].map((g) => sewFaces(g));
+}
+
 export function compoundOf(shapes: R.AnyShape[]): Shape3D {
   if (shapes.length === 1) return shapes[0] as Shape3D;
   // makeCompound deletes its inputs' wrappers, so pass clones.

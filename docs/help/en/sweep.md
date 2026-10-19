@@ -32,6 +32,12 @@ width: 480
 
 The message "Path edges must be connected" means the selected curves do not form a continuous chain.
 
+## Surface {#surface}
+
+The **Solid / Surface** switch at the top of the dialog. As a **Surface** the sweep takes **Sketch curves and edges**, open or closed; curves joined end to end go as one chain. A [surface](offset-surface#surfaces) "Surface N" with no thickness comes out: a closed curve gives a tube with open ends, not a solid. **Keep profile orientation** works as for a solid; Booleans do not apply to a surface.
+
+For example, a circle of radius 5 mm on the **Top** plane swept along a vertical line 15 mm long gives the side of a cylinder, area 2π·5·15 ≈ 471.2 mm², with no bottom or lid.
+
 ## See also {#see-also}
 
 [Loft](loft), [Extrude](extrude).

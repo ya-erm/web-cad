@@ -9,6 +9,7 @@ import { STD_PLANES, frameFromNormal, toWorld, v3 } from '../core/math';
 import { adaptRef, FIELD_SPECS, keepRefs, type SelToken } from '../core/fieldSpecs';
 import { computeRegions, type SketchRegion } from '../sketch/regions';
 import { arcAngles, entityMap, pointOf } from '../sketch/curves';
+import { isTextPart } from '../sketch/text';
 import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
 import type { BuildResult, PartMesh, SketchResult, ThreadResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
@@ -711,15 +712,45 @@ export class Engine {
    * Section view (Onshape "Section view"): parts are clipped by the section plane. Solids have
    * outward triangles, so the inside seen through the cut is drawn as flat back faces (the cap).
    */
-  private applySection() {
+  /** The section view's clipping planes (none: no section). */
+  private sectionPlanes(): THREE.Plane[] | null {
     const sec = useEditor.getState().section;
-    let planes: THREE.Plane[] | null = null;
-    if (sec) {
-      const n = new THREE.Vector3(...sec.normal).normalize();
-      const o = new THREE.Vector3(...sec.origin).addScaledVector(n, sec.offset);
-      // keep the material behind the plane (the side its normal points away from)
-      planes = [new THREE.Plane().setFromNormalAndCoplanarPoint(sec.flip ? n : n.clone().negate(), o)];
+    if (!sec) return null;
+    const n = new THREE.Vector3(...sec.normal).normalize();
+    const o = new THREE.Vector3(...sec.origin).addScaledVector(n, sec.offset);
+    // keep the material behind the plane (the side its normal points away from)
+    return [new THREE.Plane().setFromNormalAndCoplanarPoint(sec.flip ? n : n.clone().negate(), o)];
+  }
+
+  /**
+   * The preview of an edited feature cut by the section too (Hole, Extrude…): its parts with caps of their cut, its
+   * edges and tool body clipped.
+   */
+  private clipPreview(planes: THREE.Plane[] | null) {
+    for (const o of [...this.previewGroup.children]) {
+      if (o.userData.sectionCap) {
+        this.previewGroup.remove(o);
+        continue;
+      }
+      const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      for (const m of Array.isArray(mat) ? mat : mat ? [mat] : []) {
+        m.clippingPlanes = planes;
+        m.needsUpdate = true;
+      }
+      // a preview part (not the coloured tool body): the cut shows as the solid's inside, as parts do
+      if (o instanceof THREE.Mesh && o.userData.previewPart) (o.material as THREE.Material).side = planes ? THREE.FrontSide : THREE.DoubleSide;
+      if (planes && o instanceof THREE.Mesh && o.userData.previewPart) {
+        const color = ((o.material as THREE.MeshStandardMaterial).color ?? new THREE.Color(0xa9bfd6)).clone().multiplyScalar(0.62);
+        const cap = new THREE.Mesh(o.geometry, new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, clippingPlanes: planes }));
+        cap.userData.sectionCap = true;
+        this.previewGroup.add(cap);
+      }
     }
+  }
+
+  private applySection() {
+    const planes = this.sectionPlanes();
+    this.clipPreview(planes);
     // threads are cut by the section like the parts they are in
     if (this.threadObj) {
       const m = (this.threadObj as THREE.Mesh).material as THREE.Material;
@@ -786,6 +817,8 @@ export class Engine {
         }
         continue;
       }
+      // a text's box is for editing the sketch only
+      if (e.construction && isTextPart(e.id)) continue;
       const poly = entityPolyline(e, map);
       const segs = polylineSegments(poly);
       (e.construction ? constr : normal).push(...segs);
@@ -894,6 +927,7 @@ export class Engine {
         geo,
         new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color), roughness: 0.6, transparent: true, opacity: 0.82, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
       );
+      mesh.userData.previewPart = true;
       const segs: number[] = [];
       for (let i = 0; i < p.edgeRanges.length / 2; i++) {
         if (p.edges[i]?.seam) continue;
@@ -921,6 +955,7 @@ export class Engine {
     for (const m of pv.mates ?? []) this.previewGroup.add(mateTriad(m.frame));
     if (useEditor.getState().showSketches) for (const s of pv.sketches ?? []) this.addSketch(s);
     if (pv.threads?.length) this.previewGroup.add(threadObject(pv.threads));
+    this.clipPreview(this.sectionPlanes());
   }
 
   /** A mate connector: triad + ring, kept at a constant screen size (see render), pickable. */

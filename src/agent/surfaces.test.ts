@@ -54,6 +54,30 @@ describe('Surfaces', () => {
     expect(model.parts).toHaveLength(3);
   }, 60000);
 
+  it('extrudes open sketch curves into a surface', async () => {
+    const { model } = await block([
+      // an L of two lines on a plane above the block, 6 mm up
+      { op: 'sketch', name: 'L', shapes: [{ type: 'line', from: [-10, 0], to: [10, 0] }, { type: 'line', from: [10, 0], to: [10, 8] }] },
+      { op: 'extrude', sketch: 'L', surface: true, depth: 6 },
+    ]);
+    const s = model.parts.find((p) => p.surface)!;
+    expect(s.name).toBe('Surface 1');
+    expect(s.faces).toBe(2);
+    expect(s.area).toBeCloseTo(20 * 6 + 8 * 6, 3);
+  }, 60000);
+
+  it('encloses a volume between surfaces into a solid', async () => {
+    const { model } = await block([
+      // the top face copied, then taken off the block: an open box and its lid
+      { op: 'offsetSurface', faces: { normal: 'z', pick: '+z' } },
+      { op: 'deleteFace', faces: { normal: 'z', pick: '+z', part: 'Part 1' }, heal: false },
+      { op: 'enclose', surfaces: ['Part 1', 'Surface 1'] },
+    ]);
+    expect(model.parts).toHaveLength(1);
+    expect(model.parts[0].surface).toBeUndefined();
+    expect(model.parts[0].volume).toBeCloseTo(40 * 30 * 10, 3);
+  }, 60000);
+
   it('deletes faces without healing: the part becomes a surface', async () => {
     const { model } = await block([{ op: 'deleteFace', faces: { normal: 'z', pick: '+z' }, heal: false }]);
     expect(model.parts[0].surface).toBe(true);
