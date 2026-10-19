@@ -11,6 +11,7 @@ import { fileVersions } from '../store/versions';
 import { Icon, type IconName } from './icons';
 import { t } from '../i18n';
 import { getEngine } from '../viewport/engineRef';
+import { DEFAULT_DENSITY, massKg, partDensity } from '../core/materials';
 
 export function ContextMenu() {
   const menu = useEditor((s) => s.contextMenu);
@@ -126,9 +127,9 @@ export function MeasurePanel() {
       case 'volume':
         return `${formatNumber(v / f ** 3, 3)} ${u}³`;
       case 'mass': {
+        // the kernel gives cm³ (density 1): the part's own density, steel without a material
         const partId = selection[0]?.kind === 'part' ? selection[0].partId : null;
-        const density = (partId && studio?.parts[partId]?.density) || 7.85;
-        return `${formatNumber((v * density) / 1000, 4)} kg (ρ=${density})`;
+        return massText((v * partDensity(partId ? studio?.parts[partId] : undefined)) / 1000);
       }
       case 'angle':
         return `${formatNumber((v * 180) / Math.PI, 3)}°`;
@@ -136,8 +137,18 @@ export function MeasurePanel() {
         return formatNumber(v, 4);
     }
   };
+  // one part: its material (a click changes it); several: their total mass by their materials
+  const onePart = selection.length === 1 && selection[0].kind === 'part' && res.items.some((i) => i.kind === 'mass') ? selection[0].partId : null;
+  const meta = onePart ? studio?.parts[onePart] : undefined;
+  const totalMass = res.volumes?.reduce((s, x) => s + massKg(x.volume, partDensity(studio?.parts[x.partId])), 0);
   return (
     <div className="measure-panel">
+      {onePart && (
+        <div className="mrow mline" title={t('Change the material')} onClick={() => useEditor.setState({ materialOpen: { partIds: [onePart] } })}>
+          <span>{t('Material')}</span>
+          <span>{meta?.material ? `${meta.material} · ${formatNumber(partDensity(meta), 3)} g/cm³` : `${t('No material')} (${formatNumber(DEFAULT_DENSITY, 3)} g/cm³)`}</span>
+        </div>
+      )}
       {res.items.map((it) => (
         <div
           key={it.label}
@@ -149,6 +160,12 @@ export function MeasurePanel() {
           <span>{fmt(it.value, it.kind)}</span>
         </div>
       ))}
+      {totalMass !== undefined && (
+        <div className="mrow">
+          <span>{t('Total mass')}</span>
+          <span>{massText(totalMass)}</span>
+        </div>
+      )}
       {res.centerOfMass && (
         <div className="mrow">
           <span>{t('Center of mass')}</span>
@@ -157,6 +174,11 @@ export function MeasurePanel() {
       )}
     </div>
   );
+}
+
+/** A mass: grams under a kilogram, kilograms over. */
+function massText(kg: number): string {
+  return kg < 1 ? `${formatNumber(kg * 1000, 4)} g` : `${formatNumber(kg, 4)} kg`;
 }
 
 const RES: Record<string, [number, number]> = {

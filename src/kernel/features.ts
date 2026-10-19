@@ -59,7 +59,6 @@ import {
   resolveRegion,
   resolveSketchPlane,
   worldGeometryForRef,
-  type ProfileFace,
 } from './refs';
 import { adoptThreads, removePart, setPart, setSurface, type BuildState, type PartState, type ThreadState } from './state';
 import { standardHole, type ThreadSpec } from '../core/holes';
@@ -345,17 +344,28 @@ function buildHelix(ctx: Ctx, f: FeatureOf<'helix'>): FeatureOutput {
 // Body features
 // ---------------------------------------------------------------------------
 
-function upToDistance(ctx: Ctx, ref: SelRef | undefined, pf: ProfileFace, dir: Vec3): number {
+function upToDistance(ctx: Ctx, ref: SelRef | undefined, origin: Vec3, dir: Vec3): number {
   if (!ref) fail('Select a face or plane to extrude up to');
   const target = ref.kind === 'face' || ref.kind === 'plane' ? resolvePlaneRef(ctx.st, ref) : null;
   if (target) {
     const denom = v3.dot(target.normal, dir);
     if (Math.abs(denom) < 1e-6) fail('Up to face must not be parallel to the extrude direction');
     // distance from profile plane origin along dir to the target plane
-    return v3.dot(v3.sub(target.origin, pf.frame.origin), target.normal) / denom;
+    return v3.dot(v3.sub(target.origin, origin), target.normal) / denom;
   }
   const pt = resolvePoint(ctx.st, ref);
-  return v3.dot(v3.sub(pt, pf.frame.origin), dir);
+  return v3.dot(v3.sub(pt, origin), dir);
+}
+
+/** Onshape Starting offset: how far along `dir` from `origin` (on the sketch plane) the extrude starts. */
+function startShift(ctx: Ctx, p: FeatureOf<'extrude'>['params'], origin: Vec3, dir: Vec3): number {
+  if (!p.startOffset) return 0;
+  if (p.startType === 'entity') {
+    const ref = p.startEntity?.[0];
+    if (!ref) fail('Select a face, plane or point for the extrude to start at');
+    return upToDistance(ctx, ref, origin, dir);
+  }
+  return len(ctx, p.startDistance || '0 mm', 'Start offset') * (p.startFlip ? -1 : 1);
 }
 
 /** Extrude as a surface (Onshape: Surface): sketch curves, open or closed, swept along their sketch's normal. */
@@ -382,6 +392,9 @@ function buildExtrudeSurface(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
       else if (p.endType2 === 'throughAll') start = -big;
       else fail('A surface extrudes to a depth or through all (not up to a face)');
     }
+    const s0 = startShift(ctx, p, getSketch(st, r.sketchId).frame.origin, dir);
+    start += s0;
+    end += s0;
     if (Math.abs(end - start) < 1e-9) fail('Extrude depth must not be zero');
     for (const e of resolveCurveEdges(st, r)) {
       const moved = Math.abs(start) > 1e-12 ? R.cast(R.translate(e.wrapped, v3.scale(dir, start))) : e;
@@ -422,7 +435,7 @@ function buildExtrude(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
         if (!p.secondEnd) start = 0;
         break;
       case 'upToFace':
-        end = upToDistance(ctx, p.upTo[0], pf, dir);
+        end = upToDistance(ctx, p.upTo[0], pf.frame.origin, dir);
         break;
     }
     if (p.secondEnd && p.endType !== 'symmetric') {
@@ -434,9 +447,15 @@ function buildExtrude(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
           start = -big;
           break;
         case 'upToFace':
-          start = upToDistance(ctx, p.upTo2[0], pf, dir);
+          start = upToDistance(ctx, p.upTo2[0], pf.frame.origin, dir);
           break;
       }
+    }
+    // a starting offset moves the extrude away from the sketch plane; up to a face still ends at that face
+    const s0 = startShift(ctx, p, pf.frame.origin, dir);
+    if (s0) {
+      if (p.endType !== 'upToFace') end += s0;
+      if (!p.secondEnd || p.endType === 'symmetric' ? true : p.endType2 !== 'upToFace') start += s0;
     }
     if (Math.abs(end - start) < 1e-9) fail('Extrude depth must not be zero');
     let solid = prism(pf.face, dir, start, end);
@@ -450,7 +469,8 @@ function buildExtrude(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
     }
     if (p.draft) {
       const a = ang(ctx, p.draftAngle, 'Draft angle') * (p.draftFlip ? -1 : 1);
-      solid = draftSides(solid, pf.frame, dir, a);
+      // the draft turns about the plane the extrude starts at
+      solid = draftSides(solid, s0 ? { ...pf.frame, origin: v3.add(pf.frame.origin, v3.scale(dir, s0)) } : pf.frame, dir, a);
     }
     tools.push(solid);
   }

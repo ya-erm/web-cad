@@ -13,7 +13,7 @@ width: 640
 
 | Selection | Values |
 |---|---|
-| Part | **Volume**, **Surface area**, **Mass**, **Center of mass** (X, Y, Z) |
+| Part | **Material**, **Volume**, **Surface area**, **Mass** (by its material's density), **Center of mass** (X, Y, Z) |
 | Face | **Area**; for a cylindrical face, also **Radius** |
 | Edge | **Length**; for a circle or arc, also **Radius** and **Diameter** |
 | Vertex or origin | **X**, **Y**, **Z** coordinates |
@@ -37,4 +37,17 @@ The maximum distance between straight edges and planar faces is exact (it is alw
 
 > **Tip.** To quickly get the mass and volume of a part, right-click any of its faces and choose **Mass properties**; the whole part is selected.
 
-> **Limitation.** Mass is calculated with a density of 7.85 g/cm³ (steel); you cannot choose a material in the UI yet.
+## Material and mass {#material}
+
+A part's mass comes from its material's density. To set the material, click the **Material** row of the panel, or choose **Material…** in the part's context menu (in the [parts list](parts) or on the model). Pick a library material — each shows its density — or **Custom**: type a name and a density in g/cm³. With several parts selected, all of them get it.
+
+| Library materials | Density, g/cm³ |
+|---|---|
+| Steel, stainless steel, cast iron | 7.85; 7.93; 7.2 |
+| Aluminum, titanium | 2.7; 4.51 |
+| Brass, bronze, copper | 8.5; 8.8; 8.96 |
+| PLA, ABS, PETG, nylon (PA6) | 1.24; 1.04; 1.27; 1.14 |
+| Polycarbonate, acrylic (PMMA) | 1.2; 1.18 |
+| Wood (pine), plywood, glass | 0.5; 0.6; 2.5 |
+
+A part with no material weighs as steel (7.85 g/cm³). A mass under a kilogram is shown in grams. For several parts the panel shows the **Total mass**, each by its own material. The material's name goes to the **Material** column of an assembly's [bill of materials](assembly-bom).

@@ -67,6 +67,8 @@ An invalid expression is highlighted in red and is not applied. Hover over the f
 
 Change the number with the ▲▼ arrows at the field's right end (they show on hover) or the `↑` and `↓` keys. Holding a button repeats the step; with `Shift` the step is 10 times bigger, with `Alt` 10 times smaller. The step suits the unit: 1 mm, 0.1 cm or inch, 1°; a decimal number with no unit (0.5, say) moves by 0.1. An expression such as `#w / 2` is not stepped.
 
+To set the main value faster, just start typing a number while no field has the focus: it goes into the dialog's first value field (an extrude's **Depth**); then press `Enter`.
+
 The arrows button next to the field (**Opposite direction**) flips the direction.
 
 ## Operation type {#operation}

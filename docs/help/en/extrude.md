@@ -16,8 +16,10 @@ width: 600
 2. Click **Extrude** (`Shift+E`).
 3. Choose the operation type: **New**, **Add**, **Remove** or **Intersect**.
 4. Choose the **End type** and set the **Depth** (or a face for **Up to face**).
-5. If needed, turn on **Thin**, **Draft** or **Second end position**.
+5. If needed, turn on **Thin**, **Draft**, **Starting offset** or **Second end position**.
 6. Click ✓ (`Enter`).
+
+You can type the depth right away: with the dialog open, type a number — it goes into the **Depth** field — and press `Enter`.
 
 ## Options {#options}
 
@@ -31,6 +33,7 @@ width: 600
 | **Opposite direction** | For **Up to face** and **Through all**: extrudes to the other side. |
 | **Thin**, **Thickness** | Instead of a solid body, builds a wall of the given thickness along the outer boundary of the profile. The button next to the thickness moves the wall outward. |
 | **Draft**, **Draft angle** | Tilts the side faces by the given angle (tapering in or out). The button flips the tilt direction. |
+| **Starting offset** | The extrude starts away from the sketch plane: **Start type: By distance** — by the **Start offset** along the extrude direction (the button next to it — the other way); **From entity** — at a selected face, plane, mate connector or point. The depth counts from the new start; **Up to face** still ends at its face. A draft turns about the new start. |
 | **Second end position** | Also extrudes to the opposite side of the sketch plane; the second direction has its own **End type** (**Blind**, **Up to face**, **Through all**) and **Depth**. Not available for **Symmetric**. |
 | **Merge with all** / **Merge scope** | For **Add**, **Remove**, **Intersect**: the parts to apply the operation to. |
 

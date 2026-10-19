@@ -8,7 +8,7 @@ import { defineConfig, type Connect, type Plugin } from 'vite'
  * The app's version shown in the status bar: the semver of package.json ("version", raised with
  * `npm version minor|patch --no-git-tag-version`), and the date and short hash of the commit it is built from.
  */
-function appVersion(): { version: string; date: string; sha: string } {
+function appVersion(): { version: string; date: string; time: string; sha: string } {
   const git = (args: string) => {
     try {
       return execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
@@ -17,7 +17,12 @@ function appVersion(): { version: string; date: string; sha: string } {
     }
   }
   const version = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version ?? '0.0.0'
-  return { version, date: git('log -1 --format=%cs') || new Date().toISOString().slice(0, 10), sha: git('rev-parse --short HEAD') || 'local' }
+  return {
+    version,
+    date: git('log -1 --format=%cs') || new Date().toISOString().slice(0, 10),
+    time: git('log -1 --format=%cd --date=format:%H:%M'),
+    sha: git('rev-parse --short HEAD') || 'local',
+  }
 }
 
 /**

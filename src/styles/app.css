@@ -1608,6 +1608,35 @@ textarea {
 .measure-panel .mrow span:first-child {
   color: var(--text-2);
 }
+/* the material dialog: the library as a list of rows with densities */
+.material-dialog {
+  width: 380px;
+}
+.material-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin: 8px 0;
+}
+.material-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.material-row:hover {
+  background: var(--hover);
+}
+.material-row.on {
+  background: var(--accent-soft);
+}
+.material-row .material-density {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 12px;
+}
 /* a distance row: a click draws its segment on the model; the drawn one is marked */
 .measure-panel .mrow.mline {
   cursor: pointer;
@@ -1891,6 +1920,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* as wide as its text (up to the max), not squeezed by the room left at a window edge — it is moved inside */
+  width: max-content;
   max-width: 320px;
   padding: 5px 9px;
   border-radius: 5px;
@@ -1909,7 +1940,8 @@ textarea {
   transform: translate(-50%, -100%);
 }
 .tooltip span {
-  white-space: normal;
+  /* a "\n" in the text starts a new line */
+  white-space: pre-line;
 }
 .tooltip kbd {
   font-family: inherit;

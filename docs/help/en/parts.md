@@ -28,6 +28,7 @@ Right-click a part in the list:
 | **Hide** / **Show** | Part visibility. |
 | **Hide other parts** | Leaves only this part visible. |
 | **Show all** | Shows all parts. |
+| **Material…** | The part's material (or all the selected parts') from the library or your own — the mass comes from its density, see [Measure](measure#material). |
 | **Export part** | Opens the export dialog for this part only, see [Import and export](import-export). |
 | **Delete part** | Adds a [Delete part](delete-part) feature to the history. |
 | **Change color** | A palette of 20 colors and **Custom color…** for any color. |

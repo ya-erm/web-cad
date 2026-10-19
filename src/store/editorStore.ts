@@ -155,6 +155,8 @@ export interface EditorState {
   measure: MeasureResult | null;
   contextMenu: ContextMenuState | null;
   exportOpen: { partIds: string[] } | null;
+  /** The material dialog, for these parts. */
+  materialOpen: { partIds: string[] } | null;
   toast: { id: number; text: string; kind: 'info' | 'error' } | null;
   perspective: boolean;
   rotationMode: 'free' | 'turntable';
@@ -318,6 +320,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   measure: null,
   contextMenu: null,
   exportOpen: null,
+  materialOpen: null,
   toast: null,
   perspective: false,
   showExpressions: (() => {

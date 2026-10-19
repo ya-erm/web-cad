@@ -93,6 +93,20 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'expr', key: 'thickness', label: 'Thickness', unit: 'length', flipKey: 'thinFlip', when: (p) => !!p.thin && !isSurfaceBody(p) },
     { kind: 'check', key: 'draft', label: 'Draft', when: (p) => !isSurfaceBody(p) },
     { kind: 'expr', key: 'draftAngle', label: 'Draft angle', unit: 'angle', flipKey: 'draftFlip', when: (p) => !!p.draft && !isSurfaceBody(p) },
+    // Onshape Starting offset: away from the sketch plane by a distance, or at a face / plane / connector / point
+    { kind: 'check', key: 'startOffset', label: 'Starting offset' },
+    {
+      kind: 'select',
+      key: 'startType',
+      label: 'Start type',
+      options: [
+        ['blind', 'By distance'],
+        ['entity', 'From entity'],
+      ],
+      when: (p) => !!p.startOffset,
+    },
+    { kind: 'expr', key: 'startDistance', label: 'Start offset', unit: 'length', flipKey: 'startFlip', when: (p) => !!p.startOffset && p.startType !== 'entity' },
+    { kind: 'sel', key: 'startEntity', when: (p) => !!p.startOffset && p.startType === 'entity' },
     { kind: 'check', key: 'secondEnd', label: 'Second end position', when: (p) => p.endType !== 'symmetric' },
     {
       kind: 'select',

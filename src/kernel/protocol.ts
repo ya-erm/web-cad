@@ -262,6 +262,8 @@ export interface MeasureResult {
   points?: [Vec3, Vec3];
   /** The segments of the distances: minimum, maximum, centre to centre. */
   lines?: { key: string; points: [Vec3, Vec3] }[];
+  /** Several parts: each one's volume, mm³ (their total mass by their materials). */
+  volumes?: { partId: string; volume: number }[];
   centerOfMass?: Vec3;
 }
 

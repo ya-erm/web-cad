@@ -395,17 +395,20 @@ export class StudioBuilder {
     // several: their total length / area
     if (refs.length > 1 && lengths.length === refs.length) items.push({ label: 'Total length', value: lengths.reduce((a, b) => a + b, 0), kind: 'length' });
     if (refs.length > 1 && areas.length === refs.length) items.push({ label: 'Total area', value: areas.reduce((a, b) => a + b, 0), kind: 'area' });
+    let volumes: MeasureResult['volumes'];
     if (refs.length > 1 && refs.every((r) => r.kind === 'part')) {
       const parts = resolveParts(st, refs);
       let vol = 0;
+      volumes = [];
       for (const p of parts) {
         const props = R.measureShapeVolumeProperties(p.shape);
         vol += props.volume;
+        volumes.push({ partId: p.id, volume: props.volume });
         props.delete();
       }
       items.push({ label: 'Total volume', value: vol, kind: 'volume' });
     }
-    return { items, points, lines, centerOfMass };
+    return { items, points, lines, volumes, centerOfMass };
   }
 
   projection(partIds: string[], orientation: ViewOrientation, withHidden: boolean): { edges: ProjectedEdge[]; bounds: [Vec2, Vec2] | null } {

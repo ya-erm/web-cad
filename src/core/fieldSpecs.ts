@@ -57,6 +57,7 @@ export const FIELD_SPECS: FieldSpecs = {
     curves: { label: 'Sketch curves', accepts: ['sketchCurve'] },
     upTo: { label: 'Up to', accepts: ['planarFace', 'plane', 'vertex', 'sketchPoint'], max: 1 },
     upTo2: { label: 'Up to', accepts: ['planarFace', 'plane', 'vertex', 'sketchPoint'], max: 1 },
+    startEntity: { label: 'Start at: face, plane, connector or point', accepts: ['planarFace', 'plane', 'vertex', 'sketchPoint'], max: 1 },
     parts: { label: 'Merge scope', accepts: ['part'] },
   },
   revolve: {

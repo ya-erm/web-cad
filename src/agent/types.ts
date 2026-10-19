@@ -115,6 +115,8 @@ export type AgentOp =
       depth?: Num;
       end?: 'blind' | 'symmetric' | 'throughAll' | { upToFace: FaceQuery };
       flip?: boolean;
+      /** Onshape Starting offset: a distance along the extrude direction (negative — back), or a plane / face to start at. */
+      start?: Num | { from: PlaneSpec };
       boolean?: BoolOp;
       draft?: Num;
       thin?: Num;
@@ -314,7 +316,11 @@ export type AgentOp =
     }
   /** Choose options of configuration inputs: input name → option name (a checkbox input: true / false too; a variable input: its value). */
   | { op: 'configure'; values: Record<string, string | number | boolean> }
-  | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean };
+  /**
+   * `material`: a library one by id or name ("aluminum", "PLA" — its density with it) or one of your own (with `density`,
+   * g/cm³); `material: null` — none (mass as steel).
+   */
+  | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean; material?: string | null; density?: number };
 
 /**
  * Where a mate attaches on an instance: a face / edge (queries in assembly coordinates, on that instance), the
@@ -403,6 +409,10 @@ export interface PartSummary {
   size: Pt3;
   volume?: number;
   area?: number;
+  /** Its material's name (none — no material: the mass is as of steel, 7.85 g/cm³). */
+  material?: string;
+  /** Mass, kg, by its material's density. */
+  mass?: number;
   faces: number;
   edges: number;
   /** A surface body (no volume). */

@@ -26,6 +26,7 @@ import {
 } from '../core/config';
 import { derivesFrom, sourceStudio, versionSnapshot, versionStudioId } from '../core/derived';
 import { ANSI_SIZE_NAMES, ansiDefaultDepths, ansiHole, ansiThreads, ISO_SIZES, ISO_SIZE_NAMES, isoDefaultDepths, isoHole, isoPitches } from '../core/holes';
+import { findMaterial, massKg, MATERIALS, partDensity } from '../core/materials';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
@@ -715,6 +716,18 @@ class Runner {
         } else p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
         p.depth = this.expr(op.depth, 'length', '10 mm');
         p.flip = !!op.flip;
+        if (op.start !== undefined) {
+          p.startOffset = true;
+          if (typeof op.start === 'object') {
+            p.startType = 'entity';
+            p.startEntity = [await this.planeRef(op.start.from)];
+          } else {
+            p.startType = 'blind';
+            const back = typeof op.start === 'number' && op.start < 0;
+            p.startDistance = this.expr(back ? -(op.start as number) : op.start, 'length', '0 mm');
+            if (back) p.startFlip = true;
+          }
+        }
         if (op.boolean) p.op = op.boolean;
         if (op.end === 'symmetric' || op.end === 'throughAll' || op.end === 'blind') p.endType = op.end;
         else if (op.end && typeof op.end === 'object') {
@@ -1242,6 +1255,17 @@ class Runner {
         if (op.name !== undefined) meta.name = op.name;
         if (op.color !== undefined) meta.color = op.color;
         if (op.hidden !== undefined) meta.hidden = op.hidden;
+        if (op.material === null) {
+          delete meta.material;
+          delete meta.density;
+        } else if (op.material !== undefined || op.density !== undefined) {
+          // a library material brings its density; one of your own needs it
+          const lib = op.material !== undefined ? findMaterial(op.material) : undefined;
+          if (op.material !== undefined) meta.material = lib ? lib.name : op.material;
+          const density = op.density ?? lib?.density;
+          if (!(density !== undefined && density > 0)) throw new AgentError(`Material "${op.material}" is not in the library (${MATERIALS.map((m) => m.id).join(', ')}): give its density, g/cm³`);
+          meta.density = density;
+        }
         this.s.parts = { ...this.s.parts, [p.id]: meta };
         return;
       }
@@ -1302,6 +1326,10 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       size: round3([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]),
       ...(vol !== undefined ? { volume: round(vol / k ** 3) } : {}),
       ...(area !== undefined ? { area: round(area / k ** 2) } : {}),
+      // its material (none — steel for the mass) and mass, kg
+      ...(studio.parts[p.id]?.material ? { material: studio.parts[p.id].material } : {}),
+      // (to a milligram: small printed parts weigh grams)
+      ...(vol !== undefined && !p.surface ? { mass: Math.round(massKg(vol, partDensity(studio.parts[p.id])) * 1e6) / 1e6 } : {}),
       faces: p.faces.length,
       edges: p.edges.filter((e) => !e.seam).length,
       ...(p.surface ? { surface: true as const } : {}),

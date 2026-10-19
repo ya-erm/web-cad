@@ -61,6 +61,11 @@ export function defaultParams<T extends FeatureType>(type: T): FeatureParamsMap[
       thin: false,
       thickness: '2 mm',
       thinFlip: false,
+      startOffset: false,
+      startType: 'blind',
+      startDistance: '5 mm',
+      startFlip: false,
+      startEntity: [],
     }),
     revolve: () => ({
       ...mergeDefaults,

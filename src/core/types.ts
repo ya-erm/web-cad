@@ -250,6 +250,15 @@ export interface ExtrudeParams extends MergeScope {
   thin: boolean;
   thickness: string;
   thinFlip: boolean;
+  /**
+   * Onshape Starting offset: the extrude starts away from the sketch plane — by `startDistance` along the extrude
+   * direction (`startFlip` — the other way) or, `startType` entity, at a face / plane / connector / point (`startEntity`).
+   */
+  startOffset?: boolean;
+  startType?: 'blind' | 'entity';
+  startDistance?: string;
+  startFlip?: boolean;
+  startEntity?: SelRef[];
 }
 
 export interface RevolveParams extends MergeScope {

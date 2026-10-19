@@ -63,6 +63,14 @@ export function PartsList() {
             }),
           ),
       },
+      {
+        // the selected parts (the one clicked among them), or just this one
+        label: t('Material…'), icon: 'massProps',
+        action: () => {
+          const ids = ed().selection.flatMap((r) => (r.kind === 'part' ? [r.partId] : []));
+          useEditor.setState({ materialOpen: { partIds: ids.includes(id) ? ids : [id] } });
+        },
+      },
       { label: t('Export part'), icon: 'export', action: () => useEditor.setState({ exportOpen: { partIds: [id] } }) },
       { separator: true, label: '' },
       {

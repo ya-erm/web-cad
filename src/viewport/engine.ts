@@ -31,7 +31,7 @@ import { connectorFrame } from '../assembly/mates';
 import { useAssembly } from '../assembly/sources';
 import { makeEvalContext } from '../core/features';
 import { tryEvaluate } from '../core/expr';
-import { CameraController } from './camera';
+import { CameraController, stdViewAxes } from './camera';
 import { ViewCube } from './viewcube';
 import { bestHit, constantIds, makePickMaterial, Picker, PickRegistry } from './picking';
 import {
@@ -2033,6 +2033,7 @@ export class Engine {
             }),
         });
         items.push({ label: t('Mass properties'), icon: 'massProps', action: () => ed.setSelection([{ kind: 'part', partId: pid }]) });
+        items.push({ label: t('Material…'), icon: 'massProps', action: () => useEditor.setState({ materialOpen: { partIds: [pid] } }) });
       }
       items.push({ separator: true, label: '' });
     }
@@ -2078,15 +2079,101 @@ export class Engine {
     }
   }
 
-  /** PNG thumbnail of the current view. */
-  thumbnail(size = 240): string {
-    this.render();
-    const src = this.renderer.domElement;
+  /**
+   * PNG thumbnail for the documents page (`w` × `h`, the card at 2×): the parts alone (no planes, origin, sketches,
+   * connectors, selection) — the sketches if there are no parts, nothing ('') if neither — in an isometric view fitted
+   * to them, rendered off screen at twice the size with multisampling and scaled down, edges as thick as on screen.
+   */
+  thumbnail(w = 480, h = 280): string {
+    const visible = (g: THREE.Object3D) => {
+      const box = new THREE.Box3();
+      g.traverseVisible((o) => {
+        if ((o as THREE.Mesh).isMesh || (o as THREE.Line).isLine) box.expandByObject(o);
+      });
+      return box;
+    };
+    let box = visible(this.partsGroup);
+    const sketchesOnly = box.isEmpty();
+    if (sketchesOnly) box = visible(this.sketchGroup);
+    if (box.isEmpty()) return '';
+    // everything else out of the picture for a moment
+    const keep = sketchesOnly ? this.sketchGroup : this.partsGroup;
+    const hidden = this.scene.children.filter((o) => o.visible && o !== keep && !(o as THREE.Light).isLight);
+    for (const o of hidden) o.visible = false;
+    // an isometric orthographic camera around the box, a little margin
+    // `dir` points from the model towards the camera
+    const { dir, up } = stdViewAxes('iso');
+    const view = dir.clone().negate();
+    const right = new THREE.Vector3().crossVectors(view, up).normalize();
+    const camUp = new THREE.Vector3().crossVectors(right, view).normalize();
+    // the frame of what is actually seen: the meshes' (and lines') points projected on the screen axes
+    const lo = new THREE.Vector2(Infinity, Infinity);
+    const hi = new THREE.Vector2(-Infinity, -Infinity);
+    const p = new THREE.Vector3();
+    keep.traverseVisible((o) => {
+      const pos = ((o as THREE.Mesh).isMesh || (o as THREE.Line).isLine ? (o as THREE.Mesh).geometry?.getAttribute('position') : null) as THREE.BufferAttribute | null;
+      if (!pos) return;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+        const x = p.dot(right);
+        const y = p.dot(camUp);
+        lo.set(Math.min(lo.x, x), Math.min(lo.y, y));
+        hi.set(Math.max(hi.x, x), Math.max(hi.y, y));
+      }
+    });
+    const boxCenter = box.getCenter(new THREE.Vector3());
+    const center = Number.isFinite(lo.x)
+      ? boxCenter
+          .clone()
+          .addScaledVector(right, (lo.x + hi.x) / 2 - boxCenter.dot(right))
+          .addScaledVector(camUp, (lo.y + hi.y) / 2 - boxCenter.dot(camUp))
+      : boxCenter;
+    const hw = Number.isFinite(lo.x) ? (hi.x - lo.x) / 2 : box.getSize(new THREE.Vector3()).length() / 2;
+    const hh = Number.isFinite(lo.y) ? (hi.y - lo.y) / 2 : hw;
+    const aspect = w / h;
+    const half = Math.max(hh, hw / aspect, 1e-6) * 1.1;
+    const radius = box.getSize(new THREE.Vector3()).length() + 1;
+    const cam = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.01, radius * 8);
+    cam.up.copy(camUp);
+    cam.position.copy(center).addScaledVector(dir, radius * 3);
+    cam.lookAt(center);
+    cam.updateProjectionMatrix();
+    this.headlight.position.copy(cam.position);
+    this.headlight.target.position.copy(center);
+    // twice the size, multisampled; fat lines keep their on-screen width in the final picture
+    const W = w * 2;
+    const H = h * 2;
+    const rt = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    setLineResolution(w, h);
+    const pixels = new Uint8Array(W * H * 4);
+    try {
+      this.renderer.setRenderTarget(rt);
+      this.renderer.setClearColor(0x000000, 0);
+      this.renderer.clear();
+      this.renderer.render(this.scene, cam);
+      this.renderer.readRenderTargetPixels(rt, 0, 0, W, H, pixels);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      rt.dispose();
+      setLineResolution(this.width, this.height);
+      for (const o of hidden) o.visible = true;
+      this.requestRender();
+    }
+    // rows come bottom up
+    const big = document.createElement('canvas');
+    big.width = W;
+    big.height = H;
+    const img = big.getContext('2d')!.createImageData(W, H);
+    for (let y = 0; y < H; y++) img.data.set(pixels.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+    big.getContext('2d')!.putImageData(img, 0, 0);
     const c = document.createElement('canvas');
-    const ar = src.width / src.height;
-    c.width = size;
-    c.height = Math.round(size / ar);
-    c.getContext('2d')!.drawImage(src, 0, 0, c.width, c.height);
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(big, 0, 0, w, h);
     return c.toDataURL('image/png');
   }
 }

@@ -79,6 +79,19 @@ export function handleKey(e: KeyboardEvent) {
     return;
   }
   if (ctrl) return;
+  // a feature dialog open: typing a number goes straight into its first value field (Depth of an extrude…)
+  if (ed.editing && ed.editing.draft.type !== 'sketch' && !e.altKey && !e.shiftKey && /^[0-9.,-]$/.test(e.key)) {
+    const input = document.querySelector<HTMLInputElement>('.feature-dialog .expr-field input');
+    if (input) {
+      e.preventDefault();
+      input.focus();
+      // as if typed there over the old value (React sees the input event)
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, e.key === ',' ? '.' : e.key);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.setSelectionRange(input.value.length, input.value.length);
+      return;
+    }
+  }
 
   // views (all modes)
   if (e.shiftKey && /^Digit[1-7]$/.test(e.code)) {

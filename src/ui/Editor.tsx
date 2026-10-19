@@ -21,6 +21,7 @@ import { SketchDialog } from './SketchDialog';
 import { RightPanels } from './RightPanels';
 import { Viewport } from './Viewport';
 import { ContextMenu, ExportDialog, MeasurePanel, Toast } from './Overlays';
+import { MaterialDialog } from './MaterialDialog';
 import { handleKey } from './keyboard';
 import { exportSketch } from './exporting';
 import { DrawingEditor } from '../drawing/DrawingEditor';
@@ -265,8 +266,10 @@ function BottomBar() {
                 : `${t('Under defined')}: ${sv.dof} ${t('degrees of freedom')}`}
           </span>
         )}
-        {building ? <div className="spinner" /> : build && <span>{Math.round(build.timeMs)} ms</span>}
-        <span>{doc.units.length}</span>
+        {building ? <div className="spinner" /> : build && <span title={t('Model rebuild time: how long the last rebuild of the features took')}>{Math.round(build.timeMs)} ms</span>}
+        <span title={`${t('Document units')}: ${doc.units.length}, ${doc.units.angle}\n${t('Numbers without units in fields and dimensions are in these units; change them in Settings')}`}>
+          {doc.units.length}
+        </span>
         <span className="app-version" title={appVersionTitle()}>
           {APP_VERSION}
         </span>
@@ -375,6 +378,7 @@ export function Editor({ onBack }: { onBack: () => void }) {
       <BottomBar />
       <ContextMenu />
       <ExportDialog />
+      <MaterialDialog />
     </div>
   );
 }
