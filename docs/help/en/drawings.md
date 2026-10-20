@@ -195,6 +195,14 @@ caption: A centre line between a hole's outlines on the front view and centre ma
 width: 300
 ```
 
+## Bill of materials and item numbers {#bom}
+
+On a drawing of an [assembly](assembly) (insert its views with **Insert view** → the assembly tab) you can place a bill of materials table and the parts' item numbers.
+
+- **Bill of materials table** (the table button on the toolbar; available when the sheet has a view of an assembly) goes above the title block, as wide as it. Its columns are **Item**, **Part number**, **Part name**, **Qty.**, **Material**; its rows are the assembly's flattened [bill of materials](assembly-bom): a row for each part (sub-assemblies' parts too) with the number of its instances. The part number, name, and material come from the part's properties, and the table follows changes of the assembly. Drag it with the select tool; its context menu has **Put the table back above the title block** and **Delete table**.
+- **Item number** (GOST 2.109): pick the tool, click a part in a view of the assembly (the part nearest the viewer at that point; in a section, its cut), then where the shelf goes. You get a leader with a dot on the part and a shelf with the part's item in the bill of materials above it (5 mm high — a size larger than dimension numbers). The shelf points away from the dot; the tool stays on for the next part, `Esc` is done. The dot is attached to the part: move the instance in the assembly and the leader follows it, and the number always matches the table's row.
+- Drag an item number by its shelf or number; delete it from its context menu (**Delete**) or with `Del` — deleting a view deletes its item numbers too.
+
 ## Navigation {#navigation}
 
 Mouse wheel: zoom; right or middle button: pan; **Zoom to fit** (`F`): the whole sheet.

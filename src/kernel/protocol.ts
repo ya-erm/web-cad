@@ -230,6 +230,25 @@ export interface PlacedPart {
   id?: string;
 }
 
+/** The part a view shows at a point (an item number's dot): its id and the point on it in space. */
+export interface ViewPartRequest {
+  type: 'viewPart';
+  reqId: number;
+  studioKey: string;
+  partIds: string[];
+  axes: { n: Vec3; x: Vec3 };
+  p: Vec2;
+  /** How far beside the part the point may be (view mm). */
+  tol: number;
+  cut?: ViewCut;
+}
+
+export interface ViewPartResult {
+  type: 'viewPart';
+  reqId: number;
+  part: { id: string; at: Vec3 } | null;
+}
+
 /** An assembly's parts placed as one builder's (`studioKey`), for drawing views of it. */
 export interface PlaceRequest {
   type: 'place';
@@ -436,6 +455,7 @@ export type WorkerRequest =
   | ViewAnchorRequest
   | ViewRefsRequest
   | PlaceRequest
+  | ViewPartRequest
   | PingRequest;
 
 export type WorkerResponse =
@@ -447,6 +467,7 @@ export type WorkerResponse =
   | ViewAnchorResult
   | ViewRefsResult
   | { type: 'place'; reqId: number }
+  | ViewPartResult
   | { type: 'ping'; reqId: number }
   | { type: 'error'; reqId: number; message: string }
   | { type: 'ready' }

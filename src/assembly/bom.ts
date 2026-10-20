@@ -4,7 +4,7 @@
 import type { AssemblyInstance, AssemblyTab, CadDocument } from '../core/types';
 import { inputName } from '../core/config';
 import { sourceKey, sourceMesh, type AssemblySources } from './compose';
-import { expandAssembly } from './expand';
+import { expandAssembly, usedTabs } from './expand';
 
 export interface BomRow {
   /** Item number: "2", and "2.1" for the first row inside sub-assembly 2 (structured). */
@@ -67,7 +67,8 @@ function rowOf(doc: CadDocument, sources: AssemblySources, inst: AssemblyInstanc
           return o ? [o.name] : [];
         })
       : [];
-  const name = sourceMesh(sources, inst)?.name ?? meta?.name ?? inst.name.replace(/ <\d+>$/, '');
+  // (an instance's own name without its number and the sub-assemblies it is in: "Sub <1> / Pin <2>" → "Pin")
+  const name = sourceMesh(sources, inst)?.name ?? meta?.name ?? inst.name.split(' / ').pop()!.replace(/ <\d+>$/, '');
   return {
     ...base,
     kind: 'part',
@@ -85,6 +86,16 @@ function rowOf(doc: CadDocument, sources: AssemblySources, inst: AssemblyInstanc
 export function billOfMaterials(doc: CadDocument, asm: AssemblyTab, sources: AssemblySources, type: BomType = 'flattened'): BomRow[] {
   const top = type === 'flattened' ? expandAssembly(asm, sources).instances : asm.instances;
   return level(doc, sources, top.map((i) => ({ inst: i, id: i.id })), 1, 1, '', type === 'structured');
+}
+
+/**
+ * The bill of materials of an assembly as the document stores it (a drawing's: no parts built) — sub-assemblies as their
+ * tabs have them, names from the Part Studios' part properties or the instances.
+ */
+export function storedBom(doc: CadDocument, asm: AssemblyTab, type: BomType = 'flattened'): BomRow[] {
+  const sources: AssemblySources = new Map();
+  for (const sub of usedTabs(doc.tabs, asm).subs) sources.set(sub.id, { parts: new Map(), mates: [], assembly: sub });
+  return billOfMaterials(doc, asm, sources, type);
 }
 
 /**

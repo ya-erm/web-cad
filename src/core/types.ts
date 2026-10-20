@@ -808,6 +808,30 @@ export interface DrawingDimension {
   refs?: { a?: ViewRef; b?: ViewRef };
 }
 
+/**
+ * A part's item number on a drawing of an assembly (ГОСТ 2.109 «номер позиции»): a leader from a dot on the part to a
+ * shelf with its item in the bill of materials.
+ */
+export interface DrawingBalloon {
+  id: string;
+  viewId: string;
+  /** The part: an instance of the view's assembly (`X/inner` — a part of a sub-assembly). */
+  instance: string;
+  /** The dot: a point of the part in the part's own coordinates (it follows the instance as it moves). */
+  at: Vec3;
+  /** Where the shelf starts on the sheet (mm). */
+  x: number;
+  y: number;
+}
+
+/** A drawing's table of the bill of materials: an assembly's parts (flattened), as the item numbers count them. */
+export interface DrawingBom {
+  assemblyId: string;
+  /** Its bottom right corner on the sheet (mm): above the title block at first. */
+  x: number;
+  y: number;
+}
+
 export interface DrawingNote {
   id: string;
   x: number;
@@ -838,6 +862,9 @@ export interface DrawingData {
   views: DrawingView[];
   dimensions: DrawingDimension[];
   notes: DrawingNote[];
+  /** Item numbers of the parts of assembly views. */
+  balloons?: DrawingBalloon[];
+  bom?: DrawingBom;
   title: string;
   author: string;
   designation?: string;

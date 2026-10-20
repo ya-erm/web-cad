@@ -855,6 +855,78 @@ export function notePrims(d: DrawingData): Prim2D[] {
   );
 }
 
+// ---------------------------------------------------------------- bill of materials, item numbers
+
+/** A row of a drawing's BOM table. */
+export interface BomTableRow {
+  item: string;
+  partNumber: string;
+  name: string;
+  quantity: number;
+  material: string;
+}
+
+/** The table's columns (ГОСТ 2.106 order) and their widths on the sheet: 185 mm in all, as wide as the title block. */
+export const BOM_TABLE_COLUMNS: { key: keyof BomTableRow; label: string; w: number }[] = [
+  { key: 'item', label: 'Item', w: 15 },
+  { key: 'partNumber', label: 'Part number', w: 50 },
+  { key: 'name', label: 'Part name', w: 70 },
+  { key: 'quantity', label: 'Qty.', w: 15 },
+  { key: 'material', label: 'Material', w: 35 },
+];
+const BOM_HEAD_H = 10;
+const BOM_ROW_H = 8;
+
+/** A BOM table's rectangle on the sheet: its bottom right corner at `at`, as tall as its `rows` and header. */
+export function bomTableRect(at: { x: number; y: number }, rows: number) {
+  const w = BOM_TABLE_COLUMNS.reduce((s, c) => s + c.w, 0);
+  return { x0: at.x - w, y0: at.y, x1: at.x, y1: at.y + BOM_HEAD_H + rows * BOM_ROW_H };
+}
+
+/** A BOM table: the header on top, item 1 under it; `translate` — the header's words. */
+export function bomTablePrims(at: { x: number; y: number }, rows: BomTableRow[], translate: (key: string) => string = t): Prim2D[] {
+  const r = bomTableRect(at, rows.length);
+  const head = r.y1 - BOM_HEAD_H;
+  const prims: Prim2D[] = [
+    { t: 'poly', pts: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]], closed: true, style: 'border' },
+    { t: 'line', a: [r.x0, head], b: [r.x1, head], style: 'border' },
+  ];
+  for (let i = 1; i < rows.length; i++) prims.push({ t: 'line', a: [r.x0, head - i * BOM_ROW_H], b: [r.x1, head - i * BOM_ROW_H], style: 'thin' });
+  let x = r.x0;
+  for (const c of BOM_TABLE_COLUMNS) {
+    if (x > r.x0) prims.push({ t: 'line', a: [x, r.y0], b: [x, r.y1], style: 'border' });
+    prims.push(...cellText(translate(c.label), x, head, c.w, BOM_HEAD_H, 3.5, 2, 0, 2, 1));
+    rows.forEach((row, i) => {
+      const v = String(row[c.key]);
+      if (v) prims.push(...cellText(v, x, head - (i + 1) * BOM_ROW_H, c.w, BOM_ROW_H, 3.5, 1, 0, 2, 1));
+    });
+    x += c.w;
+  }
+  return prims;
+}
+
+/** An item number's height: a size larger than the dimensions' (ГОСТ 2.316: 5 against 3.5). */
+export const ITEM_H = 5;
+
+/** An item number's shelf: from where it starts (`at`) away from the dot, as long as the number. */
+export function balloonShelf(dot: Vec2, at: Vec2, item: string): [Vec2, Vec2] {
+  const w = Math.max(textWidth(item, ITEM_H) + 2, 6);
+  return [at, [at[0] + (at[0] >= dot[0] ? w : -w), at[1]]];
+}
+
+/** An item number (ГОСТ 2.109): a leader from a dot on the part to the shelf, the number above the shelf. */
+export function balloonPrims(dot: Vec2, at: Vec2, item: string): Prim2D[] {
+  const [a, b] = balloonShelf(dot, at, item);
+  const r = 0.5;
+  const disc = Array.from({ length: 12 }, (_, i): Vec2 => [dot[0] + r * Math.cos((i * Math.PI) / 6), dot[1] + r * Math.sin((i * Math.PI) / 6)]);
+  return [
+    { t: 'fill', pts: disc, color: '#000000', style: 'thin' },
+    { t: 'line', a: dot, b: a, style: 'thin' },
+    { t: 'line', a, b, style: 'thin' },
+    { t: 'text', p: [(a[0] + b[0]) / 2, a[1] + 1], text: item, h: ITEM_H, align: 'center', vAlign: 'baseline', style: 'visible' },
+  ];
+}
+
 /** Choose a standard scale so that the given model extent fits into the target size. */
 export function chooseScale(modelW: number, modelH: number, availW: number, availH: number): number {
   for (const s of STD_SCALES) if (modelW * s <= availW && modelH * s <= availH) return s;

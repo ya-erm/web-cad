@@ -1267,6 +1267,20 @@ function solveOnce(
     if (!e || e.type !== 'arc') return [];
     return [ptVar(model, e.p1), ptVar(model, e.p2)].filter((p) => p >= 0);
   };
+  /** Points coincident constraints hold on circles / arcs: curve id → point vars (made when first asked). */
+  let held: Map<string, number[]> | null = null;
+  const heldOn = (id: string): number[] => {
+    if (!held) {
+      held = new Map();
+      for (const k of constraints) {
+        if (k.type !== 'coincident' || k.driven || !k.refs || k.refs.length < 2) continue;
+        const pi = model.byId.get(k.refs[0])?.type === 'point' ? 0 : model.byId.get(k.refs[1])?.type === 'point' ? 1 : -1;
+        const p = pi < 0 ? -1 : ptVar(model, k.refs[pi]);
+        if (p >= 0) held.set(k.refs[1 - pi], [...(held.get(k.refs[1 - pi]) ?? []), p]);
+      }
+    }
+    return held.get(id) ?? [];
+  };
 
   /**
    * Translates one constraint. Phase 0 applies substitutions (returns the UF flag), phase 1
@@ -1388,9 +1402,11 @@ function solveOnce(
           const cc = centreVar(model, cid);
           const rt = radiusTerm(model, cid);
           if (cc < 0 || !rt) return 0;
-          // Arc and line share an endpoint: radius ⟂ line at the joint. (The distance form
-          // below has a double root there, i.e. a singular Jacobian.)
-          const joint = arcEnds(cid).find((p) => samePt(p, l[0]) || samePt(p, l[1]));
+          // Arc and line share an endpoint — or a line's end is held on the circle / arc: radius ⟂
+          // line at the joint. (The distance form below has a double root there, i.e. a singular
+          // Jacobian: the point on the circle would seem free to slide along the line.)
+          const atJoint = (p: number) => samePt(p, l[0]) || samePt(p, l[1]);
+          const joint = arcEnds(cid).find(atJoint) ?? heldOn(cid).find(atJoint);
           if (joint !== undefined) {
             return push(addT(draft(ci), T_PROJ, 1, [...pv(cc), ...pv(joint), ...pv(l[0]), ...pv(l[1])]));
           }

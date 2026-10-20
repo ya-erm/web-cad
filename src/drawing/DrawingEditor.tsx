@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { AssemblyTab, CadDocument, ConfigInput, DocTab, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation, ViewRef } from '../core/types';
+import type { AssemblyTab, CadDocument, ConfigInput, DocTab, DrawingBalloon, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, Vec3, ViewOrientation, ViewRef } from '../core/types';
 import { shownParts } from '../assembly/expand';
-import { sourceKey } from '../assembly/compose';
+import { rotationMatrix, sourceKey } from '../assembly/compose';
+import { storedBom } from '../assembly/bom';
 import { uid } from '../core/ids';
 import { cuttingLine, isDerivedView, isPictorial, nextViewLetter, parentView, sectionCut, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
 import type { Breakout, PlacedPart, SectionCut, ViewCut } from '../kernel/protocol';
@@ -30,6 +31,12 @@ import { Toast } from '../ui/Overlays';
 import { getLang, t } from '../i18n';
 import {
   angleSector,
+  balloonPrims,
+  balloonShelf,
+  bomTablePrims,
+  bomTableRect,
+  ITEM_H,
+  type BomTableRow,
   centerlineOf,
   chooseScale,
   cuttingLinePrims,
@@ -106,6 +113,10 @@ interface ViewSource {
   /** Built (placed) in the kernel. */
   ensure: () => Promise<void>;
 }
+
+/** A rotation matrix (row by row, `rotationMatrix`) applied to `v`; `back` — its inverse. */
+const turn = (R: number[], v: Vec3, back = false): Vec3 =>
+  [0, 1, 2].map((i) => (back ? R[i] * v[0] + R[3 + i] * v[1] + R[6 + i] * v[2] : R[i * 3] * v[0] + R[i * 3 + 1] * v[1] + R[i * 3 + 2] * v[2])) as Vec3;
 
 /** What a drawing's views come from: a Part Studio, an assembly. */
 type SourceTab = PartStudioTab | AssemblyTab;
@@ -417,7 +428,7 @@ function PrimSvg({ p, color }: { p: Prim2D; color?: string }) {
 
 // ---------------------------------------------------------------------------
 
-type Tool = 'select' | 'dimension' | 'chain' | 'baseline' | 'angle' | 'ordinate' | 'axis' | 'note' | 'section' | 'detail' | 'callout' | 'breakout';
+type Tool = 'select' | 'dimension' | 'chain' | 'baseline' | 'angle' | 'ordinate' | 'axis' | 'note' | 'section' | 'detail' | 'callout' | 'breakout' | 'balloon';
 
 /**
  * Ordinate dimensions being made: their base on a view, a point picked (until the first is placed), then their axis and
@@ -474,7 +485,7 @@ interface ViewDraft {
 type LinedDraft = ViewDraft & { b: Vec2 };
 
 /** What is selected on the sheet. */
-type Selection = { kind: 'view' | 'dim' | 'note'; id: string };
+type Selection = { kind: 'view' | 'dim' | 'note' | 'balloon' | 'bom'; id: string };
 
 type TitleFields = Pick<DrawingData, 'title' | 'author' | 'designation' | 'titleBlock'>;
 
@@ -594,6 +605,39 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const [axisDraft, setAxisDraft] = useState<{ viewId: string; l1: [Vec2, Vec2] } | null>(null);
   /** A local section's outline being clicked: its view and the points so far (view coordinates). */
   const [breakDraft, setBreakDraft] = useState<{ viewId: string; pts: Vec2[] } | null>(null);
+  /** An item number being placed: the part picked and its dot (in the part's own coordinates). */
+  const [balloonDraft, setBalloonDraft] = useState<Pick<DrawingBalloon, 'viewId' | 'instance' | 'at'> | null>(null);
+  // the assemblies the views (and the BOM table) show: their bill of materials, each part's item, where each part is
+  const assemblies = useMemo(() => {
+    const out = new Map<string, { rows: BomTableRow[]; itemOf: Map<string, string>; place: Map<string, { R: number[]; t: Vec3 }> }>();
+    for (const id of new Set([...d.views.map((v) => v.studioId), ...(d.bom ? [d.bom.assemblyId] : [])])) {
+      const asm = doc.tabs.find((x) => x.id === id);
+      if (asm?.type !== 'assembly') continue;
+      const bom = storedBom(doc, asm);
+      const itemOf = new Map(bom.flatMap((r) => r.instances.map((i) => [i, r.item] as const)));
+      const place = new Map(shownParts(doc.tabs, asm).map((i) => [i.id, { R: rotationMatrix(i.rotation), t: i.position }]));
+      out.set(id, { rows: bom.map((r) => ({ item: r.item, partNumber: r.partNumber, name: r.name, quantity: r.quantity, material: r.material })), itemOf, place });
+    }
+    return out;
+  }, [doc, d.views, d.bom]);
+  /** The assembly a view shows (a detail view: its parent's), if it shows one. */
+  const viewAssembly = (v: DrawingView) => assemblies.get(projectedView(v, d.views).studioId);
+  /** An item number's text: its part's item in the bill of materials. */
+  const balloonItem = (b: Pick<DrawingBalloon, 'viewId' | 'instance'>) => {
+    const v = d.views.find((x) => x.id === b.viewId);
+    return (v && viewAssembly(v)?.itemOf.get(b.instance)) ?? '?';
+  };
+  /** An item number's dot on the sheet: its point of the part where the assembly has the part now (none — it is gone). */
+  const balloonDot = (b: Pick<DrawingBalloon, 'viewId' | 'instance' | 'at'>): Vec2 | null => {
+    const v = d.views.find((x) => x.id === b.viewId);
+    const pr = v && proj(v);
+    const pl = v && viewAssembly(v)?.place.get(b.instance);
+    if (!v || !pr || !pl) return null;
+    const w = v3.add(turn(pl.R, b.at), pl.t);
+    const { n, x } = viewAxes(v, d.views);
+    const y = v3.cross(n, x);
+    return toSheet(v, pr, [v3.dot(w, x), v3.dot(w, y)]);
+  };
   const [noteEdit, setNoteEdit] = useState<{ id: string; text: string } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -601,7 +645,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
   const size = measured ?? { w: 800, h: 600 };
-  const drag = useRef<{ kind: 'pan' | 'view' | 'note' | 'dim' | 'label'; id?: string; sx: number; sy: number; start: Vec2; orig?: Vec2; moved: boolean } | null>(null);
+  const drag = useRef<{ kind: 'pan' | 'view' | 'note' | 'dim' | 'label' | 'balloon' | 'bom'; id?: string; sx: number; sy: number; start: Vec2; orig?: Vec2; moved: boolean } | null>(null);
   const [hoverDim, setHoverDim] = useState<string | null>(null);
   /** A view's label being edited (a double click, its menu). */
   const [labelEdit, setLabelEdit] = useState<{ id: string; text: string } | null>(null);
@@ -1028,6 +1072,19 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     setLabelEdit(null);
   };
 
+  /** The item number whose shelf (or number) is at sheet point `p`. */
+  const balloonAt = (p: Vec2) =>
+    (d.balloons ?? []).find((b) => {
+      const dot = balloonDot(b);
+      if (!dot) return false;
+      const [a, e] = balloonShelf(dot, [b.x, b.y], balloonItem(b));
+      return p[0] >= Math.min(a[0], e[0]) - 1 && p[0] <= Math.max(a[0], e[0]) + 1 && p[1] >= a[1] - 1.5 && p[1] <= a[1] + ITEM_H + 2;
+    });
+
+  /** The BOM table's rectangle on the sheet, if the drawing has one. */
+  const bomRect = d.bom ? bomTableRect(d.bom, assemblies.get(d.bom.assemblyId)?.rows.length ?? 0) : null;
+  const bomAt = (p: Vec2) => !!bomRect && p[0] >= bomRect.x0 && p[0] <= bomRect.x1 && p[1] >= bomRect.y0 && p[1] <= bomRect.y1;
+
   /** The note at sheet point `p`. */
   const noteAt = (p: Vec2) =>
     d.notes.find((n) => p[0] >= n.x - 1 && p[0] <= n.x + n.text.length * n.height * 0.6 && p[1] >= n.y - 1 - (n.text.split('\n').length - 1) * n.height * 1.5 && p[1] <= n.y + n.height);
@@ -1305,6 +1362,35 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       );
       return;
     }
+    if (tool === 'balloon') {
+      if (balloonDraft) {
+        // the shelf: here; the tool stays on for the next part
+        const b = { id: uid('b'), ...balloonDraft, x: p[0], y: p[1] };
+        upd((dd) => {
+          (dd.balloons ??= []).push(b);
+        });
+        setBalloonDraft(null);
+        return;
+      }
+      // the part under the cursor in a view of an assembly (nearest the viewer)
+      const v = hitView(p);
+      const pr = v && proj(v);
+      if (!v || !pr) return;
+      const asm = viewAssembly(v);
+      if (!asm) return useEditor.getState().showToast(t('Item numbers are for views of assemblies'), 'error');
+      const pv = projectedView(v, d.views);
+      const src = viewSource(doc, pv);
+      if (!src) return;
+      const cut = viewCutOf(v, d.views);
+      void (async () => {
+        await src.ensure();
+        const { part } = await kernel().viewPart({ studioKey: src.key, partIds: pv.partIds, axes: viewAxes(v, d.views), p: toModel(v, pr, p), tol: 3 / (c.zoom * v.scale), ...(cut ? { cut } : {}) });
+        const pl = part && asm.place.get(part.id);
+        // the dot in the part's own coordinates: it goes where the instance goes
+        if (part && pl) setBalloonDraft({ viewId: v.id, instance: part.id, at: turn(pl.R, v3.sub(part.at, pl.t), true) });
+      })();
+      return;
+    }
     if (tool === 'callout') {
       if (!calloutDraft) {
         const h = holeAt(p);
@@ -1386,6 +1472,12 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       return;
     }
     // select / move
+    const balloon = balloonAt(p);
+    if (balloon) {
+      setSelected({ kind: 'balloon', id: balloon.id });
+      drag.current = { kind: 'balloon', id: balloon.id, sx, sy, start: p, orig: [balloon.x, balloon.y], moved: false };
+      return;
+    }
     const note = noteAt(p);
     if (note) {
       setSelected({ kind: 'note', id: note.id });
@@ -1406,6 +1498,11 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       drag.current = { kind: 'label', id: lab.id, sx, sy, start: p, orig: lab.labelOffset ?? [0, 0], moved: false };
       return;
     }
+    if (d.bom && bomAt(p)) {
+      setSelected({ kind: 'bom', id: 'bom' });
+      drag.current = { kind: 'bom', sx, sy, start: p, orig: [d.bom.x, d.bom.y], moved: false };
+      return;
+    }
     const v = hitView(p);
     if (v) {
       setSelected({ kind: 'view', id: v.id });
@@ -1420,7 +1517,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     const dr = drag.current;
     if (!dr) {
       // a dimension under the cursor can be dragged
-      if (tool === 'select') setHoverDim(dimAt(p)?.id ?? labelAt(p)?.id ?? null);
+      if (tool === 'select') setHoverDim(balloonAt(p)?.id ?? dimAt(p)?.id ?? labelAt(p)?.id ?? (bomAt(p) ? 'bom' : null));
       return;
     }
     if (Math.hypot(sx - dr.sx, sy - dr.sy) > 3) dr.moved = true;
@@ -1469,6 +1566,16 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           n.y = ny;
         }
       }, `note-${dr.id}`);
+    } else if ((dr.kind === 'balloon' || dr.kind === 'bom') && dr.orig) {
+      const nx = dr.orig[0] + p[0] - dr.start[0];
+      const ny = dr.orig[1] + p[1] - dr.start[1];
+      upd((dd) => {
+        const it = dr.kind === 'bom' ? dd.bom : dd.balloons?.find((x) => x.id === dr.id);
+        if (it) {
+          it.x = nx;
+          it.y = ny;
+        }
+      }, `${dr.kind}-${dr.id ?? ''}`);
     }
   };
 
@@ -1498,14 +1605,24 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         const x = dd.views.find((q) => q.id === id);
         if (x) fn(x);
       });
-    const dm = dimAt(p);
-    const note = !dm ? noteAt(p) : undefined;
-    const lab = !dm && !note ? labelAt(p) : undefined;
-    const line = !dm && !note && !lab ? (sectionLineAt(p) ?? detailCircleAt(p)) : undefined;
-    const v = line ?? (!dm && !note && !lab ? hitView(p) : undefined);
+    const balloon = balloonAt(p);
+    const dm = !balloon ? dimAt(p) : undefined;
+    const note = !balloon && !dm ? noteAt(p) : undefined;
+    const lab = !balloon && !dm && !note ? labelAt(p) : undefined;
+    const table = !balloon && !dm && !note && !lab && bomAt(p);
+    const line = !balloon && !dm && !note && !lab && !table ? (sectionLineAt(p) ?? detailCircleAt(p)) : undefined;
+    const v = line ?? (!balloon && !dm && !note && !lab && !table ? hitView(p) : undefined);
     const inTitle = p[0] >= titleRect.x0 && p[0] <= titleRect.x1 && p[1] >= titleRect.y0 && p[1] <= titleRect.y1;
     let sel: Selection | null = null;
-    if (dm) {
+    if (balloon) {
+      sel = { kind: 'balloon', id: balloon.id };
+      item('Delete', 'trash', () => removeItem({ kind: 'balloon', id: balloon.id }), true);
+    } else if (table) {
+      sel = { kind: 'bom', id: 'bom' };
+      item('Put the table back above the title block', 'undo', () => upd((dd) => void (dd.bom &&= { ...dd.bom, x: titleRect.x1, y: titleRect.y1 })));
+      sep();
+      item('Delete table', 'trash', () => removeItem({ kind: 'bom', id: 'bom' }), true);
+    } else if (dm) {
       sel = { kind: 'dim', id: dm.id };
       // a circle's size: as a radius or a diameter; a length: along X, Y or the points
       if (dm.kind === 'diameter') item('Show as radius', 'dimension', () => setDim(dm.id, (x) => void (x.kind = 'radius')));
@@ -1621,10 +1738,13 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           }
           dd.views = dd.views.filter((v) => !gone.has(v.id));
           dd.dimensions = dd.dimensions.filter((x) => !gone.has(x.viewId));
+          if (dd.balloons) dd.balloons = dd.balloons.filter((x) => !gone.has(x.viewId));
           for (const v of dd.views) if (v.parent && gone.has(v.parent)) delete v.parent;
         }
         if (item.kind === 'dim') dd.dimensions = dd.dimensions.filter((x) => x.id !== item.id);
         if (item.kind === 'note') dd.notes = dd.notes.filter((x) => x.id !== item.id);
+        if (item.kind === 'balloon' && dd.balloons) dd.balloons = dd.balloons.filter((x) => x.id !== item.id);
+        if (item.kind === 'bom') delete dd.bom;
       }),
     [upd],
   );
@@ -1663,6 +1783,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         setOrdDraft(null);
         setAxisDraft(null);
         setRunDraft(null);
+        setBalloonDraft(null);
         setTool('select');
         setSelected(null);
       }
@@ -1689,11 +1810,17 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       // with its view only: before the view is computed its points have nowhere to go (a reload drew them askew)
       if (v && proj(v)) prims.push(...dimPrims(live(dm), v, proj(v), uf, translate, comma));
     }
+    // item numbers (with their parts' views) and the bill of materials they count
+    for (const b of d.balloons ?? []) {
+      const dot = balloonDot(b);
+      if (dot) prims.push(...balloonPrims(dot, [b.x, b.y], balloonItem(b)));
+    }
+    if (d.bom) prims.push(...bomTablePrims(d.bom, assemblies.get(d.bom.assemblyId)?.rows ?? [], translate));
     prims.push(...notePrims(d));
     return prims;
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const contentPrims = useMemo(() => sheetContent(), [d, proj, uf, editSection]);
+  const contentPrims = useMemo(() => sheetContent(), [d, proj, uf, editSection, assemblies]);
   const titleExtra = { scale: mainScale ? scaleLabel(mainScale, comma) : '—', units: unit, date };
   const allPrims = [...titleBlockPrims(d, titleExtra), ...contentPrims];
 
@@ -1732,6 +1859,9 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       }
     }
   }
+  // …of an item number: from its dot to the cursor
+  const draftDot = balloonDraft && cursor ? balloonDot(balloonDraft) : null;
+  if (balloonDraft && draftDot && cursor) previewPrims.push(...balloonPrims(draftDot, cursor, balloonItem(balloonDraft)));
   // …of a section / detail view: the cutting line (its arrows to where the view goes) or the circle
   const draftView = viewDraft && d.views.find((x) => x.id === viewDraft.viewId);
   if (viewDraft && draftView && cursor) {
@@ -2129,6 +2259,32 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           >
             <Icon name="holeCallout" />
           </button>
+          <button
+            className={'icon-btn' + (tool === 'balloon' ? ' active' : '')}
+            title={t('Item number (of a part in a view of an assembly)')}
+            disabled={!d.views.some((v) => viewAssembly(v))}
+            onClick={() => {
+              setBalloonDraft(null);
+              setTool('balloon');
+            }}
+          >
+            <Icon name="balloon" />
+          </button>
+          <button
+            className={'icon-btn' + (d.bom ? ' active' : '')}
+            title={t(d.bom ? 'Bill of materials table (on the sheet; right-click it to delete)' : 'Insert the bill of materials table (of the assembly in the views)')}
+            disabled={!d.bom && !d.views.some((v) => viewAssembly(v))}
+            onClick={() => {
+              if (d.bom) return setSelected({ kind: 'bom', id: 'bom' });
+              const v = d.views.find((x) => viewAssembly(x));
+              if (!v) return;
+              // above the title block, as wide as it
+              upd((dd) => void (dd.bom = { assemblyId: projectedView(v, d.views).studioId, x: titleRect.x1, y: titleRect.y1 }));
+              setSelected({ kind: 'bom', id: 'bom' });
+            }}
+          >
+            <Icon name="bom" />
+          </button>
           <button className={'icon-btn' + (tool === 'note' ? ' active' : '')} title={t('Note')} onClick={() => setTool('note')}>
             <Icon name="note" />
           </button>
@@ -2234,6 +2390,15 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                   </g>
                 );
               })}
+              {selected?.kind === 'balloon' &&
+                (() => {
+                  const b = d.balloons?.find((x) => x.id === selected.id);
+                  const dot = b && balloonDot(b);
+                  return b && dot ? balloonPrims(dot, [b.x, b.y], balloonItem(b)).map((p, i) => <PrimSvg key={i} p={p} color="#ff7a00" />) : null;
+                })()}
+              {selected?.kind === 'bom' && bomRect && (
+                <rect x={bomRect.x0} y={bomRect.y0} width={bomRect.x1 - bomRect.x0} height={bomRect.y1 - bomRect.y0} fill="none" stroke="#ff7a00" strokeWidth={0.8} />
+              )}
               {selected?.kind === 'dim' &&
                 (() => {
                   const dm = d.dimensions.find((x) => x.id === selected.id);
@@ -2385,6 +2550,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
               ? t(!angleDraft ? 'Angular dimension: click a straight line on a view.' : !angleDraft.l2 ? 'Click the second line (not parallel to the first).' : 'Click where the arc goes: the angle of that side is measured. Esc — cancel.')
             : tool === 'callout'
               ? t(!calloutDraft ? 'Hole callout: click a hole made by the Hole feature (end-on or from the side).' : 'Click where to place the callout. Esc — cancel.')
+            : tool === 'balloon'
+              ? t(!balloonDraft ? 'Item number: click a part in a view of an assembly.' : 'Click where the shelf with the number goes. Esc — done.')
             : tool === 'breakout'
               ? t(!breakDraft ? 'Local section: click points round the area on a view.' : 'Click more points; the first point (or Enter) closes the outline. Esc — cancel.')
             : tool === 'section' && editSection

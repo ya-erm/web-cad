@@ -482,6 +482,32 @@ describe('over-constrained sketches', () => {
     expect(tr.dof).toBe(0);
   });
 
+  it('a line tangent to two circles with its ends on them is fully defined (ends at the tangent points)', () => {
+    // a belt: circles ⌀8 at (0, 0) and (5, 40), the left line tangent to both, each end on its circle
+    const entities: SkEntity[] = [pt('c1', 0, 0), pt('c2', 5, 40), circ('k1', 'c1', 4), circ('k2', 'c2', 4), pt('a', -3.9, 0.6), pt('b', 1.1, 40.6), ln('L', 'a', 'b')];
+    const constraints = [
+      con('f1', 'fix', ['c1']),
+      con('f2', 'fix', ['c2']),
+      con('r1', 'diameter', ['k1']),
+      con('r2', 'diameter', ['k2']),
+      con('t1', 'tangent', ['L', 'k1']),
+      con('t2', 'tangent', ['L', 'k2']),
+      con('o1', 'coincident', ['a', 'k1']),
+      con('o2', 'coincident', ['b', 'k2']),
+    ];
+    const res = solveSketch(entities, constraints, { r1: 8, r2: 8 });
+    expect(res.ok).toBe(true);
+    expect(res.redundant).toEqual([]);
+    expect(res.dof).toBe(0);
+    for (const id of ['L', 'a', 'b']) expect(res.status[id]).toBe('full');
+    // the ends at the tangent points: the radius there across the line
+    const [a, b, c1, c2] = ['a', 'b', 'c1', 'c2'].map((id) => P(res.entities, id));
+    const u = [b[0] - a[0], b[1] - a[1]];
+    expect((a[0] - c1[0]) * u[0] + (a[1] - c1[1]) * u[1]).toBeCloseTo(0, 6);
+    expect((b[0] - c2[0]) * u[0] + (b[1] - c2[1]) * u[1]).toBeCloseTo(0, 6);
+    expect(dist(a, c1)).toBeCloseTo(4, 6);
+  });
+
   it('slot (two arcs, two tangent lines) is fully defined without redundancy', () => {
     const entities: SkEntity[] = [
       pt('c1', 0, 0),

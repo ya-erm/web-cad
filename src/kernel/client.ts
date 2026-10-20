@@ -15,6 +15,8 @@ import type {
   ViewAnchorRequest,
   ViewAnchorResult,
   ViewRefsRequest,
+  ViewPartRequest,
+  ViewPartResult,
   ViewRefsResult,
   WorkerRequest,
   WorkerResponse,
@@ -96,6 +98,10 @@ class KernelClient {
 
   viewRefs(req: Omitted<ViewRefsRequest>): Promise<ViewRefsResult> {
     return this.send<ViewRefsResult>({ ...req, type: 'viewRefs' } as never);
+  }
+
+  viewPart(req: Omitted<ViewPartRequest>): Promise<ViewPartResult> {
+    return this.send<ViewPartResult>({ ...req, type: 'viewPart' } as never);
   }
 
   /** An assembly's parts placed as builder `studioKey`'s (its views on drawings project, cut and anchor them). */

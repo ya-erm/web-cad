@@ -102,6 +102,9 @@ async function handle(req: WorkerRequest) {
     case 'viewRefs':
       post({ type: 'viewRefs', reqId: req.reqId, points: builderFor(req.studioKey).viewRefs(req.axes, req.refs, req.cut, req.near, req.partIds) });
       return;
+    case 'viewPart':
+      post({ type: 'viewPart', reqId: req.reqId, part: builderFor(req.studioKey).viewPart(req.partIds, req.axes, req.p, req.tol, req.cut) });
+      return;
     case 'place':
       builderFor(req.studioKey).place(req.instances, (key) => builders.get(key));
       post({ type: 'place', reqId: req.reqId });

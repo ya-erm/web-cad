@@ -1302,6 +1302,14 @@ const ICONS = {
       <path d="M4 9 H20 M4 14 H20 M9 4 V20" />
     </>
   ),
+  // an item number (ГОСТ 2.109): a dot on the part, the leader, the shelf with the number above it
+  balloon: (
+    <>
+      <path d="M4.5 20 L11 12.5 H21" {...THIN} />
+      <circle cx={4.5} cy={20} r={1.6} fill="currentColor" stroke="none" />
+      <path d="M15 4.5 L17 3 V10" stroke={BLUE} strokeWidth={1.75} />
+    </>
+  ),
   explode: (
     <>
       <rect x={9} y={9} width={6} height={6} rx={1} fill={BLUE_LIGHT} />

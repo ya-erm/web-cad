@@ -549,6 +549,43 @@ export class StudioBuilder {
   }
 
   /**
+   * The part a view shows at point `p` (an item number's dot): where the line of sight through it meets the parts (as
+   * the view's `cut` leaves them) nearest the viewer, within `tol` of it (view mm); its id and that point in space.
+   */
+  viewPart(partIds: string[], axes: ViewAxes, p: Vec2, tol: number, cut?: ViewCut): { id: string; at: Vec3 } | null {
+    const { n, x } = axes;
+    const y = v3.cross(n, x);
+    const oc = R.getOC();
+    const items = this.shapesFor(partIds);
+    const cutting = cut ? viewCutting(items, n, cut) : null;
+    const cutKey = cut ? cutKeyOf(cut, n, items) : '';
+    const base = v3.add(v3.scale(x, p[0]), v3.scale(y, p[1]));
+    let best: { id: string; at: Vec3; depth: number; off: number } | null = null;
+    for (const it of items) {
+      const shape = cutting ? cutPart(it.shape, cutting, cutKey) : it.shape;
+      if (!shape) continue;
+      // the line of sight through p, across the part
+      const [lo, hi] = bboxOf(shape);
+      const mid = v3.dot(v3.scale(v3.add(lo, hi), 0.5), n);
+      const half = v3.len(v3.sub(hi, lo)) / 2 + 1;
+      const line = R.makeLine(v3.add(base, v3.scale(n, mid - half)), v3.add(base, v3.scale(n, mid + half)));
+      const d = new oc.BRepExtrema_DistShapeShape(shape.wrapped, line.wrapped);
+      if (d.IsDone() && d.Value() <= tol)
+        for (let i = 1; i <= d.NbSolution(); i++) {
+          const q = d.PointOnShape1(i);
+          const at: Vec3 = [q.X(), q.Y(), q.Z()];
+          q.delete();
+          const depth = v3.dot(at, n);
+          // through the part beats beside it; then the nearest the viewer
+          if (!best || d.Value() < best.off - 1e-9 || (Math.abs(d.Value() - best.off) <= 1e-9 && depth > best.depth)) best = { id: it.id, at, depth, off: d.Value() };
+        }
+      d.delete();
+      line.delete();
+    }
+    return best && { id: best.id, at: best.at };
+  }
+
+  /**
    * Where references (`viewAnchor`'s) are in a view now: a vertex, a circle's centre with its radius, a straight edge's
    * ends; null — gone. Those of a `cut` (of its view's parts `partIds`): where the edge crosses it, the line or circle
    * where the face meets it — of several, the one nearest to where it was (`near`).
