@@ -735,9 +735,23 @@ export interface DrawingView {
   y: number;
   scale: number;
   showHidden: boolean;
-  /** For projected views: the parent view they stay aligned with. */
+  /** For projected views: the parent view they stay aligned with; for section and detail views — the view they are made from. */
   parent?: string;
   label?: string;
+  /**
+   * A section view of the parent (Onshape "Section view"): the parts cut along the line `a` → `b` drawn on the parent
+   * (its view coordinates, mm), seen across the line towards its `side` (1 — to the left of `a` → `b`).
+   */
+  section?: {
+    a: Vec2;
+    b: Vec2;
+    side: 1 | -1;
+    letter: string;
+    /** An offset section: the cutting line's further points after `b` (segments along a → b cut, those across step). */
+    steps?: Vec2[];
+  };
+  /** A detail view of the parent: its circle (the parent's view coordinates, mm) at the view's own scale. */
+  detail?: { c: Vec2; r: number; letter: string };
   /** The view's own configuration of the Part Studio: input id → option id (a variable input: its value). */
   configuration?: Record<string, string>;
 }
@@ -745,7 +759,8 @@ export interface DrawingView {
 export interface DrawingDimension {
   id: string;
   viewId: string;
-  kind: 'linear' | 'horizontal' | 'vertical' | 'radius' | 'diameter';
+  /** `hole` — a hole callout: `a` is the hole's centre, `textPos` the start of its shelf (Onshape Hole callout). */
+  kind: 'linear' | 'horizontal' | 'vertical' | 'radius' | 'diameter' | 'hole';
   /** Points in view model coordinates (unscaled, mm, view-local 2D). */
   a: Vec2;
   b?: Vec2;

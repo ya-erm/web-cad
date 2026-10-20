@@ -11,7 +11,7 @@ import { uid } from '../core/ids';
 import { useEditor, sameRef, type ContextMenuItem } from '../store/editorStore';
 import { activeStudio, effectiveRollback, useDoc, withStudio } from '../store/docStore';
 import { Icon } from './icons';
-import { FEATURE_ICONS } from './FeatureDialog';
+import { featureIcon } from './FeatureDialog';
 import { t, tName } from '../i18n';
 
 /** Features shown in the graphics area besides parts (an eye to hide them): a Derived feature — with its sketches. */
@@ -77,6 +77,17 @@ export function FeatureTree() {
   const statuses = useEditor((s) => s.build?.statuses);
   const editing = useEditor((s) => s.editing);
   const selection = useEditor((s) => s.selection);
+  // the feature that made the face or edge under the cursor in the graphics area (Onshape): its row is marked;
+  // an edge's — the later of its faces' features (the hole's rim: the hole)
+  const originCandidates = useEditor((s) => {
+    const h = s.hover;
+    if (s.editing || !h || (h.kind !== 'face' && h.kind !== 'edge')) return '';
+    const part = s.build?.parts.find((p) => p.id === h.partId);
+    const ff = part?.faceFeatures;
+    if (!part || !ff) return '';
+    if (h.kind === 'face') return ff[h.index] ?? '';
+    return part.faces.flatMap((f, i) => (f.edges?.includes(h.index) && ff[i] ? [ff[i]] : [])).join(' ');
+  });
   const ed = useEditor.getState;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [showDefault, setShowDefault] = useState(true);
@@ -111,6 +122,9 @@ export function FeatureTree() {
   const features = configuredFeatures(studio);
   const rollback = effectiveRollback(studio);
   const hidden = new Set(studio.hidden ?? []);
+  const originFeature = originCandidates
+    ? originCandidates.split(' ').reduce((a, b) => (features.findIndex((f) => f.id === b) > features.findIndex((f) => f.id === a) ? b : a))
+    : null;
   const folders = studio.folders ?? [];
   const indexOf = (id: string) => features.findIndex((f) => f.id === id);
 
@@ -437,19 +451,22 @@ export function FeatureTree() {
           (rolled ? ' rolled' : '') +
           (hidden.has(f.id) ? ' hidden-item' : '') +
           (isSel ? ' selected' : '') +
+          (originFeature === f.id ? ' origin-hover' : '') +
           (dropTarget?.id === f.id ? ' drop-before' : '')
         }
         style={indent ? { paddingLeft: 26 } : undefined}
         onClick={(e) => clickFeature(e, f)}
-        onMouseEnter={() => featRef && ed().setHover(featRef)}
-        onMouseLeave={() => featRef && ed().setHover(null)}
+        // the faces it made light up (Onshape); a plane — itself
+        onMouseEnter={() => (featRef ? ed().setHover(featRef) : useEditor.setState({ hoverFeatures: [f.id] }))}
+        onMouseLeave={() => (featRef ? ed().setHover(null) : useEditor.setState({ hoverFeatures: null }))}
         onDoubleClick={() => !editing && ed().editFeature(f.id)}
         onContextMenu={(e) => featureMenu(e, f, i)}
         data-tip={st?.error ? t(st.error) : st?.warning ? t(st.warning) : undefined}
         {...dndProps(f)}
       >
         <span className="tree-icon">
-          <Icon name={FEATURE_ICONS[f.type]} size={16} />
+          {/* the one being edited: as its dialog has it now */}
+          <Icon name={featureIcon(isEditing && editing ? editing.draft : f)} size={16} />
         </span>
         {renaming === f.id ? (
           <RenameInput
@@ -501,13 +518,23 @@ export function FeatureTree() {
     return (
       <div
         key={`folder-${fo.id}-${firstIndex}`}
-        className={'tree-item tree-folder' + (isSel ? ' selected' : '') + (allSuppressed ? ' suppressed' : '') + (dropTarget?.id === fo.id ? ' drop-into' : '')}
+        className={
+          'tree-item tree-folder' +
+          (isSel ? ' selected' : '') +
+          (allSuppressed ? ' suppressed' : '') +
+          // a collapsed folder stands for the feature under the cursor in it
+          (fo.collapsed && originFeature && fo.featureIds.includes(originFeature) ? ' origin-hover' : '') +
+          (dropTarget?.id === fo.id ? ' drop-into' : '')
+        }
         onClick={(e) => {
           if (e.metaKey || e.ctrlKey) setSel([...new Set([...sel, ...fo.featureIds])]);
           else setSel([...fo.featureIds]);
         }}
         onDoubleClick={() => setRenaming(fo.id)}
         onContextMenu={(e) => folderMenu(e, fo)}
+        // the faces its features made light up
+        onMouseEnter={() => useEditor.setState({ hoverFeatures: [...fo.featureIds] })}
+        onMouseLeave={() => useEditor.setState({ hoverFeatures: null })}
         onDragOver={(e) => {
           if (!dragIds.current.length) return;
           e.preventDefault();
@@ -581,7 +608,7 @@ export function FeatureTree() {
       0,
       <div key="new" className="tree-item editing">
         <span className="tree-icon">
-          <Icon name={FEATURE_ICONS[editing.draft.type]} size={16} />
+          <Icon name={featureIcon(editing.draft)} size={16} />
         </span>
         <span className="tree-name">{tName(editing.draft.name)}</span>
       </div>,

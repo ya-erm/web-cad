@@ -236,6 +236,6 @@ export default defineConfig({
   server: { hmr: false },
   optimizeDeps: { exclude: ['replicad-opencascadejs'] },
   build: { target: 'es2022', chunkSizeWarningLimit: 4000 },
-  // drafts in temp/ (copies of the project too) are not tested
-  test: { environment: 'node', exclude: ['**/node_modules/**', '**/dist/**', 'temp/**'] },
+  // drafts in temp/ (copies of the project too) and other sessions' worktrees in .claude/ are not tested
+  test: { environment: 'node', exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', '.claude/**'] },
 } as never)

@@ -19,6 +19,8 @@ Type `#name` in any numeric field of a feature dialog or in a [sketch dimension]
 - `#width / 2`
 - `#d + 2 * #wall`
 
+As soon as you type `#`, a list of the available variables with their values appears under the field; the next letters narrow it (names starting with them first, then those containing them). `↑` and `↓` pick a variable, `Enter` or `Tab` puts its name in, `Esc` closes the list; a click on a row puts the name in too.
+
 A sketch dimension defined by an expression is marked with the **fx** icon.
 
 ## Variable table {#table}

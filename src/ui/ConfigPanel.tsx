@@ -9,7 +9,7 @@ import { isDimension, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
 import { activeStudio, useDoc, withStudio } from '../store/docStore';
 import { FORMS } from './forms';
-import { FEATURE_ICONS } from './FeatureDialog';
+import { featureIcon } from './FeatureDialog';
 import { Icon } from './icons';
 import { useDraggable } from './useDraggable';
 import { t, tName } from '../i18n';
@@ -126,7 +126,7 @@ function AddParamMenu({ studio, input, at, onClose }: { studio: PartStudioTab; i
       {groups.map(({ f, params }) => (
         <div key={f.id}>
           <div className="dropdown-label cfg-add-feature">
-            <Icon name={FEATURE_ICONS[f.type]} size={14} /> {f.type === 'variable' ? `#${f.params.name}` : tName(f.name)}
+            <Icon name={featureIcon(f)} size={14} /> {f.type === 'variable' ? `#${f.params.name}` : tName(f.name)}
           </div>
           {params.map((p) => (
             <div

@@ -23,6 +23,7 @@ const ORANGE = '#f08a24';
 const ORANGE_FILL = '#fde4cc';
 const GREEN = '#3aa655';
 const RED = '#d64545';
+const PURPLE = '#8b5cd6';
 const RED_FILL = '#fbe3e3';
 const GREY_TOP = '#f4f6f8';
 const GREY_LEFT = '#e3e7eb';
@@ -212,6 +213,16 @@ const rotateRightGlyph = (
 
 const MIRROR_X = 'translate(24 0) scale(-1 1)';
 
+/** Extrude: a box from its profile, the arrow in `arrow` (blue — new; by the operation in the feature list). */
+const extrudeArt = (arrow: string) => (
+  <>
+    {box(10, 6, 6, 8)}
+    <path d="M4 17 L10 14 L16 17" stroke={ORANGE} {...THIN} strokeDasharray="1.5 1.5" strokeLinecap="butt" />
+    <path d="M4 17 L10 20 L16 17" stroke={ORANGE} strokeWidth={2} />
+    <path d="M20 16.5 V4 M17.5 6.5 L20 4 L22.5 6.5" stroke={arrow} strokeWidth={1.75} />
+  </>
+);
+
 // ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
@@ -230,14 +241,11 @@ const ICONS = {
       </g>
     </>
   ),
-  extrude: (
-    <>
-      {box(10, 6, 6, 8)}
-      <path d="M4 17 L10 14 L16 17" stroke={ORANGE} {...THIN} strokeDasharray="1.5 1.5" strokeLinecap="butt" />
-      <path d="M4 17 L10 20 L16 17" stroke={ORANGE} strokeWidth={2} />
-      <path d="M20 16.5 V4 M17.5 6.5 L20 4 L22.5 6.5" stroke={BLUE} strokeWidth={1.75} />
-    </>
-  ),
+  extrude: extrudeArt(BLUE),
+  // an extrude by what it does to the parts (in the feature list and its dialog): add, remove, intersect
+  extrudeAdd: extrudeArt(GREEN),
+  extrudeRemove: extrudeArt(RED),
+  extrudeIntersect: extrudeArt(PURPLE),
   // Partially revolved ring around a dashed axis; the profile at its ends.
   revolve: (
     <>
@@ -1165,6 +1173,36 @@ const ICONS = {
       <path d="M8.5 10 H16 M8.5 14 H16" {...THIN} strokeDasharray="1.25 1.25" strokeLinecap="butt" />
       <rect x={4} y={10} width={4.5} height={4} fill={BLUE_LIGHT} stroke={BLUE} {...SMALL} />
       <rect x={16} y={10} width={3.5} height={4} fill={BLUE_LIGHT} stroke={BLUE} {...SMALL} />
+    </>
+  ),
+  // a drawing's section view: the cutting line on a view (thick ends), the section hatched
+  drawingSection: (
+    <>
+      <rect x={2} y={6} width={8} height={12} rx={0.75} />
+      <path d="M6 4.5 V19.5" stroke={BLUE} {...THIN} strokeDasharray="3 1.25 0.75 1.25" strokeLinecap="butt" />
+      <path d="M6 2 V5 M6 19 V22" stroke={BLUE} strokeWidth={2} strokeLinecap="butt" />
+      <rect x={14} y={6} width={8} height={12} rx={0.75} fill={BLUE_LIGHT} stroke={BLUE} />
+      <path d="M14.5 10.5 L18.5 6.5 M14.5 14.5 L21.5 7.5 M15.5 17.5 L21.5 11.5 M19 17.5 L21.5 15" stroke={BLUE} {...THIN} />
+    </>
+  ),
+  // a drawing's hole callout: a leader from a hole to a shelf with the hole's text
+  holeCallout: (
+    <>
+      <circle cx={7} cy={16.5} r={4.5} fill={BLUE_LIGHT} stroke={BLUE} />
+      <path d="M10.2 13.3 L14 8.5 H22" {...THIN} />
+      <polygon points="10.2,13.3 12.06,11.84 10.82,10.84" fill="currentColor" stroke="none" />
+      <path d="M14.5 5.5 H21.5" strokeWidth={1.75} />
+    </>
+  ),
+  // a drawing's detail view: a circle on a view, enlarged
+  detailView: (
+    <>
+      <rect x={2} y={3} width={11} height={9} rx={0.75} {...THIN} />
+      <path d="M7.5 7 H10 V10.5" {...THIN} />
+      <circle cx={9} cy={8.5} r={2.5} stroke={BLUE} {...THIN} />
+      <path d="M10.8 10.3 L12.6 12.1" stroke={BLUE} {...THIN} />
+      <circle cx={16.5} cy={16.5} r={5.5} fill={BLUE_LIGHT} stroke={BLUE} />
+      <path d="M13 14 H18 V21" />
     </>
   ),
   note: (

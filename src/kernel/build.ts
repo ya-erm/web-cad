@@ -5,7 +5,7 @@ import * as R from 'replicad';
 import type { EvalContext } from '../core/expr';
 import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
 import { perpendicular as perpendicularTo, v3 } from '../core/math';
-import { FeatureError, compoundOf, isSurface, type Shape3D } from './geom';
+import { FeatureError, compoundOf, isSurface, prism, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
 import { exportMesh, meshPart } from './meshing';
@@ -20,9 +20,15 @@ import type {
   PlaneResult,
   StepAssembly,
   ProjectedEdge,
+  ProjectedHole,
+  SectionCut,
+  SectionFace,
   SketchResult,
   ThreadResult,
 } from './protocol';
+import { VIEW_AXES, type ViewAxes } from '../core/drawingViews';
+import { halfSpace } from './faceOps';
+import { trackFaceOrigins } from './faceOrigins';
 import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint } from './refs';
 import { angleBetween, centerDistance, maxDistance, type Center, type Direction } from './measure';
 import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
@@ -98,6 +104,8 @@ export class StudioBuilder {
     const m = meshPart(id, shape, { name: this.partName(st, id), color: this.ownColor(st, id) || DEFAULT_PART_COLOR, hidden: !!this.meta[id]?.hidden }, quality);
     if (st.derived.has(id)) m.derived = true;
     if (isSurface(shape)) m.surface = true;
+    const origins = st.faceOrigins.get(id);
+    if (origins?.shape === shape) m.faceFeatures = origins.faces.map((f) => f.feature);
     return m;
   }
 
@@ -131,6 +139,7 @@ export class StudioBuilder {
         const next = cloneState(prev);
         try {
           const out = await applyFeature(next, f, ec, this.sources);
+          trackFaceOrigins(prev, next, f.id);
           st = next;
           if (out.warning) status = { ok: true, warning: out.warning };
         } catch (e) {
@@ -411,11 +420,53 @@ export class StudioBuilder {
     return { items, points, lines, volumes, centerOfMass };
   }
 
-  projection(partIds: string[], orientation: ViewOrientation, withHidden: boolean): { edges: ProjectedEdge[]; bounds: [Vec2, Vec2] | null } {
-    const items = this.shapesFor(partIds);
-    if (!items.length) return { edges: [], bounds: null };
+  projection(
+    partIds: string[],
+    orientation: ViewOrientation,
+    withHidden: boolean,
+    opts: { axes?: ViewAxes; section?: SectionCut } = {},
+  ): { edges: ProjectedEdge[]; bounds: [Vec2, Vec2] | null; sections?: SectionFace[] } {
+    let items = this.shapesFor(partIds);
+    const { n, x } = opts.axes ?? VIEW_AXES[orientation];
+    const y = v3.cross(n, x);
+    const P = (p: Vec3): Vec2 => [v3.dot(p, x), v3.dot(p, y)];
+    const sections: SectionFace[] = [];
+    // an offset section's steps: lines of the view where its step faces are seen edge-on (not drawn)
+    let jogs: { p: Vec2; d: Vec2 }[] = [];
+    if (opts.section) {
+      // a section view: the parts without what lies on the viewer's side of the plane, the faces it cut hatched
+      const { origin, normal } = opts.section;
+      const steps = sectionSteps(opts.section);
+      jogs = steps?.jogs.map((j) => ({ p: P(j), d: v2norm(P(opts.section!.along!)) })) ?? [];
+      const planes = steps?.planes ?? [origin];
+      const cut: typeof items = [];
+      for (const it of items) {
+        const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
+        const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), origin))) + 10;
+        let rest: Shape3D;
+        try {
+          rest = it.shape.cut(steps ? steppedCut(opts.section, size) : halfSpace(origin, normal, size));
+        } catch {
+          continue;
+        }
+        if (!rest.faces.length) continue;
+        cut.push({ ...it, shape: rest });
+        for (const f of rest.faces) {
+          if (f.geomType !== 'PLANE') continue;
+          const nv = f.normalAt();
+          const along = Math.abs(nv.x * normal[0] + nv.y * normal[1] + nv.z * normal[2]);
+          nv.delete();
+          const c = f.center;
+          const fc: Vec3 = [c.x, c.y, c.z];
+          c.delete();
+          if (along < 1 - 1e-6 || !planes.some((o) => Math.abs(v3.dot(v3.sub(fc, o), normal)) < 1e-4)) continue;
+          sections.push({ partId: it.id, edges: f.edges.map((e) => sampleEdge(e).map(P)) });
+        }
+      }
+      items = cut;
+    }
+    if (!items.length) return { edges: [], bounds: null, ...(opts.section ? { sections } : {}) };
     const shape = compoundOf(items.map((i) => i.shape));
-    const { n, x } = VIEW_AXES[orientation];
     const oc = R.getOC();
     const ax2 = R.makeAx2([0, 0, 0], n, x);
     const algo = new oc.HLRBRep_Algo();
@@ -443,6 +494,8 @@ export class StudioBuilder {
           pts.push([p.x, p.y]);
           p.delete();
         }
+        // an offset section's step, seen edge-on: not drawn (ISO 128-44)
+        if (jogs.some((j) => pts.every((q) => Math.abs((q[0] - j.p[0]) * j.d[1] - (q[1] - j.p[1]) * j.d[0]) < 1e-5))) continue;
         const pe: ProjectedEdge = { pts, hidden };
         if (type === 'CIRCLE') {
           const ad = new oc.BRepAdaptor_Curve(e.wrapped);
@@ -469,10 +522,11 @@ export class StudioBuilder {
       collect(cast(toShape.HCompound()), true, edges);
       collect(cast(toShape.OutLineHCompound()), true, edges);
     }
-    // cosmetic threads of these parts, thin (ISO 6410)
+    // cosmetic threads of these parts, thin (ISO 6410); in a section — as cut by it
     const ids = new Set(items.map((i) => i.id));
     const threads = [...this.current.threads.values()].filter((t) => !t.owner || ids.has(t.owner));
-    edges.push(...threadLines(threads, n, x, withHidden));
+    const cutBy = opts.section && { normal: opts.section.normal, planes: sectionSteps(opts.section)?.planes ?? [opts.section.origin] };
+    edges.push(...threadLines(threads, n, x, withHidden, cutBy || undefined));
     toShape.delete();
     projector.delete();
     algo.delete();
@@ -483,8 +537,76 @@ export class StudioBuilder {
         lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])];
         hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])];
       }
-    return { edges, bounds: edges.length ? [lo, hi] : null };
+    // the Hole features' holes seen end-on (either side), for callouts; counted by the feature they come from
+    const holes: ProjectedHole[] = [];
+    if (!opts.section) {
+      const shown = [...this.current.holes.values()].filter((h) => h.owner && ids.has(h.owner));
+      const count = new Map<string, number>();
+      for (const h of shown) count.set(h.source, (count.get(h.source) ?? 0) + 1);
+      for (const h of shown) {
+        if (Math.abs(v3.dot(h.dir, n)) < 0.999) continue;
+        const c = h.callout;
+        holes.push({ c: P(h.origin), r: Math.max(c.diameter, c.cbore?.diameter ?? 0, c.csink?.diameter ?? 0) / 2, callout: c, count: count.get(h.source) ?? 1 });
+      }
+    }
+    return { edges, bounds: edges.length ? [lo, hi] : null, ...(opts.section ? { sections } : {}), ...(holes.length ? { holes } : {}) };
   }
+}
+
+const v2norm = (a: Vec2): Vec2 => {
+  const l = Math.hypot(a[0], a[1]) || 1;
+  return [a[0] / l, a[1] / l];
+};
+
+/**
+ * An offset section's line (more than one segment): the planes its segments along the first one cut (a point of each)
+ * and where its steps across them start; none for a straight cut.
+ */
+export function sectionSteps(s: SectionCut): { planes: Vec3[]; jogs: Vec3[] } | null {
+  const line = s.line;
+  if (!line || line.length < 3 || !s.along) return null;
+  const u = v3.norm(v3.sub(line[1], line[0]));
+  const planes: Vec3[] = [];
+  const jogs: Vec3[] = [];
+  for (let i = 0; i + 1 < line.length; i++) {
+    const d = v3.sub(line[i + 1], line[i]);
+    if (v3.len(d) < 1e-9) continue;
+    if (Math.abs(v3.dot(v3.norm(d), u)) > 0.999) planes.push(line[i]);
+    else jogs.push(line[i]);
+  }
+  return { planes, jogs };
+}
+
+/**
+ * What an offset section removes: a prism through the parts across the parent view, bounded by the stepped line on
+ * one side and reaching `size` beyond it towards the viewer, its ends carried on along the first segment.
+ */
+function steppedCut(s: SectionCut, size: number): Shape3D {
+  const line = s.line!;
+  const u = v3.norm(v3.sub(line[1], line[0]));
+  const first = v3.sub(line[0], v3.scale(u, size));
+  const last = v3.add(line[line.length - 1], v3.scale(u, size));
+  const toViewer = v3.scale(s.normal, size);
+  const outline = [first, ...line, last, v3.add(last, toViewer), v3.add(first, toViewer)];
+  return prism(R.makePolygon(outline), s.along!, -size, size);
+}
+
+/** Points along an edge in space (a line — its ends; a curve — about every 0.5 mm, 8 … 200 segments). */
+function sampleEdge(e: R.Edge): Vec3[] {
+  let len = 1;
+  try {
+    len = e.length;
+  } catch {
+    // keep 1
+  }
+  const nSeg = e.geomType === 'LINE' ? 1 : Math.min(200, Math.max(8, Math.ceil(len / 0.5)));
+  const pts: Vec3[] = [];
+  for (let i = 0; i <= nSeg; i++) {
+    const p = e.pointAt(i / nSeg);
+    pts.push([p.x, p.y, p.z]);
+    p.delete();
+  }
+  return pts;
 }
 
 /** Cosmetic threads as results (by key). */
@@ -497,13 +619,35 @@ function threadResults(st: BuildState): ThreadResult[] {
  * end-on from where the hole starts — a thin three-quarter circle of the major diameter; from the side — hidden thin
  * lines of the major diameter along the thread and across its end.
  */
-export function threadLines(threads: Pick<ThreadState, 'origin' | 'dir' | 'major' | 'length'>[], n: Vec3, x: Vec3, withHidden: boolean): ProjectedEdge[] {
+export function threadLines(
+  threads: Pick<ThreadState, 'origin' | 'dir' | 'major' | 'length'>[],
+  n: Vec3,
+  x: Vec3,
+  withHidden: boolean,
+  /** A section view's cut (its planes, `normal` towards the viewer): threads it cuts lengthwise are seen, removed ones not. */
+  cut?: { normal: Vec3; planes: Vec3[] },
+): ProjectedEdge[] {
   const y = v3.cross(n, x);
   const P = (p: Vec3): Vec2 => [v3.dot(p, x), v3.dot(p, y)];
   const out: ProjectedEdge[] = [];
   for (const t of threads) {
     const r = t.major / 2;
     const along = v3.dot(t.dir, n);
+    // where it is against the cut: through it (cut lengthwise), in front of it (removed) or behind
+    const depths = cut?.planes.map((o) => v3.dot(v3.sub(t.origin, o), cut.normal)) ?? [];
+    const cutThrough = depths.some((dd) => Math.abs(dd) <= r);
+    const removed = !!cut && !cutThrough && depths.every((dd) => dd > r);
+    if (removed) continue;
+    if (cutThrough && Math.abs(along) < 0.98) {
+      // in section (ISO 6410-1): the major diameter as thin solid lines, the end of the thread a thick one
+      const a = t.origin;
+      const b = v3.add(t.origin, v3.scale(t.dir, t.length));
+      const s = v3.scale(v3.norm(v3.cross(t.dir, n)), r);
+      out.push({ pts: [P(v3.add(a, s)), P(v3.add(b, s))], hidden: false, thin: true });
+      out.push({ pts: [P(v3.sub(a, s)), P(v3.sub(b, s))], hidden: false, thin: true });
+      out.push({ pts: [P(v3.add(b, s)), P(v3.sub(b, s))], hidden: false });
+      continue;
+    }
     if (along < -0.2) {
       // the hole goes away from the viewer: its mouth is seen, the thread's circle (as an ellipse when oblique)
       const e1 = perpendicularTo(t.dir);
@@ -533,16 +677,7 @@ export function threadLines(threads: Pick<ThreadState, 'origin' | 'dir' | 'major
   return out;
 }
 
-/** Projection axes: n points towards the viewer, x is the screen right direction. */
-export const VIEW_AXES: Record<ViewOrientation, { n: Vec3; x: Vec3 }> = {
-  front: { n: [0, -1, 0], x: [1, 0, 0] },
-  back: { n: [0, 1, 0], x: [-1, 0, 0] },
-  top: { n: [0, 0, 1], x: [1, 0, 0] },
-  bottom: { n: [0, 0, -1], x: [1, 0, 0] },
-  right: { n: [1, 0, 0], x: [0, 1, 0] },
-  left: { n: [-1, 0, 0], x: [0, -1, 0] },
-  iso: { n: v3.norm([1, -1, 1]), x: v3.norm([1, 1, 0]) },
-};
+export { VIEW_AXES };
 
 export async function blobToBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());

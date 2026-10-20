@@ -187,15 +187,33 @@ const RES: Record<string, [number, number]> = {
   fine: [0.005, 0.1],
 };
 
+const EXPORT_PREFS = 'webcad.export';
+const EXPORT_KINDS = ['step', 'stl', 'stl-ascii', 'obj', '3mf', 'project'] as const;
+
+/** The format, resolution and units of the last export: picked again the next time. */
+function exportPrefs(): { kind: ExportKind | 'project'; res: string; unit: 'mm' | 'in' } {
+  let p: { kind?: string; res?: string; unit?: string } = {};
+  try {
+    p = JSON.parse(localStorage.getItem(EXPORT_PREFS) ?? '{}') ?? {};
+  } catch {
+    // the defaults
+  }
+  return {
+    kind: EXPORT_KINDS.find((k) => k === p.kind) ?? 'step',
+    res: p.res && p.res in RES ? p.res : 'medium',
+    unit: p.unit === 'in' ? 'in' : 'mm',
+  };
+}
+
 export function ExportDialog() {
   const open = useEditor((s) => s.exportOpen);
   const build = useEditor((s) => s.build);
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const asm = activeAssembly(doc);
-  const [kind, setKind] = useState<ExportKind | 'project'>('step');
-  const [res, setRes] = useState('medium');
-  const [unit, setUnit] = useState<'mm' | 'in'>('mm');
+  const [kind, setKind] = useState<ExportKind | 'project'>(() => exportPrefs().kind);
+  const [res, setRes] = useState(() => exportPrefs().res);
+  const [unit, setUnit] = useState<'mm' | 'in'>(() => exportPrefs().unit);
   const [busy, setBusy] = useState(false);
   if (!open || (!studio && !asm) || !doc) return null;
   const close = () => useEditor.setState({ exportOpen: null });
@@ -205,6 +223,11 @@ export function ExportDialog() {
   // the whole document for WebCAD (tabs, feature history), not geometry for other programs
   const project = kind === 'project';
   const run = async () => {
+    try {
+      localStorage.setItem(EXPORT_PREFS, JSON.stringify({ kind, res, unit }));
+    } catch {
+      // not remembered
+    }
     if (project) {
       // with its versions
       download(projectText(doc, await fileVersions(doc.id)), `${safeName(doc.name)}.webcad.json`, 'application/json');

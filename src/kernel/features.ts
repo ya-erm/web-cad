@@ -60,7 +60,8 @@ import {
   resolveSketchPlane,
   worldGeometryForRef,
 } from './refs';
-import { adoptThreads, removePart, setPart, setSurface, type BuildState, type PartState, type ThreadState } from './state';
+import { adoptThreads, removePart, setPart, setSurface, type BuildState, type HoleState, type PartState, type ThreadState } from './state';
+import type { HoleCallout } from './protocol';
 import { standardHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
 import { wrapRegion } from './wrap';
@@ -1384,10 +1385,23 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
   const tool = tools.length === 1 ? tools[0] : compoundOf(tools);
   recordTool(ctx.st, ctx.fid, tool, 'remove');
   applyBodyOp(ctx.st, ctx.fid, tool, 'remove', { mergeAll: p.scopeAll, parts: p.scope });
+  // where the hole has its own diameter: below a counterbore / countersink
+  const start = dims.cbore ? dims.cbore.depth : dims.csink ? (dims.csink.recess ?? 0) + (dims.csink.R - dims.R0) / Math.tan(dims.csink.angle / 2) : 0;
+  // the holes for drawings' callouts, in the parts they went into
+  const callout: HoleCallout = {
+    diameter: dims.R0 * 2,
+    ...(dims.through ? {} : { depth: dims.depth }),
+    ...(dims.cbore ? { cbore: { diameter: dims.cbore.R * 2, depth: dims.cbore.depth } } : {}),
+    ...(dims.csink ? { csink: { diameter: dims.csink.R * 2, angle: (dims.csink.angle * 180) / Math.PI } } : {}),
+    ...(dims.thread ? { thread: { designation: dims.thread.designation, ...(dims.through ? {} : { depth: dims.thread.depth }) } } : {}),
+  };
+  at.forEach((a, i) => {
+    const run = materialRun(ctx.st, a.pt, a.drill, dims.R0 * 1.05 + 0.05, start, dims.through ? big : Math.max(dims.depth, start + 1e-3));
+    ctx.st.holes.set(`${ctx.fid}.${i}`, { featureId: ctx.fid, source: ctx.fid, origin: a.pt, dir: a.drill, callout, ...(run ? { owner: run.owner } : {}) });
+  });
   if (dims.thread) {
     const th = dims.thread;
     // the thread starts below a counterbore / countersink, where the hole has its own diameter
-    const start = dims.cbore ? dims.cbore.depth : dims.csink ? (dims.csink.recess ?? 0) + (dims.csink.R - dims.R0) / Math.tan(dims.csink.angle / 2) : 0;
     at.forEach((a, i) => {
       // as far as there is material around the hole (a through hole: to where it comes out)
       const run = materialRun(ctx.st, a.pt, a.drill, (dims.R0 + th.major / 2) / 2, start, start + th.depth);
@@ -1468,7 +1482,7 @@ function materialRun(st: BuildState, p0: Vec3, dir: Vec3, r: number, start: numb
 }
 
 /** A cosmetic thread carried along by a motion of shapes (patterns, mirror, Derived placement): its axis as an edge, moved. */
-function movedThread(t: ThreadState, x: Xform): Pick<ThreadState, 'origin' | 'dir' | 'length'> {
+function movedThread(t: Pick<ThreadState, 'origin' | 'dir' | 'length'>, x: Xform): Pick<ThreadState, 'origin' | 'dir' | 'length'> {
   const end = v3.add(t.origin, v3.scale(t.dir, t.length));
   const e = x(R.makeLine(t.origin, end) as unknown as Shape3D) as unknown as R.Edge;
   const [a, b] = [0, 1].map((u) => {
@@ -1480,12 +1494,22 @@ function movedThread(t: ThreadState, x: Xform): Pick<ThreadState, 'origin' | 'di
   return { origin: a, dir: v3.norm(v3.sub(b, a)), length: v3.len(v3.sub(b, a)) };
 }
 
-/** Cosmetic threads of these parts (as they are before copies of them are made). */
-const threadsOf = (st: BuildState, partIds: string[]) => [...st.threads].filter(([, t]) => t.owner && partIds.includes(t.owner));
+/** A hole carried along by a motion of shapes: its mouth and direction. */
+function movedHole(h: HoleState, x: Xform): Pick<HoleState, 'origin' | 'dir'> {
+  const m = movedThread({ origin: h.origin, dir: h.dir, length: 1 }, x);
+  return { origin: m.origin, dir: m.dir };
+}
 
-/** Copies of cosmetic threads (`threadsOf`) owned by `from`, moved by `x`, for its copy `to` (the same part: fused copies). */
-function copyThreads(st: BuildState, threads: [string, ThreadState][], from: string, to: string, x: Xform, fid: string, n: number) {
-  for (const [k, t] of threads) if (t.owner === from) st.threads.set(`${k}@${fid}.${n}`, { ...t, ...movedThread(t, x), owner: to, featureId: fid });
+/** Cosmetic threads and holes of these parts (as they are before copies of them are made). */
+const threadsOf = (st: BuildState, partIds: string[]) => ({
+  threads: [...st.threads].filter(([, t]) => t.owner && partIds.includes(t.owner)),
+  holes: [...st.holes].filter(([, h]) => h.owner && partIds.includes(h.owner)),
+});
+
+/** Copies of cosmetic threads and holes (`threadsOf`) owned by `from`, moved by `x`, for its copy `to` (the same part: fused copies). */
+function copyThreads(st: BuildState, carried: ReturnType<typeof threadsOf>, from: string, to: string, x: Xform, fid: string, n: number) {
+  for (const [k, t] of carried.threads) if (t.owner === from) st.threads.set(`${k}@${fid}.${n}`, { ...t, ...movedThread(t, x), owner: to, featureId: fid });
+  for (const [k, h] of carried.holes) if (h.owner === from) st.holes.set(`${k}@${fid}.${n}`, { ...h, ...movedHole(h, x), owner: to, featureId: fid });
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,6 +1552,7 @@ function patternInstances(
   const records = features.flatMap((fid) => st.tools.get(fid) ?? []);
   if (!records.length) fail('Select extrude, revolve, sweep, loft or hole features to pattern');
   const threads = [...st.threads].filter(([, t]) => features.includes(t.featureId));
+  const holes = [...st.holes].filter(([, h]) => features.includes(h.featureId));
   xforms.forEach((x, i) => {
     for (const rec of records) applyBodyOp(st, ctx.fid, x(rec.tool), rec.op, { mergeAll: true, parts: [] });
     // the copied holes' threads: in whatever part each copy went into, as far as its material goes
@@ -1535,6 +1560,14 @@ function patternInstances(
       const m = movedThread(t, x);
       const run = materialRun(st, m.origin, m.dir, (t.minor + t.major) / 4, 0, m.length);
       if (run) st.threads.set(`${k}@${ctx.fid}.${i + 1}`, { ...t, ...m, length: run.length, owner: run.owner, featureId: ctx.fid });
+    }
+    // and the holes: in the part the copy went into (just outside its wall, past a counterbore / countersink)
+    for (const [k, h] of holes) {
+      const m = movedHole(h, x);
+      const c = h.callout;
+      const from = c.cbore?.depth ?? 0;
+      const run = materialRun(st, m.origin, m.dir, (c.diameter / 2) * 1.05 + 0.05, from, from + (c.depth ?? sceneExtent(st)));
+      st.holes.set(`${k}@${ctx.fid}.${i + 1}`, { ...h, ...m, featureId: ctx.fid, ...(run ? { owner: run.owner } : { owner: undefined }) });
     }
   });
 }
@@ -1992,7 +2025,8 @@ function buildTransform(ctx: Ctx, f: FeatureOf<'transform'>): FeatureOutput {
     } else {
       setPart(st, part.id, res);
       // its cosmetic threads move with it
-      for (const [k, t] of threads) if (t.owner === part.id) st.threads.set(k, { ...t, ...movedThread(t, x) });
+      for (const [k, t] of threads.threads) if (t.owner === part.id) st.threads.set(k, { ...t, ...movedThread(t, x) });
+      for (const [k, h] of threads.holes) if (h.owner === part.id) st.holes.set(k, { ...h, ...movedHole(h, x) });
     }
   }
   if (!p.copy) {
@@ -2161,6 +2195,9 @@ function buildDerived(ctx: Ctx, f: FeatureOf<'derived'>): FeatureOutput {
     // with its cosmetic threads
     for (const [k, t] of src.state.threads)
       if (t.owner === id) ctx.st.threads.set(`${ctx.fid}.${k}`, { ...t, ...(p.placeTo?.[0] ? movedThread(t, place) : {}), owner: pid, featureId: ctx.fid });
+    // and holes (counted as this feature's)
+    for (const [k, h] of src.state.holes)
+      if (h.owner === id) ctx.st.holes.set(`${ctx.fid}.${k}`, { ...h, ...(p.placeTo?.[0] ? movedHole(h, place) : {}), owner: pid, featureId: ctx.fid, source: `${ctx.fid}.${h.source}` });
   }
   // its sketches, under "derivedId.sketchId": their regions and curves are referenced like this Part Studio's own
   let lostSketches = 0;

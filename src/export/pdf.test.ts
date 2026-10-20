@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { unzlibSync } from 'three/examples/jsm/libs/fflate.module.js';
 import { encodePdfLiteral, writePDF } from './pdf';
+import { pdfFontOf, sfntOfWoff } from './pdfFont';
 import type { Prim2D } from './prim2d';
 
 function latin1(bytes: Uint8Array): string {
@@ -81,6 +85,50 @@ describe('writePDF', () => {
   it('only contains a few non-ASCII bytes (binary marker)', () => {
     const high = [...bytes].filter((b) => b > 126).length;
     expect(high).toBe(4);
+  });
+});
+
+describe('writePDF with an embedded font (Cyrillic)', () => {
+  const file = readFileSync(fileURLToPath(new URL('../sketch/fonts/Inter-Regular.woff', import.meta.url)));
+  const font = pdfFontOf(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer);
+  const text = latin1(writePDF([{ width: 297, height: 210, prims }], { title: 'Чертёж', font }));
+
+  it('takes the TrueType font out of the WOFF', () => {
+    const sfnt = sfntOfWoff(new Uint8Array(file));
+    expect(new DataView(sfnt.buffer).getUint32(0)).toBe(0x00010000);
+    expect(unzlibSync(font.file)).toEqual(sfnt);
+    expect(font.glyph('Ж'.codePointAt(0)!)).toBeGreaterThan(0);
+  });
+
+  it('embeds it as a CID font for all the text, with widths and a ToUnicode map', () => {
+    expect(text).toContain('/Subtype /Type0 /BaseFont /Inter-Regular /Encoding /Identity-H');
+    expect(text).toContain('/Subtype /CIDFontType2');
+    expect(text).toMatch(/\/FontFile2 \d+ 0 R/);
+    expect(text).toMatch(/\/Length1 \d+ \/Filter \/FlateDecode/);
+    // the text as glyph ids, not WinAnsi; no "?" for the Cyrillic letters
+    expect(text).toMatch(/\/F2 5 Tf [^\n]* Tm <[0-9A-F]+> Tj ET/);
+    expect(text).not.toContain(' Tm (');
+    // "П" (U+041F) is mapped back to its character
+    const g = font.glyph(0x41f).toString(16).toUpperCase().padStart(4, '0');
+    expect(text).toContain(`<${g}> <041F>`);
+    expect(text).toMatch(/\/W \[\d+ \[\d+\]/);
+  });
+
+  it('keeps the xref right with the binary font stream', () => {
+    const startxref = Number(/startxref\s+(\d+)\s+%%EOF\s*$/.exec(text)?.[1]);
+    const size = Number(/^xref\n0 (\d+)\n/.exec(text.slice(startxref))![1]);
+    expect(size).toBe(1 + 4 + 2 + 5);
+    const o = startxref + `xref\n0 ${size}\n`.length;
+    for (let i = 1; i < size; i++) {
+      const off = Number(text.slice(o + 20 * i, o + 20 * i + 10));
+      expect(text.slice(off, off + `${i} 0 obj`.length)).toBe(`${i} 0 obj`);
+    }
+  });
+
+  it('stays with Helvetica when all the text is WinAnsi', () => {
+    const latin = latin1(writePDF([{ width: 100, height: 100, prims: [{ t: 'text', p: [10, 10], text: 'Ø20 (A)', h: 5 }] }], { font }));
+    expect(latin).not.toContain('/FontFile2');
+    expect(latin).toContain(' Tm (');
   });
 });
 

@@ -92,7 +92,7 @@ async function handle(req: WorkerRequest) {
       return;
     }
     case 'projection': {
-      const r = builderFor(req.studioKey).projection(req.partIds, req.orientation, req.hidden);
+      const r = builderFor(req.studioKey).projection(req.partIds, req.orientation, req.hidden, { axes: req.axes, section: req.section });
       post({ type: 'projection', reqId: req.reqId, ...r });
       return;
     }

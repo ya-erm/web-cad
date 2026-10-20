@@ -209,9 +209,16 @@ export class CameraController {
     this.quat.copy(quatFromDirUp(back, up));
   }
 
+  /** A turn of the view about an axis through the target (from where a turn under way ends: quick ones add up). */
   rotateAbout(axis: THREE.Vector3, angle: number) {
+    const a = this.anim;
     const q = new THREE.Quaternion().setFromAxisAngle(axis.clone().normalize(), angle);
-    this.animateTo(q.multiply(this.quat), this.target.clone(), this.viewHeight, 250);
+    this.animateTo(q.multiply(this.finalQuat), a ? a.toT.clone() : this.target.clone(), a ? a.toH : this.viewHeight, 250);
+  }
+
+  /** The orientation the view ends at (a turn under way: its end). */
+  get finalQuat(): THREE.Quaternion {
+    return (this.anim?.toQ ?? this.quat).clone();
   }
 
   pan(dxPx: number, dyPx: number) {

@@ -11,6 +11,7 @@ import { derivableVersions, snapshotStudios, versionDocument, type VersionedDocu
 import { sourceContents, type SourceContents } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { stepExpression } from './exprStep';
+import { useVariableSuggest, varChoices } from './varSuggest';
 import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
 import { FORMS, type Row } from './forms';
@@ -53,6 +54,16 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   helix: 'helix',
   mateConnector: 'mateConnector',
 };
+
+/** A feature's own icon: a solid extrude's arrow is coloured by what it does — adds (green), removes (red), intersects (purple). */
+export function featureIcon(f: Feature): IconName {
+  if (f.type === 'extrude' && f.params.bodyType !== 'surface') {
+    if (f.params.op === 'add') return 'extrudeAdd';
+    if (f.params.op === 'remove') return 'extrudeRemove';
+    if (f.params.op === 'intersect') return 'extrudeIntersect';
+  }
+  return FEATURE_ICONS[f.type];
+}
 
 export function useRefLabel() {
   const build = useEditor((s) => s.build);
@@ -188,9 +199,13 @@ function ExprInput({ value, unit, onChange }: { value: string; unit: 'length' | 
     again(400);
   };
   const steppable = stepExpression(text, 1) !== null;
+  // "#" lists the variables it can use
+  const inputRef = useRef<HTMLInputElement>(null);
+  useVariableSuggest(inputRef, () => (ctx && doc ? varChoices(ctx.vars, doc.units) : []));
   return (
     <span className="expr-field">
       <input
+        ref={inputRef}
         type="text"
         className={v === null ? 'invalid' : ''}
         value={text}
@@ -234,7 +249,7 @@ function FeaturePicker({ value, onChange, upTo }: { value: string[]; onChange: (
             checked={value.includes(f.id)}
             onChange={(e) => onChange(e.target.checked ? [...value, f.id] : value.filter((x) => x !== f.id))}
           />
-          <Icon name={FEATURE_ICONS[f.type]} size={16} />
+          <Icon name={featureIcon(f)} size={16} />
           {tName(f.name)}
         </label>
       ))}
@@ -954,7 +969,7 @@ export function FeatureDialog() {
       }}
     >
       <div className="fd-header">
-        <Icon name={FEATURE_ICONS[draft.type]} size={20} />
+        <Icon name={featureIcon(draft)} size={20} />
         <input
           className="fd-title"
           value={tName(draft.name)}

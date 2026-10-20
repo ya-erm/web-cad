@@ -51,6 +51,7 @@ import {
 import { expandTexts, loadFonts, onFontLoaded, textOfPart, textOutline } from '../sketch/text';
 import { arrowTriangle, dimensionGeometry } from '../sketch/dimensions';
 import { CONSTRAINT_GLYPH_SVG } from '../ui/constraintGlyphs';
+import { attachVariableSuggest, varChoices } from '../ui/varSuggest';
 import { refKey, useEditor, type SketchTool, type SketchTransformState } from '../store/editorStore';
 import { addUsedGeometry, projectGeometry } from '../sketch/useGeometry';
 import { applyOffset, chainIdsOf, chainPolylines, computeOffset, extendEntity, extendTarget, offsetChains, offsetDistanceAt } from '../sketch/offset';
@@ -203,6 +204,8 @@ export class SketchEditor {
     this.dimInput.style.display = 'none';
     this.dimInput.addEventListener('keydown', (e) => this.onDimKey(e));
     this.dimInput.addEventListener('blur', () => this.commitDimInput(true));
+    // "#" lists the variables (its keys go before ours: Enter picks one rather than committing)
+    this.offVarSuggest = attachVariableSuggest(this.dimInput, () => varChoices(this.evalCtx().vars, useDoc.getState().doc!.units));
     engine.container.appendChild(this.dimInput);
     this.inferLabel = document.createElement('div');
     this.inferLabel.className = 'infer-label';
@@ -218,10 +221,12 @@ export class SketchEditor {
   }
 
   private offFonts: () => void;
+  private offVarSuggest: () => void;
 
   dispose() {
     this.deactivate();
     this.offFonts();
+    this.offVarSuggest();
     this.dimInput.remove();
     this.inferLabel.remove();
     this.sidesLabel.remove();

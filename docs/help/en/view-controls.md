@@ -20,6 +20,7 @@ The view rotates around the point on the part under the cursor (if there is no p
 
 The cube in the top-right corner of the graphics area rotates together with the model. Click a face of the cube (**Front**, **Top**, **Right**, and so on) to view the model from that side; click an edge or a corner to view it at an angle.
 
+- **Arrows by the cube** appear while the pointer is over it. The triangles at its sides turn the view 90° to the next face (▶ — the right face towards you, ▲ — the top one); the two curved arrows by the top right corner roll the view 90° about the line of sight: the upper one counterclockwise, the lower one clockwise. This lays the cube on its side. Quick clicks add up: two make a half turn. With the **Turntable (Z up)** rotation mode the next mouse rotation puts the Z axis up again.
 - **Drag the cube** with the left or the right button to rotate the view, as right-dragging in the graphics area does (about the centre of the view; the rotation mode from **Settings** applies here too).
 - **Right-click the cube** (without dragging) for its menu: the standard views, isometric, dimetric, trimetric, **Zoom to fit** (`F`) and **Perspective**.
 

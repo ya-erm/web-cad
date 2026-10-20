@@ -147,6 +147,8 @@ export interface EditorState {
   activeField: string | null;
   selection: SelRef[];
   hover: SelRef | null;
+  /** Features under the pointer in the feature list (a folder: its features): the faces they made light up. */
+  hoverFeatures: string[] | null;
   sketch: SketchSession | null;
   sketchPattern: SketchPatternState | null;
   sketchTransform: SketchTransformState | null;
@@ -317,6 +319,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   activeField: null,
   selection: [],
   hover: null,
+  hoverFeatures: null,
   sketch: null,
   sketchPattern: null,
   sketchTransform: null,

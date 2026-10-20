@@ -306,9 +306,20 @@ export class Engine {
     this.labels = new CSS2DRenderer();
     this.labels.domElement.className = 'viewport-labels';
     container.appendChild(this.labels.domElement);
-    this.viewCube = new ViewCube(112);
-    container.appendChild(this.viewCube.canvas);
+    this.viewCube = new ViewCube(112, t);
+    container.appendChild(this.viewCube.element);
     this.viewCube.onPick = (dir, up) => this.cam.viewFrom(dir, up, this.fitBox());
+    // its arrows: a quarter turn about the screen's axes (from where a turn under way ends: quick clicks add up)
+    this.viewCube.onTurn = (turn) => {
+      const q = this.cam.finalQuat;
+      const axis = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(q);
+      const quarter = Math.PI / 2;
+      // right: the right face comes to the front (the camera's back turns to its right); up — the top one
+      if (turn === 'left' || turn === 'right') this.cam.rotateAbout(axis(0, 1, 0), turn === 'right' ? quarter : -quarter);
+      else if (turn === 'up' || turn === 'down') this.cam.rotateAbout(axis(1, 0, 0), turn === 'up' ? -quarter : quarter);
+      // clockwise: the camera rolls the other way
+      else this.cam.rotateAbout(axis(0, 0, 1), turn === 'cw' ? quarter : -quarter);
+    };
     // dragging the cube turns the camera about the centre of the view
     this.viewCube.onRotate = (dx, dy) => this.cam.rotate(dx, dy);
     this.viewCube.onMenu = (x, y) => this.viewCubeMenu(x, y);
@@ -346,6 +357,7 @@ export class Engine {
         if (
           s.selection !== p.selection ||
           s.hover !== p.hover ||
+          s.hoverFeatures !== p.hoverFeatures ||
           s.editing?.draft !== p.editing?.draft ||
           s.build !== p.build
         )
@@ -1029,6 +1041,7 @@ export class Engine {
       this.addHighlight(r, COLORS.selected);
     }
     if (ed.hover && !seen.has(refKey(ed.hover))) this.addHighlight(ed.hover, COLORS.hover);
+    if (ed.hoverFeatures?.length && !ed.editing) this.addFeatureHighlight(new Set(ed.hoverFeatures), COLORS.hover);
     this.syncTriad();
     this.needsRender = true;
   }
@@ -1254,6 +1267,31 @@ export class Engine {
       );
     } else assemblyDragMove(delta, angle, axis, c);
     return true;
+  }
+
+  /** The faces these features made (a row of the feature list under the pointer): one lit mesh per part. */
+  private addFeatureHighlight(features: Set<string>, color: number) {
+    for (const po of this.parts.values()) {
+      const ff = po.data.faceFeatures;
+      if (!ff) continue;
+      const idx: number[] = [];
+      ff.forEach((fid, i) => {
+        if (!features.has(fid)) return;
+        const s = po.data.faceRanges[i * 2];
+        const c = po.data.faceRanges[i * 2 + 1];
+        for (let k = s; k < s + c; k++) idx.push(po.data.indices[k]);
+      });
+      if (!idx.length) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', po.mesh.geometry.getAttribute('position'));
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+      );
+      m.userData.sharedGeometry = true;
+      this.highlightGroup.add(m);
+    }
   }
 
   private addHighlight(r: SelRef, color: number) {

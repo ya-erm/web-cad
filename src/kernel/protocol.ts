@@ -71,6 +71,8 @@ export interface PartMesh {
   faces: FaceInfo[];
   edges: EdgeInfo[];
   bbox: [Vec3, Vec3];
+  /** The feature that made each face (by face index): hovering a face highlights it in the feature list. */
+  faceFeatures?: string[];
 }
 
 export interface SketchResult {
@@ -274,7 +276,49 @@ export interface ProjectionRequest {
   studioKey: string;
   partIds: string[];
   orientation: ViewOrientation;
+  /** The axes to look along instead of the orientation's (a section view). */
+  axes?: { n: Vec3; x: Vec3 };
+  /** A section: the material on the side of the plane through `origin` that `normal` points to is removed. */
+  section?: SectionCut;
   hidden: boolean;
+}
+
+/**
+ * A section view's cut: the material on the side of the plane through `origin` that `normal` (towards the viewer)
+ * points to is removed. An offset section: on that side of the stepped `line` instead (its points; the segments along
+ * the first one cut, those across it are steps), which lies across `along` (the parent view's normal) — the steps are
+ * not drawn in the section.
+ */
+export interface SectionCut {
+  origin: Vec3;
+  normal: Vec3;
+  line?: Vec3[];
+  along?: Vec3;
+}
+
+/** A hole's sizes for a drawing's hole callout (mm, degrees). */
+export interface HoleCallout {
+  diameter: number;
+  /** A blind hole: its depth from the mouth (without the drill tip); through: none. */
+  depth?: number;
+  cbore?: { diameter: number; depth: number };
+  csink?: { diameter: number; angle: number };
+  /** A tapped hole: "M8", "1/4-20 UNC"; its depth (none — all the way). */
+  thread?: { designation: string; depth?: number };
+}
+
+/** A hole seen end-on in a view: its centre and outer radius there, its callout and how many the feature made. */
+export interface ProjectedHole {
+  c: Vec2;
+  r: number;
+  callout: HoleCallout;
+  count: number;
+}
+
+/** A face of a part cut by a section view's plane: its edges in view coordinates (closed loops, any order), hatched. */
+export interface SectionFace {
+  partId: string;
+  edges: Vec2[][];
 }
 
 export interface ProjectedEdge {
@@ -292,6 +336,10 @@ export interface ProjectionResult {
   reqId: number;
   edges: ProjectedEdge[];
   bounds: [Vec2, Vec2] | null;
+  /** A section view: the cut faces. */
+  sections?: SectionFace[];
+  /** The Hole features' holes seen end-on (for hole callouts). */
+  holes?: ProjectedHole[];
 }
 
 export interface PingRequest {

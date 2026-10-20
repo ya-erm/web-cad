@@ -20,12 +20,14 @@ The **Default geometry** group (click its header to collapse it) contains the **
 
 ## Features in the list {#items}
 
-Each row shows the feature type icon and the feature name. For [variables](variables), `#name = expression` is shown next to the name.
+Each row shows the feature type icon and the feature name. For [variables](variables), `#name = expression` is shown next to the name. An [extrude](extrude)'s icon arrow shows its operation: blue — **New**, green — **Add**, red — **Remove**, purple — **Intersect** (while its dialog is open, the icon follows the choice there).
 
 - **Red dot**: the feature failed to build (error). Hover over the row to read the message.
 - **Yellow dot**: the feature built with a warning.
 - **Gray row**: the feature is suppressed or below the rollback bar.
 - Sketches, planes, and helices have an eye icon that hides or shows them in the graphics area.
+- **An orange mark on the left** — the feature that created the face or edge under the cursor in the graphics area (as in Onshape). A face trimmed or split later (the top of a block with a hole) stays with the feature that created it; an edge belongs to the later of its two faces' features (a hole's rim — to the hole). If the feature is in a collapsed folder, the folder is marked. There is no mark while a feature dialog is open.
+- The other way round: the pointer over a feature's row lights up the faces it created in the graphics area (over a folder — those of all its features).
 
 ## Selecting and editing {#selecting}
 

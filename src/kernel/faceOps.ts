@@ -162,7 +162,7 @@ function box([lo, hi]: [Vec3, Vec3], grow = 0): Shape3D {
 }
 
 /** The half-space on the side `n` points to from the plane through `p` (a box of `size`). */
-function halfSpace(p: Vec3, n: Vec3, size: number): Shape3D {
+export function halfSpace(p: Vec3, n: Vec3, size: number): Shape3D {
   const u = v3.norm(v3.cross(n, Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]));
   const w = v3.cross(n, u);
   const c = (a: number, b: number) => v3.add(p, v3.add(v3.scale(u, a * size), v3.scale(w, b * size)));

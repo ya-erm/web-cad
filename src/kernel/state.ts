@@ -3,6 +3,8 @@ import type { VariableTable } from '../core/expr';
 import type { BoolOp, PlaneFrame, SkEntity, Vec3 } from '../core/types';
 import type { SketchRegion } from '../sketch/regions';
 import type { Shape3D } from './geom';
+import type { PartFaceOrigins } from './faceOrigins';
+import type { HoleCallout } from './protocol';
 
 export interface PartState {
   id: string;
@@ -59,6 +61,20 @@ export interface ThreadState {
   owner?: string;
 }
 
+/** A hole of the Hole feature (or a copy of one): what a drawing's hole callout says about it. */
+export interface HoleState {
+  /** The feature that made it (a hole, or a pattern / copy of it). */
+  featureId: string;
+  /** The Hole feature it comes from: the holes of one are counted together in a callout ("4×"). */
+  source: string;
+  /** Its mouth on the surface and its direction into the material. */
+  origin: Vec3;
+  dir: Vec3;
+  callout: HoleCallout;
+  /** The part it is in: it follows that part's moves and copies. */
+  owner?: string;
+}
+
 export interface ToolRecord {
   tool: Shape3D;
   op: BoolOp;
@@ -81,10 +97,15 @@ export interface BuildState {
   derived: Map<string, { name: string; color?: string }>;
   /** Cosmetic threads of tapped holes (and their copies). */
   threads: Map<string, ThreadState>;
+  /** The Hole features' holes (and their copies). */
+  holes: Map<string, HoleState>;
+  /** The features that made each part's faces (replaced as a whole after each feature, see faceOrigins.ts). */
+  faceOrigins: Map<string, PartFaceOrigins>;
 }
 
 export function emptyState(): BuildState {
   return {
+    faceOrigins: new Map(),
     parts: new Map(),
     sketches: new Map(),
     planes: new Map(),
@@ -96,11 +117,13 @@ export function emptyState(): BuildState {
     surfaceOrder: [],
     derived: new Map(),
     threads: new Map(),
+    holes: new Map(),
   };
 }
 
 export function cloneState(s: BuildState): BuildState {
   return {
+    faceOrigins: s.faceOrigins,
     parts: new Map(s.parts),
     sketches: new Map(s.sketches),
     planes: new Map(s.planes),
@@ -112,6 +135,7 @@ export function cloneState(s: BuildState): BuildState {
     surfaceOrder: s.surfaceOrder,
     derived: new Map(s.derived),
     threads: new Map(s.threads),
+    holes: new Map(s.holes),
   };
 }
 
@@ -135,4 +159,6 @@ export function removePart(st: BuildState, id: string) {
 /** Part `from` merged into part `to` (before `from` is removed): its cosmetic threads are `to`'s now. */
 export function adoptThreads(st: BuildState, from: string, to: string) {
   for (const [k, t] of st.threads) if (t.owner === from) st.threads.set(k, { ...t, owner: to });
+  // the holes too
+  for (const [k, h] of st.holes) if (h.owner === from) st.holes.set(k, { ...h, owner: to });
 }

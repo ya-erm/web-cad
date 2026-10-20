@@ -21,7 +21,7 @@ width: 460
 | **OBJ (.obj)** | A triangle mesh with normals; each part is a separate object. |
 | **3MF (.3mf)** | A mesh with part colors and units, for 3D printing. |
 
-**Resolution** (**Coarse**, **Medium**, **Fine**) sets the mesh accuracy for STL, OBJ, and 3MF: the higher it is, the smoother the curved surfaces and the larger the file. **Units**: mm or inch. Several selected parts are saved to one file.
+**Resolution** (**Coarse**, **Medium**, **Fine**) sets the mesh accuracy for STL, OBJ, and 3MF: the higher it is, the smoother the curved surfaces and the larger the file. **Units**: mm or inch. Several selected parts are saved to one file. The format, resolution, and units of the last export are remembered in this browser and picked in the dialog right away the next time.
 
 ## Exporting an assembly {#export-assembly}
 

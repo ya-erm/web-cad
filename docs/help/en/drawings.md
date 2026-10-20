@@ -54,9 +54,36 @@ Click the title block at the bottom right of the sheet, or **Title block** in th
 - Drag views with the mouse. Projected views stay aligned with their parent view.
 - **View properties**: **Orientation**, **Scale** (also changes linked projected views at once), **Show hidden lines**, **Configuration** (when the Part Studio has a [configuration](configurations#uses): the view's own variant, also together with its linked projected views), **Label**, **Delete view**.
 
+## Section views {#section}
+
+A section view shows the parts cut by a plane along a line drawn on a view (Onshape **Section view**).
+
+1. Click **Section view** on the toolbar.
+2. Click the start of the cutting line on an orthographic view (just outside its frame works too), then its end. The points snap to the view's vertices and circle centers; a line within 5° of horizontal or vertical is straightened.
+3. Move the cursor to where the section goes — the arrows on the line show the viewing direction — and click. With **First angle** projection the arrows point towards the placed section, with **Third angle** away from it.
+
+The parts are cut by the plane through the cutting line, perpendicular to the view; the part between the plane and the viewer is removed. The section looks across the line: a cutting line on a top view gives a front view, a vertical one on a front view gives a side view. Cut faces are hatched with thin lines at 45°, an adjacent part the other way, further parts wider (ISO 128-50). Hidden lines are off by default in sections. A thread the plane cuts lengthwise is shown per ISO 6410: the major diameter as thin solid lines, the thread end as a thick one; a thread in front of the cutting plane (removed) is not drawn.
+
+**Offset section.** After the second point of the cutting line, **Shift**+click adds another point: each next segment runs along the first one or across it (whichever is nearer the cursor). The segments along the first one each cut their own plane; those across are the steps between them: they are not drawn in the section itself, and on the parent view the bends of the line get thick strokes.
+
+The parent view gets the cutting line (ISO 128-44 / GOST 2.305): a thin chain line across the view, thick strokes beyond it, arrows and letters. The section is labeled **A–A** above it. Letters go in order (Latin — without I, O, Q, S, X, Z; in Russian — without Ё, З, Й, О, Х, Ъ, Ы, Ь) and are changed in the **View letter** field of the section's properties; the button next to it reverses the viewing direction. A section has its parent's scale and configuration. It stays on its line of projection (across the cutting line): dragging moves it along that line only, and it follows its parent when the parent is moved. Hold **Alt** to drag it anywhere.
+
+## Detail views {#detail}
+
+A detail view shows the part of a view inside a circle at a larger scale (Onshape **Detail view**).
+
+1. Click **Detail view** on the toolbar.
+2. Click the circle's center on a view (points snap to vertices and circle centers), then a point that sets the radius.
+3. Click where to place the detail: a dashed circle at the cursor shows its size.
+
+The scale is the nearest standard one at least twice the view's (1:1 → 2:1); it is changed in the properties independently of the parent. The parent gets a thin circle and the letter on a leader's shelf, the detail the label **B (4:1)**; the detail itself is bounded by a thin circle. Dimensions are placed on a detail as on any view; points outside its circle are not highlighted.
+
+Deleting a view also deletes the sections and details made from it.
+
 ## Dimensions and notes {#annotations}
 
 - **Dimension** (`D`): click two points (view vertices are highlighted), then click where to place the dimension; a horizontal, vertical, or aligned dimension is chosen based on the cursor position. Clicking a circle places a diameter, `Shift` + click places a radius.
+- **Hole callout**: click a hole made by the [Hole](hole) feature in a view along its axis (it lights up under the cursor), then where the text goes. The callout, with an arrow at the hole's outer circle and a shelf, gives its sizes per ISO 15786: the thread and its depth (`M8 ↧16`), the diameter and depth or **THRU** (`Ø6.8 ↧20`), the counterbore (`⌴ Ø15 ↧8.6`), the countersink (`⌵ Ø18 × 90°`); when the feature made several holes (a pattern of it too), their number comes first — `4×`. The symbols are drawn as lines, so they look the same in SVG, DXF, and PDF. The callout follows changes of the hole in the model.
 - **Note**: click a spot on the sheet and type the text in the window.
 - Press `Del` to delete the selected dimension, note, or view. `Esc` returns to the select tool.
 
@@ -68,6 +95,6 @@ Mouse wheel: zoom; right or middle button: pan; **Zoom to fit** (`F`): the whole
 
 The **Export** button on the right of the drawing toolbar: **PDF**, **SVG**, or **DXF**; the whole sheet at 1:1 scale in millimeters.
 
-All three formats preserve the selected template and its dimensions. The current PDF writer does not support Cyrillic text and uses English service labels. Use SVG or DXF for Cyrillic titles and fields.
+All three formats preserve the selected template and its dimensions. When the sheet has Cyrillic (or other characters beyond Latin), the PDF embeds the Inter font — the one of [sketch text](sketch-text) — and all the sheet's text is set in it: the service labels stay in the interface language, and the PDF text can be searched and copied. A sheet with Latin text only uses the standard Helvetica, and the file is smaller.
 
-> **Limitation.** Drawing dimensions are attached to view points, not to model edges, so check them after you change the model. Section views, detail views, tolerances, and surface finish symbols are not supported yet.
+> **Limitation.** Drawing dimensions are attached to view points, not to model edges, so check them after you change the model. Offset and broken-out sections, tolerances, and surface finish symbols are not supported yet.

@@ -214,8 +214,7 @@ export interface TextFrame {
   sin: number;
 }
 
-export function textFrame(p: TextPrim): TextFrame {
-  const width = textWidth(p.text, p.h);
+export function textFrame(p: TextPrim, width = textWidth(p.text, p.h)): TextFrame {
   const ang = p.angle ?? 0;
   const cos = Math.cos(ang);
   const sin = Math.sin(ang);

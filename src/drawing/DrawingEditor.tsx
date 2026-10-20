@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
 import type { CadDocument, ConfigInput, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
 import { uid } from '../core/ids';
+import { cuttingLine, isDerivedView, nextViewLetter, parentView, sectionCut, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
+import type { SectionCut } from '../kernel/protocol';
 import { chosenLabel, configuredFeatures, inputName, variantStudio } from '../core/config';
 import { ConfigurationFields } from '../ui/ConfigurationFields';
 import { derivedBuildOrder, derivedInputs, studioVersion } from '../core/derived';
@@ -15,6 +17,7 @@ import { useEditor } from '../store/editorStore';
 import type { Prim2D } from '../export/prim2d';
 import { STYLE_DEFAULTS } from '../export/prim2d';
 import { writePDF } from '../export/pdf';
+import { loadPdfFont } from '../export/pdfFont';
 import { writeSVG } from '../export/svg';
 import { writeDXF } from '../export/dxf';
 import { download, safeName } from '../ui/exporting';
@@ -23,6 +26,8 @@ import { Toast } from '../ui/Overlays';
 import { getLang, t } from '../i18n';
 import {
   chooseScale,
+  cuttingLinePrims,
+  detailCirclePrims,
   dimPrims,
   frameRect,
   notePrims,
@@ -71,8 +76,29 @@ async function ensureBuilt(doc: CadDocument, studio: PartStudioTab) {
   builtStudios.set(studio.id, inputs);
 }
 
-function viewKey(v: DrawingView, studio: PartStudioTab, doc?: CadDocument) {
-  return `${studioKeyOf(studio, doc)}|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`;
+/** What a view's projection depends on besides the Part Studio: the axes it is seen along, its section, its parts. */
+function viewGeometry(v: DrawingView, views: DrawingView[]) {
+  const req = projectionRequest(v, views);
+  return `${JSON.stringify([req.axes ?? v.orientation, req.section ?? null])}|${v.partIds.join(',')}|${v.showHidden}`;
+}
+
+function viewKey(v: DrawingView, views: DrawingView[], studio: PartStudioTab, doc?: CadDocument) {
+  return `${studioKeyOf(studio, doc)}|${viewGeometry(v, views)}`;
+}
+
+/** The kernel's projection of a view: a section view — along its own axes, cut by its plane. */
+function projectionRequest(v: DrawingView, views: DrawingView[]): { axes?: ViewAxes; section?: SectionCut } {
+  const parent = v.section && parentView(v, views);
+  if (!v.section || !parent) return {};
+  const { axes, cut } = sectionCut(viewAxes(parent, views), v.section);
+  return { axes, section: cut };
+}
+
+/** The view whose projection a view shows: a detail view — its parent's (the parent's parent's …). */
+function projectedView(v: DrawingView, views: DrawingView[]): DrawingView {
+  let cur = v;
+  for (let i = 0; i < 16 && cur.detail; i++) cur = parentView(cur, views) ?? cur;
+  return cur;
 }
 
 /** The Part Studio of a view as the view's own configuration has it (its id: the variant's key). */
@@ -83,6 +109,25 @@ function viewStudio(doc: CadDocument, v: DrawingView): PartStudioTab | undefined
 
 /** A view and the views projected with it (its parent, the parent's other views): they share scale and configuration. */
 const sameFamily = (a: DrawingView, b: DrawingView) => a.id === b.id || a.parent === b.id || b.parent === a.id || (!!a.parent && a.parent === b.parent);
+/** …but a detail view keeps its own scale (it enlarges). */
+const sameScale = (a: DrawingView, b: DrawingView) => a.id === b.id || (sameFamily(a, b) && !a.detail && !b.detail);
+
+/** A detail view's scale: the standard one nearest to twice its parent's (1:1 → 2:1, 1:5 → 1:2.5). */
+function detailScale(parentScale: number): number {
+  const up = [...STD_SCALES].reverse().find((s) => s >= parentScale * 2 - 1e-9);
+  return up ?? STD_SCALES[0];
+}
+
+/** The angle of a cutting line snapped to the view's horizontal or vertical when it is within 5° of it. */
+function alignCut(a: Vec2, b: Vec2): Vec2 {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const ang = Math.atan2(dy, dx);
+  const q = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2);
+  if (Math.abs(ang - q) > (5 * Math.PI) / 180) return b;
+  const l = Math.hypot(dx, dy);
+  return [a[0] + Math.round(Math.cos(q)) * l, a[1] + Math.round(Math.sin(q)) * l];
+}
 
 function useProjections(doc: CadDocument, drawing: DrawingData) {
   const [, force] = useState(0);
@@ -92,13 +137,14 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
       await kernel().ready();
       for (const v of drawing.views) {
         const studio = viewStudio(doc, v);
-        if (!studio) continue;
-        const key = viewKey(v, studio, doc);
+        // a detail view shows its parent's projection
+        if (!studio || v.detail) continue;
+        const key = viewKey(v, drawing.views, studio, doc);
         if (projCache.has(key) || pending.current.has(key)) continue;
         pending.current.add(key);
         try {
           await ensureBuilt(doc, studio);
-          const res = await kernel().projection({ studioKey: studio.id, partIds: v.partIds, orientation: v.orientation, hidden: true });
+          const res = await kernel().projection({ studioKey: studio.id, partIds: v.partIds, orientation: v.orientation, hidden: true, ...projectionRequest(v, drawing.views) });
           projCache.set(key, { ...res, key });
         } catch (e) {
           console.error(e);
@@ -110,13 +156,15 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
       }
     })();
   }, [doc, drawing.views]);
-  return (v: DrawingView): ProjectionData | undefined => {
+  return (view: DrawingView): ProjectionData | undefined => {
+    const v = projectedView(view, drawing.views);
     const studio = viewStudio(doc, v);
     if (!studio) return undefined;
-    const exact = projCache.get(viewKey(v, studio, doc));
+    const exact = projCache.get(viewKey(v, drawing.views, studio, doc));
     if (exact) return exact;
     // stale projection of the same view while the new one is computed
-    for (const p of projCache.values()) if (p.key.startsWith(`${studio.id}:`) && p.key.endsWith(`|${v.orientation}|${v.partIds.join(',')}|${v.showHidden}`)) return p;
+    const geometry = `|${viewGeometry(v, drawing.views)}`;
+    for (const p of projCache.values()) if (p.key.startsWith(`${studio.id}:`) && p.key.endsWith(geometry)) return p;
     return undefined;
   };
 }
@@ -187,13 +235,24 @@ function PrimSvg({ p, color }: { p: Prim2D; color?: string }) {
 
 // ---------------------------------------------------------------------------
 
-type Tool = 'select' | 'dimension' | 'note';
+type Tool = 'select' | 'dimension' | 'note' | 'section' | 'detail' | 'callout';
 
 interface DimDraft {
   viewId: string;
   a?: Vec2;
   circle?: { c: Vec2; r: number };
 }
+
+/** A section or detail view being made: on the parent `viewId`, the cutting line's or the circle's points (its view coordinates). */
+interface ViewDraft {
+  viewId: string;
+  a: Vec2;
+  b?: Vec2;
+  /** An offset section's further points (Shift+click). */
+  steps?: Vec2[];
+}
+/** A draft with its line (or circle) drawn: ready to be placed. */
+type LinedDraft = ViewDraft & { b: Vec2 };
 
 type TitleFields = Pick<DrawingData, 'title' | 'author' | 'designation' | 'titleBlock'>;
 
@@ -302,6 +361,9 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const [cam, setCam] = useState<{ x: number; y: number; zoom: number } | null>(null);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const [dimDraft, setDimDraft] = useState<DimDraft | null>(null);
+  const [viewDraft, setViewDraft] = useState<ViewDraft | null>(null);
+  /** A hole callout being placed: its view and the hole's centre there. */
+  const [calloutDraft, setCalloutDraft] = useState<{ viewId: string; a: Vec2 } | null>(null);
   const [noteEdit, setNoteEdit] = useState<{ id: string; text: string } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -437,27 +499,46 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     });
   };
 
-  const moveView = (id: string, to: Vec2) => {
+  /** A section's line of projection on the sheet: across its cutting line (it keeps to it, as Onshape aligns it). */
+  const sectionAxis = (s: NonNullable<DrawingView['section']>): Vec2 => {
+    const l = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) || 1;
+    return [-(s.b[1] - s.a[1]) / l, (s.b[0] - s.a[0]) / l];
+  };
+  /** Move a view to `to`: aligned ones only along their line of projection; `free` (Alt) — anywhere. */
+  const moveView = (id: string, to: Vec2, free = false) => {
     upd((dd) => {
       const v = dd.views.find((x) => x.id === id);
       if (!v) return;
-      const dx = to[0] - v.x;
-      const dy = to[1] - v.y;
-      // keep projection alignment with the parent
-      const parent = v.parent ? dd.views.find((x) => x.id === v.parent) : undefined;
-      if (parent) {
+      const [x0, y0] = [v.x, v.y];
+      // keep projection alignment with the parent (a detail view is placed freely)
+      const parent = v.parent && !isDerivedView(v) ? dd.views.find((x) => x.id === v.parent) : undefined;
+      if (free || v.detail) {
+        v.x = to[0];
+        v.y = to[1];
+      } else if (v.section) {
+        const w = sectionAxis(v.section);
+        const t = (to[0] - v.x) * w[0] + (to[1] - v.y) * w[1];
+        v.x += w[0] * t;
+        v.y += w[1] * t;
+      } else if (parent) {
         if (Math.abs(parent.x - v.x) < Math.abs(parent.y - v.y)) v.y = to[1];
         else v.x = to[0];
       } else {
         v.x = to[0];
         v.y = to[1];
       }
-      // children follow along their aligned axis
-      for (const ch of dd.views)
-        if (ch.parent === id) {
-          if (Math.abs(ch.x - (v.x - dx)) < Math.abs(ch.y - (v.y - dy))) ch.x += v.x - (to[0] - dx);
-          else ch.y += v.y - (to[1] - dy);
-        }
+      const [dx, dy] = [v.x - x0, v.y - y0];
+      // children follow along their aligned axis: projected views, sections across their line of projection
+      for (const ch of dd.views) {
+        if (ch.parent !== id || ch.detail) continue;
+        if (ch.section) {
+          const w = sectionAxis(ch.section);
+          const t = dx * w[0] + dy * w[1];
+          ch.x += dx - w[0] * t;
+          ch.y += dy - w[1] * t;
+        } else if (Math.abs(ch.x - x0) < Math.abs(ch.y - y0)) ch.x += dx;
+        else ch.y += dy;
+      }
     }, `move-${id}`);
   };
 
@@ -475,6 +556,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         const cands = [e.pts[0], e.pts[e.pts.length - 1]];
         if (e.circle) cands.push(e.circle.c);
         for (const q of cands) {
+          // a detail view shows only its circle
+          if (v.detail && Math.hypot(q[0] - v.detail.c[0], q[1] - v.detail.c[1]) > v.detail.r) continue;
           const s = toSheet(v, pr, q);
           const dd = Math.hypot(s[0] - sheetPt[0], s[1] - sheetPt[1]);
           if (dd < tol && (!best || dd < best.d)) best = { viewId: v.id, p: q, d: dd };
@@ -492,6 +575,54 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     return best;
   };
 
+  /** The hole (of a Hole feature, seen end-on) under a sheet point: its view and centre. */
+  const holeAt = (p: Vec2): { viewId: string; a: Vec2; r: number } | null => {
+    let best: { viewId: string; a: Vec2; r: number; d: number } | null = null;
+    for (const v of d.views) {
+      const pr = proj(v);
+      for (const h of pr?.holes ?? []) {
+        if (v.detail && Math.hypot(h.c[0] - v.detail.c[0], h.c[1] - v.detail.c[1]) > v.detail.r) continue;
+        const s = toSheet(v, pr, h.c);
+        const dist = Math.hypot(s[0] - p[0], s[1] - p[1]);
+        if (dist <= h.r * v.scale + 4 / c.zoom && (!best || dist < best.d)) best = { viewId: v.id, a: h.c, r: h.r, d: dist };
+      }
+    }
+    return best;
+  };
+
+  // ---------------------------------------------------------------- section and detail views
+  /** A point on view `v` for a cutting line / detail circle: snapped to its corners and circle centres. */
+  const draftPoint = (v: DrawingView, p: Vec2): Vec2 => {
+    const sp = snapPoint(p);
+    return sp && sp.viewId === v.id && !sp.circle ? sp.p : toModel(v, proj(v), p);
+  };
+  /** The cutting line's second point (kept horizontal / vertical near those), the circle's point. */
+  const draftSecond = (v: DrawingView, a: Vec2, p: Vec2): Vec2 => {
+    const b = draftPoint(v, p);
+    return tool === 'section' ? alignCut(a, b) : b;
+  };
+  /** Which side of the cutting line a section view placed at `p` looks to: the arrows point to it (first angle) or away (third). */
+  const sectionSide = (v: DrawingView, dr: LinedDraft, p: Vec2): 1 | -1 => {
+    const pr = proj(v);
+    const A = toSheet(v, pr, dr.a);
+    const B = toSheet(v, pr, dr.b);
+    const left = (B[0] - A[0]) * (p[1] - A[1]) - (B[1] - A[1]) * (p[0] - A[0]) >= 0 ? 1 : -1;
+    return (d.projection ?? 'first') === 'first' ? left : (-left as 1 | -1);
+  };
+  const placeDerived = (v: DrawingView, dr: LinedDraft, p: Vec2) => {
+    const id = uid('v');
+    const letter = nextViewLetter(d.views, getLang());
+    const base = { id, studioId: v.studioId, partIds: [...v.partIds], orientation: v.orientation, x: p[0], y: p[1], parent: v.id, ...(v.configuration ? { configuration: { ...v.configuration } } : {}) };
+    const view: DrawingView =
+      tool === 'section'
+        ? { ...base, scale: v.scale, showHidden: false, section: { a: dr.a, b: dr.b, side: sectionSide(v, dr, p), letter, ...(dr.steps?.length ? { steps: dr.steps } : {}) } }
+        : { ...base, scale: detailScale(v.scale), showHidden: v.showHidden, detail: { c: dr.a, r: Math.hypot(dr.b[0] - dr.a[0], dr.b[1] - dr.a[1]), letter } };
+    upd((dd) => {
+      dd.views.push(view);
+    });
+    setSelected({ kind: 'view', id });
+  };
+
   // ---------------------------------------------------------------- events
   const onWheel = (e: React.WheelEvent) => {
     const { sx, sy } = local(e);
@@ -502,13 +633,18 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     setCam({ x: nx, y: ny, zoom });
   };
 
-  const hitView = (p: Vec2) => {
+  /** The view under a sheet point; with a `margin` (mm) — the nearest one whose frame grown by it holds the point. */
+  const hitView = (p: Vec2, margin = 0) => {
+    let best: { v: DrawingView; d: number } | null = null;
     for (let i = d.views.length - 1; i >= 0; i--) {
       const v = d.views[i];
       const r = viewRect(v, proj(v));
-      if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return v;
+      // the distance out of the frame (0 inside)
+      const dist = Math.hypot(Math.max(r.x0 - p[0], 0, p[0] - r.x1), Math.max(r.y0 - p[1], 0, p[1] - r.y1));
+      if (dist <= margin && (!best || dist < best.d)) best = { v, d: dist };
+      if (dist === 0) break;
     }
-    return null;
+    return best?.v ?? null;
   };
 
   const onDown = (e: React.PointerEvent) => {
@@ -552,6 +688,49 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         dd.dimensions.push({ id: uid('d'), viewId: v.id, kind, a: dimDraft.a!, b: bm, offset });
       });
       setDimDraft(null);
+      return;
+    }
+    if (tool === 'callout') {
+      if (!calloutDraft) {
+        const h = holeAt(p);
+        if (h) setCalloutDraft({ viewId: h.viewId, a: h.a });
+        return;
+      }
+      const dr = calloutDraft;
+      upd((dd) => {
+        dd.dimensions.push({ id: uid('d'), viewId: dr.viewId, kind: 'hole', a: dr.a, offset: 0, textPos: p });
+      });
+      setCalloutDraft(null);
+      return;
+    }
+    if (tool === 'section' || tool === 'detail') {
+      if (!viewDraft) {
+        // the parent: an orthographic view (a section of an isometric one means nothing on the sheet)
+        // a cutting line may start just outside the view
+        const v = hitView(p, tool === 'section' ? 20 : 0);
+        if (!v || !proj(v) || (tool === 'section' && v.orientation === 'iso')) return;
+        setViewDraft({ viewId: v.id, a: draftPoint(v, p) });
+        return;
+      }
+      const v = d.views.find((x) => x.id === viewDraft.viewId);
+      if (!v) return setViewDraft(null);
+      if (!viewDraft.b) {
+        const b = draftSecond(v, viewDraft.a, p);
+        // a click on the same spot is not a line / circle
+        if (Math.hypot(b[0] - viewDraft.a[0], b[1] - viewDraft.a[1]) * v.scale < 1) return;
+        setViewDraft({ ...viewDraft, b });
+        return;
+      }
+      // Shift: one more point of the cutting line (an offset section), along or across its first segment
+      if (tool === 'section' && e.shiftKey) {
+        const pts = cuttingLine(viewDraft as LinedDraft);
+        const q = stepPoint(viewDraft.a, viewDraft.b, pts[pts.length - 1], draftPoint(v, p));
+        if (Math.hypot(q[0] - pts[pts.length - 1][0], q[1] - pts[pts.length - 1][1]) * v.scale >= 1) setViewDraft({ ...viewDraft, steps: [...(viewDraft.steps ?? []), q] });
+        return;
+      }
+      placeDerived(v, viewDraft as LinedDraft, p);
+      setViewDraft(null);
+      setTool('select');
       return;
     }
     if (tool === 'note') {
@@ -598,7 +777,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     if (dr.kind === 'pan') {
       setCam({ x: dr.start[0] - (sx - dr.sx) / c.zoom, y: dr.start[1] + (sy - dr.sy) / c.zoom, zoom: c.zoom });
     } else if (dr.kind === 'view' && dr.id && dr.orig) {
-      moveView(dr.id, [dr.orig[0] + p[0] - dr.start[0], dr.orig[1] + p[1] - dr.start[1]]);
+      // Alt: anywhere, not along the line of projection
+      moveView(dr.id, [dr.orig[0] + p[0] - dr.start[0], dr.orig[1] + p[1] - dr.start[1]], e.altKey);
     } else if (dr.kind === 'note' && dr.id && dr.orig) {
       const nx = dr.orig[0] + p[0] - dr.start[0];
       const ny = dr.orig[1] + p[1] - dr.start[1];
@@ -620,9 +800,19 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     if (!selected) return;
     upd((dd) => {
       if (selected.kind === 'view') {
-        dd.views = dd.views.filter((v) => v.id !== selected.id);
-        dd.dimensions = dd.dimensions.filter((x) => x.viewId !== selected.id);
-        for (const v of dd.views) if (v.parent === selected.id) delete v.parent;
+        // with the section and detail views made from it (and theirs): they have no geometry without it
+        const gone = new Set([selected.id]);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const v of dd.views)
+            if (!gone.has(v.id) && v.parent && gone.has(v.parent) && isDerivedView(v)) {
+              gone.add(v.id);
+              grew = true;
+            }
+        }
+        dd.views = dd.views.filter((v) => !gone.has(v.id));
+        dd.dimensions = dd.dimensions.filter((x) => !gone.has(x.viewId));
+        for (const v of dd.views) if (v.parent && gone.has(v.parent)) delete v.parent;
       }
       if (selected.kind === 'dim') dd.dimensions = dd.dimensions.filter((x) => x.id !== selected.id);
       if (selected.kind === 'note') dd.notes = dd.notes.filter((x) => x.id !== selected.id);
@@ -638,6 +828,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
       if (e.key === 'Escape') {
         setDimDraft(null);
+        setViewDraft(null);
+        setCalloutDraft(null);
         setTool('select');
         setSelected(null);
       }
@@ -651,26 +843,35 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   // ---------------------------------------------------------------- primitives
   const date = new Date(doc.modified).toLocaleDateString(getLang() === 'ru' ? 'ru-RU' : 'en-GB');
   const mainScale = d.views.find((v) => v.orientation !== 'iso')?.scale ?? d.views[0]?.scale;
-  const contentPrims = useMemo(() => {
+  /** The views, dimensions and notes; `translate` — the words of hole callouts ("THRU"). */
+  const sheetContent = (translate: (key: string) => string = t) => {
     const prims: Prim2D[] = [];
-    for (const v of d.views) prims.push(...viewPrims(v, proj(v)));
+    for (const v of d.views) prims.push(...viewPrims(v, proj(v), d.views));
     for (const dm of d.dimensions) {
       const v = d.views.find((x) => x.id === dm.viewId);
-      if (v) prims.push(...dimPrims(dm, v, proj(v), uf));
+      if (v) prims.push(...dimPrims(dm, v, proj(v), uf, translate));
     }
     prims.push(...notePrims(d));
     return prims;
-  }, [d, proj, uf]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const contentPrims = useMemo(() => sheetContent(), [d, proj, uf]);
   const titleExtra = { scale: mainScale ? scaleLabel(mainScale) : '—', units: unit, date };
   const allPrims = [...titleBlockPrims(d, titleExtra), ...contentPrims];
 
-  const exportAs = (fmt: 'pdf' | 'svg' | 'dxf') => {
+  const exportAs = async (fmt: 'pdf' | 'svg' | 'dxf') => {
     const name = safeName(`${doc.name} - ${tab.name}`);
-    // The current PDF writer uses WinAnsi; keep its service labels representable.
-    if (fmt === 'pdf') download(writePDF([{ width: W, height: H, prims: [...titleBlockPrims(d, titleExtra, (key) => key), ...contentPrims] }], { title: d.title }), `${name}.pdf`, 'application/pdf');
+    setMenu(null);
+    if (fmt === 'pdf') {
+      // Cyrillic and the like: in the embedded font; without it (it could not be loaded) the PDF has WinAnsi only,
+      // so its service labels are in English then
+      const font = await loadPdfFont().catch(() => undefined);
+      const tr = font ? t : (key: string) => key;
+      const prims = font ? allPrims : [...titleBlockPrims(d, titleExtra, tr), ...sheetContent(tr)];
+      download(writePDF([{ width: W, height: H, prims }], { title: d.title, font }), `${name}.pdf`, 'application/pdf');
+    }
     if (fmt === 'svg') download(writeSVG(allPrims, { width: W, height: H, background: '#ffffff' }), `${name}.svg`, 'image/svg+xml');
     if (fmt === 'dxf') download(writeDXF(allPrims, { units: 'mm' }), `${name}.dxf`, 'image/vnd.dxf');
-    setMenu(null);
   };
 
   // live preview of a dimension being placed
@@ -693,7 +894,29 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       }
     }
   }
-  const snapHint = tool === 'dimension' && cursor ? snapPoint(cursor) : null;
+  // …of a section / detail view: the cutting line (its arrows to where the view goes) or the circle
+  const draftView = viewDraft && d.views.find((x) => x.id === viewDraft.viewId);
+  if (viewDraft && draftView && cursor) {
+    const pr = proj(draftView);
+    const b = viewDraft.b ?? draftSecond(draftView, viewDraft.a, cursor);
+    const dr = { ...viewDraft, b };
+    const letter = nextViewLetter(d.views, getLang());
+    if (tool === 'section' && !viewDraft.b) previewPrims.push({ t: 'line', a: toSheet(draftView, pr, dr.a), b: toSheet(draftView, pr, b), style: 'center' });
+    else if (tool === 'section') previewPrims.push(...cuttingLinePrims(draftView, pr, { a: dr.a, b, side: sectionSide(draftView, dr, cursor), letter, steps: viewDraft.steps }));
+    else {
+      const r = Math.hypot(b[0] - dr.a[0], b[1] - dr.a[1]);
+      previewPrims.push(...detailCirclePrims(draftView, pr, { c: dr.a, r, letter }));
+      // where the view goes
+      if (viewDraft.b) previewPrims.push({ t: 'circle', c: cursor, r: r * detailScale(draftView.scale), style: 'hidden' });
+    }
+  }
+  // …of a hole callout: it follows the cursor
+  const calloutView = calloutDraft && d.views.find((x) => x.id === calloutDraft.viewId);
+  if (calloutDraft && calloutView && cursor)
+    previewPrims.push(...dimPrims({ id: 'p', viewId: calloutView.id, kind: 'hole', a: calloutDraft.a, offset: 0, textPos: cursor }, calloutView, proj(calloutView), uf));
+  /** The hole a callout would point at, lit up under the cursor. */
+  const holeHint = tool === 'callout' && !calloutDraft && cursor ? holeAt(cursor) : null;
+  const snapHint = (tool === 'dimension' || ((tool === 'section' || tool === 'detail') && !viewDraft?.b)) && cursor ? snapPoint(cursor) : null;
   const selView = selected?.kind === 'view' ? d.views.find((v) => v.id === selected.id) : undefined;
   const studioOf = (v: DrawingView) => doc.tabs.find((x): x is PartStudioTab => x.id === v.studioId && x.type === 'partStudio');
   const selStudio = selView && studioOf(selView);
@@ -762,10 +985,14 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           {d.views.map((v) => (
             <div key={v.id} className={'tree-item' + (selected?.id === v.id ? ' selected' : '')} onClick={() => setSelected({ kind: 'view', id: v.id })}>
               <span className="tree-icon">
-                <Icon name={v.orientation === 'iso' ? 'isoView' : 'drawingView'} size={16} />
+                <Icon name={v.section ? 'drawingSection' : v.detail ? 'detailView' : v.orientation === 'iso' ? 'isoView' : 'drawingView'} size={16} />
               </span>
               <span className="tree-name">
-                {[t(VIEW_NAMES[v.orientation]), scaleLabel(v.scale), ...viewOptions(v)].join(' · ')}
+                {[
+                  v.section ? `${t('Section')} ${v.section.letter}–${v.section.letter}` : v.detail ? `${t('Detail')} ${v.detail.letter}` : t(VIEW_NAMES[v.orientation]),
+                  scaleLabel(v.scale),
+                  ...viewOptions(v),
+                ].join(' · ')}
               </span>
             </div>
           ))}
@@ -774,18 +1001,54 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           <>
             <div className="panel-header">{t('View properties')}</div>
             <div className="fd-body">
-              <div className="fd-row">
-                <label>{t('Orientation')}</label>
-                <div className="fd-control">
-                  <select value={selView.orientation} onChange={(e) => upd((dd) => void (dd.views.find((x) => x.id === selView.id)!.orientation = e.target.value as ViewOrientation))}>
-                    {(Object.keys(VIEW_NAMES) as ViewOrientation[]).map((o) => (
-                      <option key={o} value={o}>
-                        {t(VIEW_NAMES[o])}
-                      </option>
-                    ))}
-                  </select>
+              {isDerivedView(selView) ? (
+                // a section or detail view: seen as its parent is; its letter (on the parent and above the view)
+                <div className="fd-row">
+                  <label>{t('View letter')}</label>
+                  <div className="fd-control">
+                    <input
+                      type="text"
+                      value={selView.section?.letter ?? selView.detail?.letter ?? ''}
+                      onChange={(e) =>
+                        upd((dd) => {
+                          const v = dd.views.find((x) => x.id === selView.id)!;
+                          const l = e.target.value.trim().toUpperCase().slice(0, 4);
+                          if (v.section) v.section.letter = l;
+                          if (v.detail) v.detail.letter = l;
+                        }, `letter-${selView.id}`)
+                      }
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                    {selView.section && (
+                      <button
+                        className="icon-btn"
+                        title={t('Opposite direction')}
+                        onClick={() =>
+                          upd((dd) => {
+                            const s = dd.views.find((x) => x.id === selView.id)!.section;
+                            if (s) s.side = s.side === 1 ? -1 : 1;
+                          })
+                        }
+                      >
+                        <Icon name="flip" size={18} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="fd-row">
+                  <label>{t('Orientation')}</label>
+                  <div className="fd-control">
+                    <select value={selView.orientation} onChange={(e) => upd((dd) => void (dd.views.find((x) => x.id === selView.id)!.orientation = e.target.value as ViewOrientation))}>
+                      {(Object.keys(VIEW_NAMES) as ViewOrientation[]).map((o) => (
+                        <option key={o} value={o}>
+                          {t(VIEW_NAMES[o])}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
               <div className="fd-row">
                 <label>{t('Scale')}</label>
                 <div className="fd-control">
@@ -794,7 +1057,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                     onChange={(e) =>
                       upd((dd) => {
                         const s = Number(e.target.value);
-                        for (const v of dd.views) if (sameFamily(v, selView)) v.scale = s;
+                        for (const v of dd.views) if (sameScale(v, selView)) v.scale = s;
                       })
                     }
                   >
@@ -890,8 +1153,41 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           <button className={'icon-btn' + (tool === 'dimension' ? ' active' : '')} title={t('Dimension') + ' (D)'} onClick={() => setTool('dimension')}>
             <Icon name="dimension" />
           </button>
+          <button
+            className={'icon-btn' + (tool === 'callout' ? ' active' : '')}
+            title={t('Hole callout')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setCalloutDraft(null);
+              setTool('callout');
+            }}
+          >
+            <Icon name="holeCallout" />
+          </button>
           <button className={'icon-btn' + (tool === 'note' ? ' active' : '')} title={t('Note')} onClick={() => setTool('note')}>
             <Icon name="note" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'section' ? ' active' : '')}
+            title={t('Section view (cut along a line on a view)')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setViewDraft(null);
+              setTool('section');
+            }}
+          >
+            <Icon name="drawingSection" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'detail' ? ' active' : '')}
+            title={t('Detail view (an enlarged circle of a view)')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setViewDraft(null);
+              setTool('detail');
+            }}
+          >
+            <Icon name="detailView" />
           </button>
           <div className="tb-sep" />
           <button className="btn small drawing-title-tool" onClick={() => setEditingTitle(true)}>
@@ -969,6 +1265,12 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
               {previewPrims.map((p, i) => (
                 <PrimSvg key={`pv${i}`} p={p} color="#1f6fd1" />
               ))}
+              {holeHint &&
+                (() => {
+                  const v = d.views.find((x) => x.id === holeHint.viewId)!;
+                  const s = toSheet(v, proj(v), holeHint.a);
+                  return <circle cx={s[0]} cy={s[1]} r={holeHint.r * v.scale} fill="none" stroke="#ff7a00" strokeWidth={0.6} />;
+                })()}
               {snapHint &&
                 (() => {
                   const v = d.views.find((x) => x.id === snapHint.viewId)!;
@@ -1021,7 +1323,16 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           onSave={(fields) => { upd((dd) => { Object.assign(dd, fields); }); setEditingTitle(false); }}
         />}
         <div className="drawing-status">
-          {cursor && `${cursor[0].toFixed(1)}, ${cursor[1].toFixed(1)} mm`} · {tool === 'dimension' ? t('Click two points or a circle, then place the dimension. Shift = radius.') : t('Drag views to move. Wheel to zoom, right/middle drag to pan.')}
+          {cursor && `${cursor[0].toFixed(1)}, ${cursor[1].toFixed(1)} mm`} ·{' '}
+          {tool === 'dimension'
+            ? t('Click two points or a circle, then place the dimension. Shift = radius.')
+            : tool === 'callout'
+              ? t(!calloutDraft ? 'Hole callout: click a hole made by the Hole feature (seen end-on).' : 'Click where to place the callout. Esc — cancel.')
+            : tool === 'section'
+              ? t(!viewDraft ? 'Section view: click the start of the cutting line on a view.' : !viewDraft.b ? 'Click the end of the cutting line.' : 'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section). Esc — cancel.')
+              : tool === 'detail'
+                ? t(!viewDraft ? 'Detail view: click the centre of the circle on a view.' : !viewDraft.b ? 'Click to set the circle’s radius.' : 'Click where to place the detail view. Esc — cancel.')
+                : t('Drag views to move. Wheel to zoom, right/middle drag to pan.')}
         </div>
       </div>
     </>

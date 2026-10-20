@@ -12,6 +12,53 @@ const FACES: { label: string; normal: THREE.Vector3; up: THREE.Vector3 }[] = [
   { label: 'Bottom', normal: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, -1, 0) },
 ];
 
+/** A quarter turn of the view from the cube's arrows: to the face on that side, or rolled about the line of sight. */
+export type ViewTurn = 'left' | 'right' | 'up' | 'down' | 'cw' | 'ccw';
+
+// The arrows round the cube (shown while the pointer is over it, no tooltips): triangles by the sides of the face seen
+// straight on, and an arc round its top right corner — its upper half rolls the view counterclockwise, the lower one
+// clockwise. Their names: for screen readers only.
+const TRIANGLE = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 8.5 L6 3.5 L9.5 8.5 Z" /></svg>';
+const SIDES: { turn: ViewTurn; label: string }[] = [
+  { turn: 'up', label: 'Rotate view 90° up' },
+  { turn: 'down', label: 'Rotate view 90° down' },
+  { turn: 'left', label: 'Rotate view 90° left' },
+  { turn: 'right', label: 'Rotate view 90° right' },
+];
+const ROLLS: { turn: ViewTurn; label: string }[] = [
+  { turn: 'ccw', label: 'Roll view 90° counterclockwise' },
+  { turn: 'cw', label: 'Roll view 90° clockwise' },
+];
+
+/**
+ * The roll arrows round the top right corner of the face seen straight on (it fills the middle half of the cube's
+ * canvas of `size` px): two arcs of one circle centred between that corner and the cube's centre, apart in the middle,
+ * one to the top (counterclockwise), one to the right (clockwise), each ending in an arrowhead.
+ */
+export function rollArc(size: number): { turn: 'cw' | 'ccw'; arc: string; head: string }[] {
+  const cx = size * 0.607;
+  const cy = size * 0.393;
+  const R = size * 0.32;
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const at = (deg: number): [number, number] => [cx + R * Math.cos(rad(deg)), cy - R * Math.sin(rad(deg))];
+  const f = (p: [number, number]) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`;
+  /** An arrowhead at the arc's end at `deg`, pointing on along it (`sign` 1: the angle growing — counterclockwise). */
+  const head = (deg: number, sign: number) => {
+    const e = at(deg);
+    const d: [number, number] = [-Math.sin(rad(deg)) * sign, -Math.cos(rad(deg)) * sign];
+    const L = size * 0.065;
+    const W = size * 0.042;
+    const p = (k: number, w: number): [number, number] => [e[0] + d[0] * k - d[1] * w, e[1] + d[1] * k + d[0] * w];
+    return `M${f(p(L, 0))} L${f(p(0, W))} L${f(p(0, -W))} Z`;
+  };
+  // clear of the triangles by the top and the right side; a gap between the two in the middle
+  const [top, right, mid, gap] = [73, 17, 45, 6];
+  return [
+    { turn: 'ccw', arc: `M${f(at(mid + gap))} A${R} ${R} 0 0 0 ${f(at(top))}`, head: head(top, 1) },
+    { turn: 'cw', arc: `M${f(at(mid - gap))} A${R} ${R} 0 0 1 ${f(at(right))}`, head: head(right, -1) },
+  ];
+}
+
 function labelTexture(text: string, hover = false) {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -33,10 +80,13 @@ function labelTexture(text: string, hover = false) {
 }
 
 export class ViewCube {
+  /** The cube with its arrows (what goes into the graphics area). */
+  readonly element: HTMLDivElement;
   readonly canvas: HTMLCanvasElement;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.OrthographicCamera(-1.6, 1.6, 1.6, -1.6, 0.1, 10);
+  // a little room round the cube: seen from a corner (its widest) it stays inside the arrows
+  private camera = new THREE.OrthographicCamera(-1.75, 1.75, 1.75, -1.75, 0.1, 10);
   private cube: THREE.Mesh;
   private materials: THREE.MeshBasicMaterial[];
   private textures: { normal: THREE.Texture; hover: THREE.Texture }[];
@@ -47,12 +97,53 @@ export class ViewCube {
   onRotate: (dx: number, dy: number) => void = () => {};
   /** Right click on the cube: its menu (window coordinates). */
   onMenu: (x: number, y: number) => void = () => {};
+  /** An arrow by the cube: a quarter turn of the view (Onshape — "lay the cube on its side"). */
+  onTurn: (turn: ViewTurn) => void = () => {};
   /** A press on the cube: a click picks a view, a drag (past a few pixels) turns the camera. */
   private press: { x: number; y: number; dragged: boolean; right: boolean } | null = null;
 
-  constructor(size = 110) {
+  constructor(size = 110, translate: (key: string) => string = (k) => k) {
+    this.element = document.createElement('div');
+    this.element.className = 'viewcube';
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'viewcube-canvas';
+    this.element.appendChild(this.canvas);
+    const turnOn = (el: Element, turn: ViewTurn) => {
+      el.addEventListener('pointerdown', (e) => e.stopPropagation());
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onTurn(turn);
+      });
+    };
+    for (const { turn, label } of SIDES) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `viewcube-turn turn-${turn}`;
+      b.setAttribute('aria-label', translate(label));
+      b.innerHTML = TRIANGLE;
+      turnOn(b, turn);
+      this.element.appendChild(b);
+    }
+    // the roll arc: drawn over the canvas, only its strokes and heads take the pointer
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'viewcube-roll');
+    svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+    for (const half of rollArc(size)) {
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', `turn-${half.turn}`);
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', translate(ROLLS.find((r) => r.turn === half.turn)!.label));
+      for (const [cls, d] of [['hit', half.arc], ['arc', half.arc], ['head', half.head]]) {
+        const p = document.createElementNS(NS, 'path');
+        p.setAttribute('class', cls);
+        p.setAttribute('d', d);
+        g.appendChild(p);
+      }
+      turnOn(g, half.turn);
+      svg.appendChild(g);
+    }
+    this.element.appendChild(svg);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(size, size);

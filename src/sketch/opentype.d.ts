@@ -17,7 +17,10 @@ declare module 'opentype.js' {
 
   export interface Font {
     unitsPerEm: number;
-    tables: { os2?: { sCapHeight?: number } };
+    ascender: number;
+    descender: number;
+    tables: { os2?: { sCapHeight?: number }; head?: { xMin: number; yMin: number; xMax: number; yMax: number } };
+    glyphs: { get(index: number): Glyph };
     charToGlyph(c: string): Glyph;
     /** Lays out `text` (kerning, ligatures) and calls back with each glyph and its pen position; returns the end x. */
     forEachGlyph(
