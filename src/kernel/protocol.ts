@@ -296,6 +296,8 @@ export interface SectionCut {
   normal: Vec3;
   line?: Vec3[];
   along?: Vec3;
+  /** An aligned section: `line` is a → b → c at an angle, the part beyond b turned into the plane of a → b. */
+  aligned?: boolean;
 }
 
 /**

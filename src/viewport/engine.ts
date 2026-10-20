@@ -216,6 +216,38 @@ function moveTriadObject(active: string | null): THREE.Group {
   return g;
 }
 
+/** The centre of gravity symbol (ISO 7000-ish): a circle with opposite quarters black, on a white halo. */
+function massCenterSymbol(): HTMLCanvasElement {
+  const s = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d')!;
+  const m = s / 2;
+  const r = s / 2 - 6;
+  g.beginPath();
+  g.arc(m, m, r + 3, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fill();
+  g.beginPath();
+  g.arc(m, m, r, 0, Math.PI * 2);
+  g.fillStyle = '#fff';
+  g.fill();
+  g.fillStyle = '#1d2329';
+  for (const a of [0, Math.PI]) {
+    g.beginPath();
+    g.moveTo(m, m);
+    g.arc(m, m, r, a - Math.PI / 2, a);
+    g.closePath();
+    g.fill();
+  }
+  g.beginPath();
+  g.arc(m, m, r, 0, Math.PI * 2);
+  g.lineWidth = 4;
+  g.strokeStyle = '#1d2329';
+  g.stroke();
+  return c;
+}
+
 /** Orbit cursor: circular arrow (white halo for contrast), falls back to "move". */
 const ROTATE_CURSOR = (() => {
   const arc = 'M19 9.5A7.5 7.5 0 1 0 19.5 14';
@@ -442,6 +474,7 @@ export class Engine {
   }
 
   private measureObj: THREE.Object3D | null = null;
+  private massCenterObj: THREE.Object3D | null = null;
 
   /** The measure panel's distance: a dashed segment over the model with dots at its ends (none — taken away). */
   setMeasureLine(points: [Vec3, Vec3] | null) {
@@ -460,6 +493,26 @@ export class Engine {
       g.renderOrder = 10;
       this.scene.add(g);
       this.measureObj = g;
+    }
+    this.requestRender();
+  }
+
+  /** The centre of mass symbol (a circle in black and white quarters) over the model, or none. */
+  setMassCenter(p: Vec3 | null) {
+    if (this.massCenterObj) {
+      this.scene.remove(this.massCenterObj);
+      disposeObject(this.massCenterObj);
+      this.massCenterObj = null;
+    }
+    if (p) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+      const map = new THREE.CanvasTexture(massCenterSymbol());
+      map.colorSpace = THREE.SRGBColorSpace;
+      const o = new THREE.Points(geo, new THREE.PointsMaterial({ map, size: 22, sizeAttenuation: false, transparent: true, depthTest: false }));
+      o.renderOrder = 40;
+      this.scene.add(o);
+      this.massCenterObj = o;
     }
     this.requestRender();
   }
@@ -590,7 +643,7 @@ export class Engine {
     if (build) {
       for (const p of build.parts) {
         if (p.hidden) continue;
-        this.addPart(p, changed.has(p.id));
+        this.addPart(p, changed.has(p.id), studio?.parts[p.id]?.opacity);
       }
       // cosmetic threads of tapped holes (not of hidden parts)
       const hiddenParts = new Set(build.parts.filter((p) => p.hidden).map((p) => p.id));
@@ -679,7 +732,7 @@ export class Engine {
     return b;
   }
 
-  private addPart(p: PartMesh, faded: boolean) {
+  private addPart(p: PartMesh, faded: boolean, opacity = 1) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
@@ -696,6 +749,8 @@ export class Engine {
     geo.setAttribute('pickId', new THREE.BufferAttribute(ids, 1));
     geo.computeBoundingBox();
     if (geo.boundingBox) this.sceneBox.union(geo.boundingBox);
+    // a part changed by the previewed feature is faded; a see-through one (its appearance) shows the parts inside
+    const alpha = faded ? 0.25 : Math.min(1, Math.max(0.1, opacity));
     const material = new THREE.MeshStandardMaterial({
       color: new THREE.Color(p.color),
       roughness: 0.62,
@@ -704,9 +759,9 @@ export class Engine {
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
-      transparent: faded,
-      opacity: faded ? 0.25 : 1,
-      depthWrite: !faded,
+      transparent: alpha < 1,
+      opacity: alpha,
+      depthWrite: alpha >= 1,
     });
     const mesh = new THREE.Mesh(geo, material);
     // edges as segments
@@ -887,7 +942,9 @@ export class Engine {
       const id = this.registry.alloc({ t: 'region', sketchId: s.featureId, region: r, priority: PRIORITY.region, radius: 1.5 });
       const pgeo = geo.clone();
       pgeo.setAttribute('pickId', constantIds(pgeo.getAttribute('position').count, id));
-      pg.add(new THREE.Mesh(pgeo, makePickMaterial({ polygonOffset: -1 })));
+      // pushed back less than part faces (2): a region wins over the face it lies on, but the
+      // sketch's own lines between two regions stay pickable on top of it
+      pg.add(new THREE.Mesh(pgeo, makePickMaterial({ polygonOffset: 1 })));
     }
     if (pickSegs.length) {
       const lg = new THREE.BufferGeometry();

@@ -320,7 +320,7 @@ export type AgentOp =
    * `material`: a library one by id or name ("aluminum", "PLA" — its density with it) or one of your own (with `density`,
    * g/cm³); `material: null` — none (mass as steel).
    */
-  | { op: 'part'; part: PartQuery; name?: string; color?: string; hidden?: boolean; material?: string | null; density?: number };
+  | { op: 'part'; part: PartQuery; name?: string; color?: string; opacity?: number; hidden?: boolean; material?: string | null; density?: number };
 
 /**
  * Where a mate attaches on an instance: a face / edge (queries in assembly coordinates, on that instance), the

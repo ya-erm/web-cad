@@ -349,8 +349,12 @@ export function cuttingLinePrims(v: DrawingView, proj: ProjectionData | undefine
     return Number.isFinite(t) ? t : 0;
   };
   const last = rest[rest.length - 1];
+  // the end beyond the last point: along the first segment — an aligned section's along its own (its arrow across it)
+  const prev = rest.length > 1 ? rest[rest.length - 2] : B;
+  const uEnd = s.aligned && last ? norm([last[0] - prev[0], last[1] - prev[1]]) : u;
+  const wEnd: Vec2 = [-uEnd[1] * s.side, uEnd[0] * s.side];
   const P0 = rest.length ? add(A, mul(u, -exit(A, mul(u, -1)))) : add(A, mul(u, t0));
-  const P1 = rest.length ? add(last, mul(u, exit(last, u))) : add(A, mul(u, t1));
+  const P1 = rest.length ? add(last, mul(uEnd, exit(last, uEnd))) : add(A, mul(u, t1));
   const line = rest.length ? [P0, A, B, ...rest, P1] : [P0, P1];
   const out: Prim2D[] = [{ t: 'poly', pts: line, style: 'center' }];
   // thick strokes at the bends: an angle along both segments
@@ -358,15 +362,15 @@ export function cuttingLinePrims(v: DrawingView, proj: ProjectionData | undefine
     const i = line.indexOf(P);
     for (const Q of [line[i - 1], line[i + 1]]) out.push({ t: 'line', a: P, b: add(P, mul(norm([Q[0] - P[0], Q[1] - P[1]]), Math.min(STROKE / 2, Math.hypot(Q[0] - P[0], Q[1] - P[1])))), style: 'border' });
   }
-  for (const [P, out1] of [[P0, mul(u, -1)], [P1, u]] as const) {
+  for (const [P, out1, wa] of [[P0, mul(u, -1), w], [P1, uEnd, wEnd]] as const) {
     const E = add(P, mul(out1, STROKE));
     out.push({ t: 'line', a: P, b: E, style: 'border' });
     // the arrow 2 mm in from the stroke's outer end, pointing at it; the letter behind the arrow
     const tip = add(E, mul(out1, -2));
-    const tail = add(tip, mul(w, -SECTION_ARROW));
+    const tail = add(tip, mul(wa, -SECTION_ARROW));
     out.push({ t: 'line', a: tail, b: tip, style: 'thin' });
-    out.push({ t: 'arrow', tip, dir: w, size: 3.5, style: 'thin' });
-    out.push({ t: 'text', p: add(tail, mul(w, -LETTER_H * 0.8)), text: s.letter, h: LETTER_H, align: 'center', vAlign: 'middle', style: 'thin' });
+    out.push({ t: 'arrow', tip, dir: wa, size: 3.5, style: 'thin' });
+    out.push({ t: 'text', p: add(tail, mul(wa, -LETTER_H * 0.8)), text: s.letter, h: LETTER_H, align: 'center', vAlign: 'middle', style: 'thin' });
   }
   return out;
 }

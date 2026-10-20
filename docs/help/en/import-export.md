@@ -11,8 +11,10 @@ width: 460
 
 1. Select the parts to export in the [parts list](parts). If no parts are selected, all visible parts are exported.
 2. Click **Export** in the top-right corner (or **Export part** in the part context menu).
-3. In the **Export parts** dialog, choose the **Format**, **Resolution** (for mesh formats), and **Units**.
+3. In the **Export parts** dialog (the **Parts** tab), choose the **Format**, **Resolution** (for mesh formats), and **Units**. They are remembered for the next export.
 4. Click **Export**; the browser downloads the file.
+
+The **WebCAD project** tab of the same dialog saves the whole document instead of geometry. See [Project files](documents#project-files).
 
 | Format | What is saved |
 |---|---|

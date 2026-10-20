@@ -42,6 +42,30 @@ export function AppSettingsItems() {
   );
 }
 
+/** RU | EN in a header (as in the help); the choice is kept and the page reloads in it. */
+export function LangSwitch() {
+  const cur = getLang();
+  return (
+    <div className="help-langs" role="group" aria-label={t('Language')} title={t('Language')}>
+      {(['ru', 'en'] as const).map((l) => (
+        <button
+          key={l}
+          className={l === cur ? 'on' : ''}
+          lang={l}
+          title={l === 'ru' ? 'Русский' : 'English'}
+          onClick={() => {
+            if (l === cur) return;
+            setLang(l);
+            location.reload();
+          }}
+        >
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** The Settings button of the documents page. */
 export function AppSettingsButton() {
   const [open, setOpen] = useState(false);

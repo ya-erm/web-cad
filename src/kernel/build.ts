@@ -438,15 +438,21 @@ export class StudioBuilder {
     let halfAxis: { p: Vec2; d: Vec2 } | null = null;
     // a local section's outline in the view: its walls are seen edge-on there (drawn as a freehand line instead)
     let breakPoly: Vec2[] | null = null;
-    // what is cut away: the tool for a part (its size), the planes the cut faces lie on, their normal
-    let cutting: { tool: (size: number, origin: Vec3) => Shape3D; planes: Vec3[]; normal: Vec3 } | null = null;
-    if (opts.section) {
+    // what is cut away: a part as cut (its size), the planes the cut faces lie on, their normal
+    let cutting: { apply: (shape: Shape3D, size: number) => Shape3D; planes: Vec3[]; normal: Vec3 } | null = null;
+    if (opts.section?.aligned && opts.section.line && opts.section.line.length >= 3 && opts.section.along) {
+      // an aligned section (ГОСТ «ломаный»): the part beyond the bend cut by its own plane, turned into the first one
+      const sec = opts.section;
+      cutting = { apply: (s, size) => alignedCut(s, sec, size), planes: [sec.origin], normal: sec.normal };
+      // the bend's axis, seen edge-on where the two pieces meet
+      jogs = [{ p: P(sec.line![1]), d: v2norm(P(sec.along!)) }];
+    } else if (opts.section) {
       // a section view: the parts without what lies on the viewer's side of the plane, the faces it cut hatched
       const sec = opts.section;
       const steps = sectionSteps(sec);
       jogs = steps?.jogs.map((j) => ({ p: P(j), d: v2norm(P(sec.along!)) })) ?? [];
       if (steps?.half) halfAxis = jogs[jogs.length - 1] ?? null;
-      cutting = { tool: (size) => (steps ? steppedCut(sec, size) : halfSpace(sec.origin, sec.normal, size)), planes: steps?.planes ?? [sec.origin], normal: sec.normal };
+      cutting = { apply: (s, size) => s.cut(steps ? steppedCut(sec, size) : halfSpace(sec.origin, sec.normal, size)), planes: steps?.planes ?? [sec.origin], normal: sec.normal };
     } else if (opts.breakout && opts.breakout.outline.length >= 3 && items.length) {
       // a local section: inside the outline, from the viewer down to its depth (the parts' middle by default)
       let front = -Infinity;
@@ -462,7 +468,7 @@ export class StudioBuilder {
       const depth = opts.breakout.depth === undefined ? (front + back) / 2 : front - opts.breakout.depth;
       const outline = opts.breakout.outline.map((q) => v3.add(q, v3.scale(n, depth - v3.dot(q, n))));
       breakPoly = outline.map(P);
-      cutting = { tool: (size) => prism(R.makePolygon(outline), n, 0, Math.max(front - depth, 0) + size), planes: [outline[0]], normal: n };
+      cutting = { apply: (s, size) => s.cut(prism(R.makePolygon(outline), n, 0, Math.max(front - depth, 0) + size)), planes: [outline[0]], normal: n };
     }
     if (cutting) {
       const { planes, normal } = cutting;
@@ -472,7 +478,7 @@ export class StudioBuilder {
         const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), planes[0]))) + 10;
         let rest: Shape3D;
         try {
-          rest = it.shape.cut(cutting.tool(size, planes[0]));
+          rest = cutting.apply(it.shape, size);
         } catch {
           continue;
         }
@@ -644,6 +650,41 @@ export function sectionSteps(s: SectionCut): { planes: Vec3[]; jogs: Vec3[]; hal
     half = across;
   }
   return { planes, jogs, half };
+}
+
+/**
+ * A part in an aligned section (line a → b → c, bent at b): split along the bisector of the bend (an axis across the
+ * parent view through b); the piece by a → b cut by its plane, the piece by b → c by its own plane and turned about the
+ * axis into the first one — both cut faces then lie in the section's plane.
+ */
+function alignedCut(shape: Shape3D, s: SectionCut, size: number): Shape3D {
+  const [a, b, c] = s.line!;
+  const axis = s.along!;
+  const u1 = v3.norm(v3.sub(b, a));
+  const u2 = v3.norm(v3.sub(c, b));
+  // the turn from the second segment to the first's extension, about the axis
+  const angle = Math.atan2(v3.dot(v3.cross(u2, u1), axis), v3.dot(u2, u1));
+  const turn = (v: Vec3, t: number) => {
+    const k = axis;
+    return v3.add(v3.add(v3.scale(v, Math.cos(t)), v3.scale(v3.cross(k, v), Math.sin(t))), v3.scale(k, v3.dot(k, v) * (1 - Math.cos(t))));
+  };
+  // the second plane's normal towards the viewer: the first's turned back
+  const n2 = turn(s.normal, -angle);
+  // each piece reaches the bend across its own segment: the first on a's side of b, the second on c's side — turned,
+  // it carries on from where the first ends, so the outline of a round part comes out whole (some material in the
+  // angle between the segments is shown in both)
+  const pieces: Shape3D[] = [];
+  const first = shape.cut(halfSpace(b, u1, size));
+  const second = shape.cut(halfSpace(b, v3.neg(u2), size));
+  if (first.faces.length) {
+    const cutFirst = first.cut(halfSpace(a, s.normal, size));
+    if (cutFirst.faces.length) pieces.push(cutFirst);
+  }
+  if (second.faces.length) {
+    const cutSecond = second.cut(halfSpace(b, n2, size));
+    if (cutSecond.faces.length) pieces.push(R.cast(R.rotate(cutSecond.wrapped, (angle * 180) / Math.PI, b, axis)) as Shape3D);
+  }
+  return compoundOf(pieces);
 }
 
 /**

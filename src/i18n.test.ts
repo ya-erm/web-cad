@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { t } from './i18n';
+import { browserLang, t } from './i18n';
 
 const kernelDir = fileURLToPath(new URL('./kernel/', import.meta.url));
 
@@ -26,5 +26,13 @@ describe('i18n', () => {
     const messages = kernelMessages();
     expect(messages.length).toBeGreaterThan(50);
     expect(messages.filter((m) => t(m) === m)).toEqual([]);
+  });
+
+  it('takes the first browser language it has, else English', () => {
+    expect(browserLang(['ru-RU', 'en-US'])).toBe('ru');
+    expect(browserLang(['de-DE', 'en-GB', 'ru'])).toBe('en');
+    expect(browserLang(['uk', 'RU'])).toBe('ru');
+    expect(browserLang(['de', 'fr'])).toBe('en');
+    expect(browserLang([])).toBe('en');
   });
 });

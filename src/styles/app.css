@@ -98,6 +98,13 @@ textarea {
 .btn.primary:hover {
   background: var(--accent-2);
 }
+/* a two-colour icon on the blue button: its blue arrow would vanish, so all its lines are white, unfilled */
+.btn.primary svg [stroke]:not([stroke='none']) {
+  stroke: currentColor;
+}
+.btn.primary svg [fill='#ffffff'] {
+  fill: none;
+}
 .btn.danger {
   color: var(--danger);
 }
@@ -114,13 +121,19 @@ textarea {
   flex-direction: column;
   height: 100%;
 }
+/* the same height and logo place as the editor's top bar (40 px; the logo 12 px in, as in its 30 px button) */
 .docs-top {
-  height: 52px;
+  height: 40px;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 20px;
+  padding: 0 16px 0 10px;
   border-bottom: 1px solid var(--border);
+}
+.docs-top .brand-logo,
+.help-top .brand-logo {
+  margin: 0 2px;
 }
 .brand {
   display: flex;
@@ -1556,6 +1569,24 @@ textarea {
   background: var(--accent);
   color: #fff;
 }
+/* Export: parts or the WebCAD project, as two big tabs at the top of the dialog */
+.segmented.export-what {
+  margin-bottom: 4px;
+}
+.segmented.export-what button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.export-format {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  color: var(--text-2);
+}
 .sel-field {
   border: 1px solid var(--border-strong);
   border-radius: 4px;
@@ -1857,8 +1888,15 @@ textarea {
   padding: 2px 4px;
   border-radius: 3px;
 }
-.measure-panel .mrow.mline:hover {
+.measure-panel .mrow.mline:hover,
+.measure-panel .mrow.mpoint:hover {
   background: var(--hover);
+}
+/* the centre of mass: marked on the model while hovered */
+.measure-panel .mrow.mpoint {
+  margin: 0 -4px;
+  padding: 2px 4px;
+  border-radius: 3px;
 }
 .measure-panel .mrow.mline.active span:first-child::before {
   content: '';
@@ -1951,6 +1989,23 @@ textarea {
   border-radius: 4px;
   background: none;
   cursor: pointer;
+}
+.palette-opacity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+  color: var(--text-2);
+}
+.palette-opacity input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.palette-opacity-value {
+  width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -2578,12 +2633,12 @@ textarea {
   background: #fff;
 }
 .help-top {
-  height: 52px;
+  height: 40px;
   flex: none;
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0 16px;
+  padding: 0 16px 0 10px;
   border-bottom: 1px solid var(--border);
 }
 .help-top .spacer {
@@ -2594,8 +2649,19 @@ textarea {
   text-decoration: none;
 }
 .help-brand {
-  text-decoration: none;
   flex: none;
+}
+.help-brand a {
+  text-decoration: none;
+  color: inherit;
+}
+.help-brand-app {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.help-brand a:hover {
+  opacity: 0.85;
 }
 /* the version next to the name on the documents page */
 .brand-version {
@@ -2649,23 +2715,32 @@ textarea {
   border-radius: 4px;
   overflow: hidden;
 }
-.help-langs a {
+/* links in the help (each language is its own address), buttons on the documents page */
+.help-langs > a,
+.help-langs > button {
   padding: 3px 9px;
+  font: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 16px;
   color: var(--text-2);
   text-decoration: none;
+  background: none;
+  border: none;
   border-right: 1px solid var(--border);
+  cursor: pointer;
 }
-.help-langs a:last-child {
+.help-langs > :last-child {
   border-right: none;
 }
-.help-langs a:hover {
+.help-langs > :hover {
   background: var(--hover);
 }
-.help-langs a.on {
+.help-langs > .on,
+.help-langs > .on:hover {
   background: var(--accent);
   color: #fff;
+  cursor: default;
 }
 .help-body {
   flex: 1;

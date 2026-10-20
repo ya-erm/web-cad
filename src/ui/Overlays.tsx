@@ -28,7 +28,7 @@ export function ContextMenu() {
   }, [menu]);
   if (!menu) return null;
   const x = Math.min(menu.x, window.innerWidth - 220);
-  const y = Math.min(menu.y, window.innerHeight - 40 - menu.items.length * 30 - (menu.palette ? 90 : 0));
+  const y = Math.min(menu.y, window.innerHeight - 40 - menu.items.length * 30 - (menu.palette ? (menu.palette.opacity ? 120 : 90) : 0));
   return (
     <div className="context-menu" style={{ left: x, top: Math.max(4, y) }} onPointerDown={(e) => e.stopPropagation()}>
       {menu.items.map((it, i) =>
@@ -74,9 +74,33 @@ export function ContextMenu() {
             />
             {t('Custom color…')}
           </label>
+          {menu.palette.opacity && <OpacityRow {...menu.palette.opacity} />}
         </>
       )}
     </div>
+  );
+}
+
+/** Opacity slider of a part's appearance (Onshape: Edit appearance → opacity), 10…100 %. */
+function OpacityRow({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [pct, setPct] = useState(Math.round(value * 100));
+  return (
+    <label className="palette-opacity" title={t('Opacity')}>
+      <span>{t('Opacity')}</span>
+      <input
+        type="range"
+        min={10}
+        max={100}
+        step={5}
+        value={pct}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          setPct(v);
+          onChange(v / 100);
+        }}
+      />
+      <span className="palette-opacity-value">{pct}%</span>
+    </label>
   );
 }
 
@@ -101,6 +125,12 @@ export function MeasurePanel() {
     getEngine()?.setMeasureLine(line?.points ?? null);
     return () => getEngine()?.setMeasureLine(null);
   }, [res, shown]);
+  // the centre of mass is marked on the model while its row is under the cursor
+  const [comHover, setComHover] = useState(false);
+  useEffect(() => {
+    getEngine()?.setMassCenter(comHover && res?.centerOfMass ? res.centerOfMass : null);
+    return () => getEngine()?.setMassCenter(null);
+  }, [comHover, res]);
   useEffect(() => {
     if (!studio || editing || !selection.length || selection.length > 200) {
       setRes(null);
@@ -167,7 +197,7 @@ export function MeasurePanel() {
         </div>
       )}
       {res.centerOfMass && (
-        <div className="mrow">
+        <div className="mrow mpoint" onMouseEnter={() => setComHover(true)} onMouseLeave={() => setComHover(false)}>
           <span>{t('Center of mass')}</span>
           <span>{res.centerOfMass.map((v) => formatNumber(v / f, 2)).join(', ')}</span>
         </div>
@@ -188,10 +218,10 @@ const RES: Record<string, [number, number]> = {
 };
 
 const EXPORT_PREFS = 'webcad.export';
-const EXPORT_KINDS = ['step', 'stl', 'stl-ascii', 'obj', '3mf', 'project'] as const;
+const EXPORT_KINDS = ['step', 'stl', 'stl-ascii', 'obj', '3mf'] as const;
 
 /** The format, resolution and units of the last export: picked again the next time. */
-function exportPrefs(): { kind: ExportKind | 'project'; res: string; unit: 'mm' | 'in' } {
+function exportPrefs(): { kind: ExportKind; res: string; unit: 'mm' | 'in' } {
   let p: { kind?: string; res?: string; unit?: string } = {};
   try {
     p = JSON.parse(localStorage.getItem(EXPORT_PREFS) ?? '{}') ?? {};
@@ -211,27 +241,29 @@ export function ExportDialog() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const asm = activeAssembly(doc);
-  const [kind, setKind] = useState<ExportKind | 'project'>(() => exportPrefs().kind);
+  const [kind, setKind] = useState<ExportKind>(() => exportPrefs().kind);
   const [res, setRes] = useState(() => exportPrefs().res);
   const [unit, setUnit] = useState<'mm' | 'in'>(() => exportPrefs().unit);
   const [busy, setBusy] = useState(false);
+  // the "WebCAD project" tab, chosen for this opening of the dialog only: it opens on the geometry
+  const [projectFor, setProjectFor] = useState<object | null>(null);
   if (!open || (!studio && !asm) || !doc) return null;
   const close = () => useEditor.setState({ exportOpen: null });
   // an assembly exports its instances (the selected ones, else the shown ones) where they stand
   const instances = asm ? asm.instances.filter((i) => (open.partIds.length ? open.partIds.includes(i.id) : !i.hidden)) : [];
   const parts = asm ? instances : (build?.parts ?? []).filter((p) => (open.partIds.length ? open.partIds.includes(p.id) : !p.hidden));
   // the whole document for WebCAD (tabs, feature history), not geometry for other programs
-  const project = kind === 'project';
+  const project = projectFor === open;
   const run = async () => {
-    try {
-      localStorage.setItem(EXPORT_PREFS, JSON.stringify({ kind, res, unit }));
-    } catch {
-      // not remembered
-    }
     if (project) {
       // with its versions
       download(projectText(doc, await fileVersions(doc.id)), `${safeName(doc.name)}.webcad.json`, 'application/json');
       return close();
+    }
+    try {
+      localStorage.setItem(EXPORT_PREFS, JSON.stringify({ kind, res, unit }));
+    } catch {
+      // not remembered
     }
     setBusy(true);
     try {
@@ -251,27 +283,44 @@ export function ExportDialog() {
     <div className="modal-backdrop" onPointerDown={close}>
       <div className="modal" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <Icon name="export" /> &nbsp;{project ? t('Export') : asm ? t('Export assembly') : t('Export parts')}
+          <Icon name="export" /> &nbsp;{project ? t('Export project') : asm ? t('Export assembly') : t('Export parts')}
           <span className="spacer" />
           <button className="icon-btn" onClick={close}>
             <Icon name="close" size={18} />
           </button>
         </div>
         <div className="modal-body">
-          <div className="fd-row">
-            <label>{t('Format')}</label>
-            <div className="fd-control">
-              <select value={kind} onChange={(e) => setKind(e.target.value as ExportKind | 'project')}>
-                <option value="step">STEP (.step)</option>
-                <option value="stl">STL binary (.stl)</option>
-                <option value="stl-ascii">STL ASCII (.stl)</option>
-                <option value="obj">OBJ (.obj)</option>
-                <option value="3mf">3MF (.3mf)</option>
-                <option value="project">{t('WebCAD project (.webcad.json)')}</option>
-              </select>
-            </div>
+          {/* what goes out: geometry for other programs or the document itself for WebCAD */}
+          <div className="segmented export-what">
+            <button className={project ? '' : 'on'} onClick={() => setProjectFor(null)}>
+              <Icon name={asm ? 'assembly' : 'partItem'} size={16} /> {asm ? t('Assembly') : t('Parts')}
+            </button>
+            <button className={project ? 'on' : ''} onClick={() => setProjectFor(open)}>
+              <Icon name="document" size={16} /> {t('WebCAD project')}
+            </button>
           </div>
-          {project && <div className="fd-hint">{t('The whole document — every tab with its feature history — to open again in WebCAD (Import project).')}</div>}
+          {project ? (
+            <>
+              <div className="fd-row">
+                <label>{t('Format')}</label>
+                <div className="fd-control export-format">{t('WebCAD project (.webcad.json)')}</div>
+              </div>
+              <div className="fd-hint">{t('The whole document — every tab with its feature history — to open again in WebCAD (Import project).')}</div>
+            </>
+          ) : (
+            <div className="fd-row">
+              <label>{t('Format')}</label>
+              <div className="fd-control">
+                <select value={kind} onChange={(e) => setKind(e.target.value as ExportKind)}>
+                  <option value="step">STEP (.step)</option>
+                  <option value="stl">STL binary (.stl)</option>
+                  <option value="stl-ascii">STL ASCII (.stl)</option>
+                  <option value="obj">OBJ (.obj)</option>
+                  <option value="3mf">3MF (.3mf)</option>
+                </select>
+              </div>
+            </div>
+          )}
           {kind !== 'step' && !project && (
             <div className="fd-row">
               <label>{t('Resolution')}</label>

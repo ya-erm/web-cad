@@ -258,8 +258,9 @@ interface ViewDraft {
   viewId: string;
   a: Vec2;
   b?: Vec2;
-  /** An offset section's further points (Shift+click). */
+  /** An offset section's further points (Shift+click); an aligned section's one (Alt+click). */
   steps?: Vec2[];
+  aligned?: boolean;
 }
 /** A draft with its line (or circle) drawn: ready to be placed. */
 type LinedDraft = ViewDraft & { b: Vec2 };
@@ -639,7 +640,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     const base = { id, studioId: v.studioId, partIds: [...v.partIds], orientation: v.orientation, x: p[0], y: p[1], parent: v.id, ...(v.configuration ? { configuration: { ...v.configuration } } : {}) };
     const view: DrawingView =
       tool === 'section'
-        ? { ...base, scale: v.scale, showHidden: false, section: { a: dr.a, b: dr.b, side: sectionSide(v, dr, p), letter, ...(dr.steps?.length ? { steps: dr.steps } : {}) } }
+        ? { ...base, scale: v.scale, showHidden: false, section: { a: dr.a, b: dr.b, side: sectionSide(v, dr, p), letter, ...(dr.steps?.length ? { steps: dr.steps } : {}), ...(dr.aligned ? { aligned: true } : {}) } }
         : { ...base, scale: detailScale(v.scale), showHidden: v.showHidden, detail: { c: dr.a, r: Math.hypot(dr.b[0] - dr.a[0], dr.b[1] - dr.a[1]), letter } };
     upd((dd) => {
       dd.views.push(view);
@@ -761,8 +762,14 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         setViewDraft({ ...viewDraft, b });
         return;
       }
+      // Alt: the line bends at b at any angle (an aligned section) — once, right after b
+      if (tool === 'section' && e.altKey && !viewDraft.steps?.length) {
+        const q = draftPoint(v, p);
+        if (Math.hypot(q[0] - viewDraft.b[0], q[1] - viewDraft.b[1]) * v.scale >= 1) setViewDraft({ ...viewDraft, steps: [q], aligned: true });
+        return;
+      }
       // Shift: one more point of the cutting line (an offset section), along or across its first segment
-      if (tool === 'section' && e.shiftKey) {
+      if (tool === 'section' && e.shiftKey && !viewDraft.aligned) {
         const pts = cuttingLine(viewDraft as LinedDraft);
         const q = stepPoint(viewDraft.a, viewDraft.b, pts[pts.length - 1], draftPoint(v, p));
         if (Math.hypot(q[0] - pts[pts.length - 1][0], q[1] - pts[pts.length - 1][1]) * v.scale >= 1) setViewDraft({ ...viewDraft, steps: [...(viewDraft.steps ?? []), q] });
@@ -948,7 +955,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     const dr = { ...viewDraft, b };
     const letter = nextViewLetter(d.views, getLang());
     if (tool === 'section' && !viewDraft.b) previewPrims.push({ t: 'line', a: toSheet(draftView, pr, dr.a), b: toSheet(draftView, pr, b), style: 'center' });
-    else if (tool === 'section') previewPrims.push(...cuttingLinePrims(draftView, pr, { a: dr.a, b, side: sectionSide(draftView, dr, cursor), letter, steps: viewDraft.steps }));
+    else if (tool === 'section') previewPrims.push(...cuttingLinePrims(draftView, pr, { a: dr.a, b, side: sectionSide(draftView, dr, cursor), letter, steps: viewDraft.steps, aligned: viewDraft.aligned }));
     else {
       const r = Math.hypot(b[0] - dr.a[0], b[1] - dr.a[1]);
       previewPrims.push(...detailCirclePrims(draftView, pr, { c: dr.a, r, letter }));
@@ -1426,7 +1433,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
             : tool === 'breakout'
               ? t(!breakDraft ? 'Local section: click points round the area on a view.' : 'Click more points; the first point (or Enter) closes the outline. Esc — cancel.')
             : tool === 'section'
-              ? t(!viewDraft ? 'Section view: click the start of the cutting line on a view.' : !viewDraft.b ? 'Click the end of the cutting line.' : 'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section). Esc — cancel.')
+              ? t(!viewDraft ? 'Section view: click the start of the cutting line on a view.' : !viewDraft.b ? 'Click the end of the cutting line.' : 'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section), Alt+click — a bend at any angle (an aligned section). Esc — cancel.')
               : tool === 'detail'
                 ? t(!viewDraft ? 'Detail view: click the centre of the circle on a view.' : !viewDraft.b ? 'Click to set the circle’s radius.' : 'Click where to place the detail view. Esc — cancel.')
                 : t('Drag views to move. Wheel to zoom, right/middle drag to pan.')}

@@ -136,7 +136,12 @@ export interface ContextMenuState {
   x: number;
   y: number;
   items: ContextMenuItem[];
-  palette?: { colors: string[]; onPick: (color: string) => void };
+  palette?: {
+    colors: string[];
+    onPick: (color: string) => void;
+    /** Opacity 0.1…1 under the colours (a part's appearance). */
+    opacity?: { value: number; onChange: (v: number) => void };
+  };
 }
 
 export interface EditorState {

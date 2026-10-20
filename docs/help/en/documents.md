@@ -21,6 +21,7 @@ The **Documents** page opens when you start WebCAD and when you click the ◆ lo
 | Move to trash | **Move to trash** in the document menu. The document leaves the list and can be restored — right away too, with **Restore** in the notice in the middle of the header (it closes with its cross or by itself after a few seconds). |
 | Import project | The **Import project** button opens a `.webcad.json` file as a new document. |
 | Folder on this computer | Documents as files of a folder, saved by themselves (Chrome, Edge), see [below](#folder). |
+| Language | The **RU \| EN** switch on the right of the header; the choice is kept in the browser and the page reloads. Until you choose, WebCAD takes the language from the browser's languages (Russian or English; any other gives English). |
 
 The thumbnail updates while the document is open and when you return to the document list.
 
@@ -54,7 +55,7 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 You can save the whole document (all tabs, feature history, settings, [versions](versions#file)) to a file and open it in another browser or on another computer:
 
-1. In the open document, click **Export** at the top right and choose the **WebCAD project (.webcad.json)** format. A `<name>.webcad.json` file downloads.
+1. In the open document, click **Export** at the top right, choose the **WebCAD project** tab at the top of the dialog, and click **Export**. A `<name>.webcad.json` file downloads.
 2. On the **Documents** page, click **Import project** and select that file.
 
 > **Tip.** Project files are an easy way to make a backup: documents are stored only in this browser, see [Offline use and storage](offline). To have the files kept up to date by themselves, work in a [folder on your computer](#folder).

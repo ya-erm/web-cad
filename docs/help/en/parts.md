@@ -33,8 +33,9 @@ Right-click a part in the list:
 | **Export part** | Opens the export dialog for this part only, see [Import and export](import-export). |
 | **Delete part** | Adds a [Delete part](delete-part) feature to the history. |
 | **Change color** | A palette of 20 colors and **Custom color…** for any color. |
+| **Opacity** | The slider under the palette, 10–100 %: a see-through part shows what is inside and behind it. Dragging it is one undo step; mass and export are not affected. |
 
-Color, name, and visibility are stored in the document. The color is preserved when you export to 3MF.
+Color, opacity, name, and visibility are stored in the document. The color is preserved when you export to 3MF.
 
 You can also hide a part from the graphics area: right-click one of its faces or edges → **Hide**.
 

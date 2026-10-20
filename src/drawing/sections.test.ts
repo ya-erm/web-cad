@@ -176,6 +176,41 @@ describe('Section views of a model (OpenCascade)', () => {
     expect(local.edges.some((e) => e.pts.every((p) => Math.abs(p[0] + 5) < 1e-6))).toBe(false);
   }, 60000);
 
+  it('makes an aligned section: the part beyond the bend turned into the plane of the first segment', async () => {
+    await initOpenCascade(wasm);
+    const doc = emptyDocument('Aligned section');
+    const k = nodeKernel(doc.units);
+    // a flange ⌀80 × 10: a centre hole ⌀20, holes ⌀10 at 0° and 120° on a ⌀60 circle
+    const top = { face: { normal: 'z', pick: '+z' } };
+    const at120: Vec2 = [30 * Math.cos((2 * Math.PI) / 3), 30 * Math.sin((2 * Math.PI) / 3)];
+    const { report } = await runOps(doc.tabs[0] as PartStudioTab, doc.units, [
+      { op: 'sketch', shapes: [{ type: 'circle', c: [0, 0], r: 40 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'sketch', name: 'C', plane: top, shapes: [{ type: 'point', at: [0, 0] }] },
+      { op: 'hole', sketch: 'C', diameter: 20, through: true },
+      { op: 'sketch', name: 'P', plane: top, shapes: [{ type: 'point', at: [30, 0] }, { type: 'point', at: at120 }] },
+      { op: 'hole', sketch: 'P', diameter: 10, through: true },
+    ] as DocumentOp[] as never, k);
+    expect(report.failed).toEqual([]);
+    // from the right through the 0° hole to the centre, then out through the 120° one
+    const s = { a: [50, 0] as Vec2, b: [0, 0] as Vec2, steps: [[50 * Math.cos((2 * Math.PI) / 3), 50 * Math.sin((2 * Math.PI) / 3)]] as Vec2[], side: 1 as const, letter: 'A', aligned: true };
+    const { axes, cut } = sectionCut(VIEW_AXES.top, s);
+    expect(cut.aligned).toBe(true);
+    const res = k.builder.projection([], 'top', false, { axes, section: cut });
+    const spans = res.sections!.map((f) => {
+      const xs = f.edges.flat().map((p) => p[0]);
+      return [Math.min(...xs), Math.max(...xs)].map((v) => Math.round(v * 1e4) / 1e4 + 0);
+    });
+    // the 120° hole turned to x = −30: the two halves alike
+    expect(spans.sort((p, q) => p[0] - q[0])).toEqual([[-40, -35], [-25, -10], [10, 25], [35, 40]]);
+    // the outline is whole: the centre hole's far wall is seen right across (−10 … 10), no seam where the pieces meet
+    const upper = Math.max(...res.edges.flatMap((e) => e.pts.map((p) => p[1])));
+    const covers = (x: number) =>
+      res.edges.some((e) => !e.hidden && e.pts.every((p) => Math.abs(p[1] - upper) < 1e-6) && Math.min(...e.pts.map((p) => p[0])) <= x + 1e-6 && Math.max(...e.pts.map((p) => p[0])) >= x - 1e-6);
+    expect([-9, -1, 0, 1, 9].every(covers)).toBe(true);
+    expect(res.edges.some((e) => e.pts.every((p) => Math.abs(p[0]) < 1e-6))).toBe(false);
+  }, 60000);
+
   it('turns an offset line along or across its first segment', () => {
     expect(stepPoint([0, 0], [10, 0], [10, 0], [12, 9])).toEqual([10, 9]);
     expect(stepPoint([0, 0], [10, 0], [10, 9], [30, 10])).toEqual([30, 9]);

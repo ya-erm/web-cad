@@ -3,6 +3,16 @@
 
 export type Lang = 'ru' | 'en';
 
+/** The first of the browser's preferred languages (its Accept-Language) that WebCAD has; English otherwise. */
+export function browserLang(prefs: readonly string[] = typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])): Lang {
+  for (const p of prefs) {
+    const base = (p ?? '').toLowerCase().split(/[-_]/)[0];
+    if (base === 'ru' || base === 'en') return base;
+  }
+  return 'en';
+}
+
+// a language chosen in the app is kept; until then it follows the browser
 let lang: Lang = ((): Lang => {
   try {
     const saved = localStorage.getItem('webcad.lang');
@@ -10,7 +20,7 @@ let lang: Lang = ((): Lang => {
   } catch {
     /* ignore */
   }
-  return 'ru';
+  return browserLang();
 })();
 
 export function getLang(): Lang {
@@ -149,6 +159,8 @@ const RU: Record<string, string> = {
     'Конфигурация задаёт варианты модели: её варианты — строки таблицы, а параметры фич (размеры, флажки, отключение фичи, переменные) — столбцы.',
   'Drag to move; double-click to put it back next to its button': 'Перетащите, чтобы переместить; двойной щелчок — вернуть к кнопке',
   'WebCAD project (.webcad.json)': 'Проект WebCAD (.webcad.json)',
+  'WebCAD project': 'Проект WebCAD',
+  'Export project': 'Экспорт проекта',
   'The whole document — every tab with its feature history — to open again in WebCAD (Import project).':
     'Весь документ — все вкладки с историей фич — чтобы снова открыть его в WebCAD (Импорт проекта).',
   'Add folder…': 'Добавить папку…',
@@ -865,6 +877,7 @@ const RU: Record<string, string> = {
   'Select entities to fix': 'Выберите элементы для фиксации',
   'Hide planes': 'Скрыть плоскости',
   'Custom color…': 'Свой цвет…',
+  Opacity: 'Непрозрачность',
   Folder: 'Папка',
   'Click edges, faces, vertices or entities of other sketches to project them into this sketch.':
     'Щёлкайте рёбра, грани, вершины или элементы других эскизов, чтобы спроецировать их в этот эскиз.',
@@ -984,8 +997,8 @@ const RU: Record<string, string> = {
   'View letter': 'Буква',
   'Section view: click the start of the cutting line on a view.': 'Разрез: щёлкните начало секущей линии на виде.',
   'Click the end of the cutting line.': 'Щёлкните конец секущей линии.',
-  'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section). Esc — cancel.':
-    'Щёлкните, где разместить разрез (стрелки показывают направление взгляда); Shift+щелчок — ещё одна точка линии (ступенчатый разрез). Esc — отмена.',
+  'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section), Alt+click — a bend at any angle (an aligned section). Esc — cancel.':
+    'Щёлкните, где разместить разрез (стрелки показывают направление взгляда); Shift+щелчок — ещё точка линии (ступенчатый разрез), Alt+щелчок — излом под любым углом (ломаный разрез). Esc — отмена.',
   'Detail view: click the centre of the circle on a view.': 'Выносной элемент: щёлкните центр окружности на виде.',
   'Click to set the circle’s radius.': 'Щёлкните, чтобы задать радиус окружности.',
   'Click where to place the detail view. Esc — cancel.': 'Щёлкните, где разместить выносной элемент. Esc — отмена.',

@@ -7,7 +7,7 @@ import { folderSupported } from '../store/localFolder';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
 import { Icon } from './icons';
 import { ContextMenu } from './Overlays';
-import { AppSettingsButton } from './AppSettings';
+import { AppSettingsButton, LangSwitch } from './AppSettings';
 import { t, getLang } from '../i18n';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
@@ -429,6 +429,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           <Icon name="help" size={14} /> {t('Help')}
         </button>
         <AppSettingsButton />
+        <LangSwitch />
       </div>
       <div className="docs-body">
         <div className="docs-side">

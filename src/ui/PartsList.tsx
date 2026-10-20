@@ -99,7 +99,15 @@ export function PartsList() {
         x: e.clientX,
         y: e.clientY,
         items,
-        palette: { colors: COLOR_CHOICES, onPick: (color) => setPartMeta(id, { color }, `color-${id}`) },
+        palette: {
+          colors: COLOR_CHOICES,
+          onPick: (color) => setPartMeta(id, { color }, `color-${id}`),
+          // dragging the slider is one undo step; fully opaque leaves no value behind
+          opacity: {
+            value: studio?.parts[id]?.opacity ?? 1,
+            onChange: (v) => setPartMeta(id, { opacity: v >= 1 ? undefined : v }, `opacity-${id}`),
+          },
+        },
       },
     });
   };

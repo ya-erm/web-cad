@@ -62,5 +62,6 @@ The document saves automatically in this browser. A geometry file does not conta
 - `F1` in the editor opens help for the current sketch tool or the open feature dialog; otherwise it opens this page.
 - The **?** button in a feature dialog header opens the page for that feature; the **?** button in the top bar opens help for the current context.
 - Help opens in a new browser tab, works offline, and is available in Russian and English (the **RU / EN** switch at the top of the page).
+- The **WebCAD** logo in the help's header opens the documents list; the word **Help** next to it opens the first help page.
 - Search looks through the headings and text of all pages. Press `/` to move the cursor to the search field.
 - Click an illustration to open it at full size in a new tab. Diagram numbers are explained in the captions.

@@ -70,6 +70,8 @@ export function sectionCut(parent: ViewAxes, s: SectionLine): { axes: ViewAxes; 
   if (pts.length < 3) return { axes, cut: { origin, normal: axes.n } };
   const yp = v3.cross(parent.n, parent.x);
   const line = pts.map((p) => v3.add(v3.scale(parent.x, p[0]), v3.scale(yp, p[1])));
+  // an aligned section: a → b → c only
+  if (s.aligned) return { axes, cut: { origin, normal: axes.n, line: line.slice(0, 3), along: parent.n, aligned: true } };
   return { axes, cut: { origin, normal: axes.n, line, along: parent.n } };
 }
 

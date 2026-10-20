@@ -237,5 +237,6 @@ export default defineConfig({
   optimizeDeps: { exclude: ['replicad-opencascadejs'] },
   build: { target: 'es2022', chunkSizeWarningLimit: 4000 },
   // drafts in temp/ (copies of the project too) and other sessions' worktrees in .claude/ are not tested
-  test: { environment: 'node', exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', '.claude/**'] },
+  // the interface language follows the browser; tests expect Russian whatever Node reports
+  test: { environment: 'node', setupFiles: ['src/testSetup.ts'], exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', '.claude/**'] },
 } as never)

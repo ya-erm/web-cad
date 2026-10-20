@@ -165,9 +165,15 @@ export default function HelpPage() {
         <button className="icon-btn help-nav-toggle" title={s.contents} onClick={() => setNavOpen(!navOpen)}>
           <Icon name="layers" size={18} />
         </button>
-        <a className="brand help-brand" href={helpHash(lang, TOC.start)}>
-          <div className="brand-logo">◆</div> WebCAD <span className="help-brand-sub">{s.help}</span>
-        </a>
+        {/* the logo and the name: WebCAD itself; "Help": the help's start page */}
+        <span className="brand help-brand">
+          <a className="help-brand-app" href="#/" title={s.openApp}>
+            <div className="brand-logo">◆</div> WebCAD
+          </a>
+          <a className="help-brand-sub" href={helpHash(lang, TOC.start)}>
+            {s.help}
+          </a>
+        </span>
         <div className="help-search">
           <span className="search-icon">
             <Icon name="search" size={16} />
@@ -192,9 +198,6 @@ export default function HelpPage() {
             </a>
           ))}
         </div>
-        <a className="btn small" href="#/">
-          <Icon name="home" size={14} /> {s.openApp}
-        </a>
       </header>
       <div className="help-body">
         <nav className={'help-nav' + (navOpen ? ' open' : '')} ref={navRef} aria-label={s.contents}>

@@ -708,6 +708,8 @@ export type Feature = { [K in FeatureType]: FeatureOf<K> }[FeatureType];
 export interface PartMeta {
   name?: string;
   color?: string;
+  /** 0.1…1 (shown see-through below 1); none — opaque. */
+  opacity?: number;
   hidden?: boolean;
   /** g/cm^3 */
   density?: number;
@@ -749,6 +751,8 @@ export interface DrawingView {
     letter: string;
     /** An offset section: the cutting line's further points after `b` (segments along a → b cut, those across step). */
     steps?: Vec2[];
+    /** An aligned section: `steps` is one point at any angle; the part beyond `b` is turned into the plane of a → b. */
+    aligned?: boolean;
   };
   /**
    * A local (broken-out) section of this view: inside the closed `outline` (its view coordinates, mm) the parts are

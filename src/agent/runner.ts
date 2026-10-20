@@ -1254,6 +1254,11 @@ class Runner {
         const meta = { ...(this.s.parts[p.id] ?? {}) };
         if (op.name !== undefined) meta.name = op.name;
         if (op.color !== undefined) meta.color = op.color;
+        if (op.opacity !== undefined) {
+          if (!(op.opacity > 0 && op.opacity <= 1)) throw new AgentError('"opacity" is from 0.1 (almost clear) to 1 (opaque)');
+          if (op.opacity >= 1) delete meta.opacity;
+          else meta.opacity = Math.max(0.1, op.opacity);
+        }
         if (op.hidden !== undefined) meta.hidden = op.hidden;
         if (op.material === null) {
           delete meta.material;

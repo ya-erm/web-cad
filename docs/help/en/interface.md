@@ -40,9 +40,9 @@ The **Settings** menu in the top bar of a document (on the documents page — on
 |---|---|
 | **Units** | Document length units: mm, cm, m, in, ft. Numbers without units in fields and dimensions are interpreted in these units. |
 | **Rotation** | **Free rotation** rotates around the screen axes; **Turntable (Z up)** rotates around the Z axis and keeps the horizon level. The setting is remembered in the browser. |
-| **Language** | **Русский** or **English**. The page reloads. |
+| **Language** | **Русский** or **English**. The page reloads. Until you choose, the language comes from the browser's languages. The documents page and the help also switch it with the **RU \| EN** buttons in their header. |
 
-The whole document goes to a `.webcad.json` file with the **Export** button and the **WebCAD project** format. See [Documents and tabs](documents#project-files).
+The whole document goes to a `.webcad.json` file with the **Export** button and the **WebCAD project** tab. See [Documents and tabs](documents#project-files).
 
 ## Context menus {#context-menus}
 

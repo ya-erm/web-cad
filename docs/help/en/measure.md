@@ -13,7 +13,7 @@ width: 640
 
 | Selection | Values |
 |---|---|
-| Part | **Material**, **Volume**, **Surface area**, **Mass** (by its material's density), **Center of mass** (X, Y, Z) |
+| Part | **Material**, **Volume**, **Surface area**, **Mass** (by its material's density), **Center of mass** (X, Y, Z; while the cursor is on this row, the point is marked on the model with the center of mass symbol) |
 | Face | **Area**; for a cylindrical face, also **Radius** |
 | Edge | **Length**; for a circle or arc, also **Radius** and **Diameter** |
 | Vertex or origin | **X**, **Y**, **Z** coordinates |
