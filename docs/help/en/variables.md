@@ -50,7 +50,7 @@ Expressions work in any numeric field, in sketch dimensions, in sketch pattern p
 
 | What | Examples |
 |---|---|
-| Numbers | `10`, `2.5`, `.5`, `1e3` |
+| Numbers | `10`, `2.5` or `2,5`, `.5`, `1e3` |
 | Length units | `mm`, `cm`, `m`, `in`, `ft`, `yd`, `um` (also `millimeter`, `meter`, `inch`, `foot`) |
 | Angle units | `deg`, `rad`, `°` (also `degree`, `radian`) |
 | Operators | `+`, `-`, `*`, `/`, `^` (power), parentheses |
@@ -60,6 +60,7 @@ Expressions work in any numeric field, in sketch dimensions, in sketch pattern p
 
 Rules:
 
+- A decimal point or a decimal comma can be used: `2,5 mm` = `2.5 mm`. Inside `min`, `max`, and `atan2` the comma separates the arguments (`max(1,5)` is the larger of 1 and 5), so write a decimal there with a point or in its own parentheses: `max(2.5, #t)`, `max((2,5), #t)`.
 - A number without length units is interpreted in document units; an angle without units, in degrees.
 - You can add a unitless number to a value with units: `10 + 5 mm` = 15 mm.
 - You cannot add a length to an angle: `10 mm + 5 deg` gives the error "Mismatched units".

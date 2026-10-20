@@ -6,7 +6,8 @@ import { emptyDocument, initOpenCascade, nodeKernel } from '../agent/headless';
 import { runOps } from '../agent/runner';
 import type { PartStudioTab } from '../core/types';
 import type { ProjectedHole } from '../kernel/protocol';
-import { calloutLines, calloutText, dimPrims, type ProjectionData } from './sheet';
+import { calloutLines, calloutText, dimPrims, dimText, scaleLabel, sheetNumber, type ProjectionData } from './sheet';
+import { t } from '../i18n';
 
 const wasm = fileURLToPath(new URL('../../node_modules/replicad-opencascadejs/dist/replicad_single.wasm', import.meta.url));
 const en = (k: string) => k;
@@ -20,6 +21,19 @@ describe('Hole callout lines', () => {
     expect(calloutText(calloutLines(hole({ diameter: 6.6, csink: { diameter: 13, angle: 90 } }), 1, en))).toBe('Ø6.6 THRU\n⌵ Ø13 × 90°');
     // in inches
     expect(calloutText(calloutLines(hole({ diameter: 25.4, depth: 12.7 }), 25.4, en))).toBe('Ø1 ↧0.5');
+  });
+
+  it('writes the decimal comma when the drawing asks for it (ГОСТ 2.307), in callouts, dimensions and scales', () => {
+    expect(calloutText(calloutLines(hole({ diameter: 6.8, depth: 20, thread: { designation: 'M8', depth: 16 } }), 1, t, true))).toBe('M8 ↧16\nØ6,8 ↧20');
+    expect(calloutText(calloutLines(hole({ diameter: 9, cbore: { diameter: 15, depth: 8.6 } }, 4), 1, t, true))).toBe('4× Ø9 насквозь\n⌴ Ø15 ↧8,6');
+    // the language does not choose it: Russian words, the point
+    expect(calloutText(calloutLines(hole({ diameter: 6.8, depth: 20 }), 1, t))).toBe('Ø6.8 ↧20');
+    const d = { id: 'd', viewId: 'v', kind: 'diameter' as const, a: [0, 0] as [number, number], b: [3.25, 0] as [number, number], offset: 0 };
+    expect(dimText(d, 1, true)).toBe('Ø6,5');
+    expect(dimText(d, 1)).toBe('Ø6.5');
+    expect(scaleLabel(1 / 2.5, true)).toBe('1:2,5');
+    expect(scaleLabel(2.5)).toBe('2.5:1');
+    expect(sheetNumber(12, 2, true)).toBe('12');
   });
 
   it('draws the symbols as lines (no font has them all)', () => {

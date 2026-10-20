@@ -723,7 +723,7 @@ export interface PartMeta {
 // Drawings
 // ---------------------------------------------------------------------------
 
-export type ViewOrientation = 'front' | 'back' | 'top' | 'bottom' | 'left' | 'right' | 'iso';
+export type ViewOrientation = 'front' | 'back' | 'top' | 'bottom' | 'left' | 'right' | 'iso' | 'dimetric' | 'trimetric';
 
 export interface DrawingView {
   id: string;
@@ -740,6 +740,10 @@ export interface DrawingView {
   /** For projected views: the parent view they stay aligned with; for section and detail views — the view they are made from. */
   parent?: string;
   label?: string;
+  /** Where its label was dragged to, sheet mm from its place above the view (none — there). */
+  labelOffset?: Vec2;
+  /** A projected or section view placed freely (Onshape "Break alignment"): not kept on its line of projection, not following its parent. */
+  unaligned?: boolean;
   /**
    * A section view of the parent (Onshape "Section view"): the parts cut along the line `a` → `b` drawn on the parent
    * (its view coordinates, mm), seen across the line towards its `side` (1 — to the left of `a` → `b`).
@@ -776,6 +780,11 @@ export interface DrawingDimension {
   /** Label offset in sheet mm relative to the measured geometry. */
   offset: number;
   textPos?: Vec2;
+  /**
+   * What `a` and `b` stand for in the model — a vertex, or an edge circle (its centre; a diameter's, radius's or hole
+   * callout's `a`): the dimension follows the model through them. Without them (or when lost) — the points as stored.
+   */
+  refs?: { a?: SelRef; b?: SelRef };
 }
 
 export interface DrawingNote {
@@ -816,6 +825,8 @@ export interface DrawingData {
   scaleLabel?: string;
   /** First-angle (ISO/ГОСТ, default) or third-angle (ANSI) projection. */
   projection?: 'first' | 'third';
+  /** The decimal sign of the numbers on the sheet (dimensions, callouts, scales): the point (default) or the comma. */
+  decimal?: '.' | ',';
 }
 
 // ---------------------------------------------------------------------------

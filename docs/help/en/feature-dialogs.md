@@ -61,7 +61,7 @@ If you select geometry **before** starting a feature, it goes straight into the 
 You can enter a number or an expression in any numeric field:
 
 - `25`: in document units (in degrees for angles);
-- `25 mm`, `1.5 in`, `30 deg`;
+- `25 mm`, `1.5 in` or `1,5 in` (a decimal point or comma), `30 deg`;
 - `#width / 2 + 1 mm`: with [variables](variables).
 
 An invalid expression is highlighted in red and is not applied. Hover over the field to see the evaluated value. After `#`, a list of [variables](variables#use) appears under the field — pick one with the arrows and `Enter`.

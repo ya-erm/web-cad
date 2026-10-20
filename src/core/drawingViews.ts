@@ -10,6 +10,9 @@ export interface ViewAxes {
   x: Vec3;
 }
 
+/** A pictorial view looked at from `dir` (towards the viewer), Z up on the sheet. */
+const pictorial = (dir: Vec3): ViewAxes => ({ n: v3.norm(dir), x: v3.norm(v3.cross([0, 0, 1], dir)) });
+
 export const VIEW_AXES: Record<ViewOrientation, ViewAxes> = {
   front: { n: [0, -1, 0], x: [1, 0, 0] },
   back: { n: [0, 1, 0], x: [-1, 0, 0] },
@@ -17,8 +20,15 @@ export const VIEW_AXES: Record<ViewOrientation, ViewAxes> = {
   bottom: { n: [0, 0, -1], x: [1, 0, 0] },
   right: { n: [1, 0, 0], x: [0, 1, 0] },
   left: { n: [-1, 0, 0], x: [0, -1, 0] },
-  iso: { n: v3.norm([1, -1, 1]), x: v3.norm([1, 1, 0]) },
+  iso: pictorial([1, -1, 1]),
+  // ISO 5456-3 / ГОСТ 2.317: X and Z shortened alike (0.94), Y by half (0.47); X at 7°, Y at 41° to the horizontal
+  dimetric: pictorial([1, -Math.sqrt(7), 1]),
+  // as the Trimetric view of the graphics area
+  trimetric: pictorial([0.6, -1.4, 0.9]),
 };
+
+/** An axonometric view (isometric, dimetric, trimetric): no sections from it, not the sheet's scale. */
+export const isPictorial = (o: ViewOrientation) => o === 'iso' || o === 'dimetric' || o === 'trimetric';
 
 export type SectionLine = NonNullable<DrawingView['section']>;
 

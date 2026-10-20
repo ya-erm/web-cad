@@ -20,6 +20,13 @@ describe('stepExpression', () => {
     expect(stepExpression('0.3 mm', -1, 0.1)).toBe('0.2 mm');
   });
 
+  it('keeps a decimal comma', () => {
+    expect(stepExpression('1,5 mm', 1)).toBe('2,5 mm');
+    expect(stepExpression('0,5', 1)).toBe('0,6');
+    expect(stepExpression('2,5 mm', -1, 0.1)).toBe('2,4 mm');
+    expect(stepExpression('0,1', -1)).toBe('0');
+  });
+
   it('leaves expressions alone', () => {
     expect(stepExpression('#w / 2', 1)).toBeNull();
     expect(stepExpression('10 mm + 2 mm', 1)).toBeNull();

@@ -20,9 +20,15 @@ export const SHEETS: Record<DrawingData['sheet'], [number, number]> = {
 
 export const STD_SCALES = [10, 5, 4, 2, 1, 1 / 2, 1 / 2.5, 1 / 4, 1 / 5, 1 / 10, 1 / 20, 1 / 25, 1 / 50, 1 / 100, 1 / 200, 1 / 500, 1 / 1000];
 
-export function scaleLabel(s: number): string {
-  if (s >= 1) return `${formatNumber(s, 2)}:1`;
-  return `1:${formatNumber(1 / s, 2)}`;
+/** A number written on the sheet: with the decimal point, or the comma (`comma`: the drawing's choice, ГОСТ 2.307). */
+export function sheetNumber(v: number, digits: number, comma = false): string {
+  const s = formatNumber(v, digits);
+  return comma ? s.replace('.', ',') : s;
+}
+
+export function scaleLabel(s: number, comma = false): string {
+  if (s >= 1) return `${sheetNumber(s, 2, comma)}:1`;
+  return `1:${sheetNumber(1 / s, 2, comma)}`;
 }
 
 export function sheetSize(d: DrawingData): [number, number] {
@@ -156,13 +162,15 @@ export const VIEW_NAMES: Record<ViewOrientation, string> = {
   left: 'Left',
   right: 'Right',
   iso: 'Isometric',
+  dimetric: 'Dimetric',
+  trimetric: 'Trimetric',
 };
 
 /**
  * A view's lines on the sheet: its edges, centre marks, hatched section faces, the cutting lines and detail circles of
  * the views made from it (`views` — all the drawing's), its label; a detail view — cut to its circle.
  */
-export function viewPrims(v: DrawingView, proj: ProjectionData | undefined, views: DrawingView[] = []): Prim2D[] {
+export function viewPrims(v: DrawingView, proj: ProjectionData | undefined, views: DrawingView[] = [], comma = false): Prim2D[] {
   if (!proj) return [];
   const out: Prim2D[] = [];
   for (const e of proj.edges) {
@@ -203,13 +211,19 @@ export function viewPrims(v: DrawingView, proj: ProjectionData | undefined, view
   }
   const res = v.detail ? clipToCircle(out, [v.x, v.y], v.detail.r * v.scale) : out;
   if (v.detail) res.push({ t: 'circle', c: [v.x, v.y], r: v.detail.r * v.scale, style: 'thin' });
-  const derived = derivedViewLabel(v, scaleLabel(v.scale));
-  const label = v.label || derived;
-  if (label) {
-    const r = viewRect(v, proj);
-    res.push({ t: 'text', p: [(r.x0 + r.x1) / 2, r.y1 + 3], text: label, h: derived ? LETTER_H : 3.5, align: 'center', style: 'thin' });
-  }
+  const label = viewLabel(v, proj, comma);
+  if (label) res.push({ t: 'text', p: label.p, text: label.text, h: label.h, align: 'center', style: 'thin' });
   return res;
+}
+
+/** A view's label: its own text, or a section's / detail's ("А–А", "Б (4:1)"); centred above the view or where it was dragged. */
+export function viewLabel(v: DrawingView, proj: ProjectionData | undefined, comma = false): { text: string; p: Vec2; h: number } | null {
+  const derived = derivedViewLabel(v, scaleLabel(v.scale, comma));
+  const text = v.label || derived;
+  if (!text) return null;
+  const r = viewRect(v, proj);
+  const [dx, dy] = v.labelOffset ?? [0, 0];
+  return { text, p: [(r.x0 + r.x1) / 2 + dx, r.y1 + 3 + dy], h: derived ? LETTER_H : 3.5 };
 }
 
 /** Hatch spacing on the sheet, mm. */
@@ -405,9 +419,9 @@ export function measureDim(d: DrawingDimension): number {
   return Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
 }
 
-export function dimText(d: DrawingDimension, unitFactor: number): string {
+export function dimText(d: DrawingDimension, unitFactor: number, comma = false): string {
   const v = measureDim(d) / unitFactor;
-  const s = formatNumber(v, 2);
+  const s = sheetNumber(v, 2, comma);
   if (d.kind === 'diameter') return `Ø${s}`;
   if (d.kind === 'radius') return `R${s}`;
   return s;
@@ -425,9 +439,9 @@ export function calloutHole(proj: ProjectionData | undefined, a: Vec2): Projecte
   return proj?.holes?.find((h) => Math.hypot(h.c[0] - a[0], h.c[1] - a[1]) < 1e-3);
 }
 
-/** A callout's lines: "4× M8 ↧16" / "Ø6.8 ↧20", "Ø9 THRU" / "⌴ Ø15 ↧8.6", "⌵ Ø18 × 90°". */
-export function calloutLines(h: ProjectedHole, unitFactor: number, translate: (key: string) => string = t): CalloutToken[][] {
-  const n = (mm: number) => formatNumber(mm / unitFactor, 2);
+/** A callout's lines: "4× M8 ↧16" / "Ø6.8 ↧20", "Ø9 THRU" / "⌴ Ø15 ↧8.6", "⌵ Ø18 × 90°" (`comma`: "Ø6,8"). */
+export function calloutLines(h: ProjectedHole, unitFactor: number, translate: (key: string) => string = t, comma = false): CalloutToken[][] {
+  const n = (mm: number) => sheetNumber(mm / unitFactor, 2, comma);
   const c = h.callout;
   const count = h.count > 1 ? `${h.count}× ` : '';
   const depth = (mm: number | undefined): CalloutToken[] => (mm === undefined ? [` ${translate('THRU')}`] : [' ', { sym: 'depth' }, n(mm)]);
@@ -437,7 +451,7 @@ export function calloutLines(h: ProjectedHole, unitFactor: number, translate: (k
     lines.push([`Ø${n(c.diameter)}`, ...depth(c.depth)]);
   } else lines.push([`${count}Ø${n(c.diameter)}`, ...depth(c.depth)]);
   if (c.cbore) lines.push([{ sym: 'cbore' }, ` Ø${n(c.cbore.diameter)} `, { sym: 'depth' }, n(c.cbore.depth)]);
-  if (c.csink) lines.push([{ sym: 'csink' }, ` Ø${n(c.csink.diameter)} × ${formatNumber(c.csink.angle, 1)}°`]);
+  if (c.csink) lines.push([{ sym: 'csink' }, ` Ø${n(c.csink.diameter)} × ${sheetNumber(c.csink.angle, 1, comma)}°`]);
   return lines;
 }
 
@@ -464,11 +478,11 @@ function symbolPrims(sym: 'depth' | 'cbore' | 'csink', x: number, y: number, h: 
  * A hole callout: a leader with an arrow at the hole's outer circle, a shelf at `textPos` and the lines above it
  * (to its right or, placed left of the hole, to its left).
  */
-function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined, unitFactor: number, translate: (key: string) => string): Prim2D[] {
+function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined, unitFactor: number, translate: (key: string) => string, comma: boolean): Prim2D[] {
   const A = toSheet(v, proj, d.a);
   const T = d.textPos ?? [A[0] + 15, A[1] + 15];
   const hole = calloutHole(proj, d.a);
-  const lines: CalloutToken[][] = hole ? calloutLines(hole, unitFactor, translate) : [['?']];
+  const lines: CalloutToken[][] = hole ? calloutLines(hole, unitFactor, translate, comma) : [['?']];
   const r = (hole?.r ?? 0) * v.scale;
   const u = norm([T[0] - A[0], T[1] - A[1]]);
   const P: Vec2 = [A[0] + u[0] * r, A[1] + u[1] * r];
@@ -499,11 +513,18 @@ function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData 
 }
 
 /** Dimension primitives in sheet coordinates. For radius/diameter `a` is the centre and `b` a point on the circle. */
-export function dimPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined, unitFactor: number, translate: (key: string) => string = t): Prim2D[] {
-  if (d.kind === 'hole') return calloutPrims(d, v, proj, unitFactor, translate);
+export function dimPrims(
+  d: DrawingDimension,
+  v: DrawingView,
+  proj: ProjectionData | undefined,
+  unitFactor: number,
+  translate: (key: string) => string = t,
+  comma = false,
+): Prim2D[] {
+  if (d.kind === 'hole') return calloutPrims(d, v, proj, unitFactor, translate, comma);
   const out: Prim2D[] = [];
   const A = toSheet(v, proj, d.a);
-  const text = dimText(d, unitFactor);
+  const text = dimText(d, unitFactor, comma);
   if (d.kind === 'radius' || d.kind === 'diameter') {
     if (!d.b) return out;
     const B = toSheet(v, proj, d.b);

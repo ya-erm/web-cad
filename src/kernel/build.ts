@@ -5,10 +5,10 @@ import * as R from 'replicad';
 import type { EvalContext } from '../core/expr';
 import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
 import { perpendicular as perpendicularTo, v3 } from '../core/math';
-import { FeatureError, compoundOf, isSurface, prism, type Shape3D } from './geom';
+import { FeatureError, bboxOf, compoundOf, isSurface, prism, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
-import { exportMesh, meshPart } from './meshing';
+import { exportMesh, meshPart, topologyOf } from './meshing';
 import type {
   BuildRequest,
   BuildResult,
@@ -30,7 +30,8 @@ import type {
 import { VIEW_AXES, type ViewAxes } from '../core/drawingViews';
 import { halfSpace } from './faceOps';
 import { trackFaceOrigins } from './faceOrigins';
-import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint } from './refs';
+import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint, resolveVertex } from './refs';
+import { edgeSig, vertexSig } from './sigs';
 import { angleBetween, centerDistance, maxDistance, type Center, type Direction } from './measure';
 import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
 import type { SelRef } from '../core/types';
@@ -419,6 +420,62 @@ export class StudioBuilder {
       items.push({ label: 'Total volume', value: vol, kind: 'volume' });
     }
     return { items, points, lines, volumes, centerOfMass };
+  }
+
+  /**
+   * What a point of a drawing view stands for in the model (a dimension's anchor, so it follows the model): of the parts
+   * shown, the vertex projecting to `p` nearest the viewer — or, with `circle`, an edge circle seen end-on centred at `p`
+   * (of radius `circle.r` when given). A circle's centre is the anchor of a point that is no vertex too.
+   */
+  viewAnchor(partIds: string[], axes: ViewAxes, p: Vec2, circle?: { r?: number }): SelRef | null {
+    const st = this.current;
+    const { n, x } = axes;
+    const y = v3.cross(n, x);
+    const P = (q: Vec3): Vec2 => [v3.dot(q, x), v3.dot(q, y)];
+    const near = (q: Vec3) => {
+      const s = P(q);
+      return Math.hypot(s[0] - p[0], s[1] - p[1]) < 0.01;
+    };
+    let vertex: { ref: SelRef; depth: number } | null = null;
+    let ring: { ref: SelRef; depth: number } | null = null;
+    for (const it of this.shapesFor(partIds)) {
+      const part = st.parts.get(it.id);
+      if (!part) continue;
+      const topo = topologyOf(part.shape);
+      const bbox = bboxOf(part.shape);
+      if (!circle)
+        topo.vertices.forEach((v, i) => {
+          const depth = v3.dot(v, n);
+          if (near(v) && (!vertex || depth > vertex.depth)) vertex = { ref: { kind: 'vertex', partId: it.id, index: i, sig: vertexSig(v, bbox) }, depth };
+        });
+      topo.edgeInfo.forEach((e, i) => {
+        if (!e.circleCenter || !e.axis || Math.abs(v3.dot(e.axis, n)) < 1 - 1e-6 || !near(e.circleCenter)) return;
+        if (circle?.r !== undefined && Math.abs((e.radius ?? 0) - circle.r) > 0.01) return;
+        const depth = v3.dot(e.circleCenter, n);
+        if (!ring || depth > ring.depth) ring = { ref: { kind: 'edge', partId: it.id, index: i, sig: edgeSig(e, bbox) }, depth };
+      });
+    }
+    return (vertex as { ref: SelRef } | null)?.ref ?? (ring as { ref: SelRef } | null)?.ref ?? null;
+  }
+
+  /** Where references (`viewAnchor`'s) are in a view now: a vertex, a circle's centre with its radius; null — gone. */
+  viewRefs(axes: ViewAxes, refs: SelRef[]): ({ p: Vec2; r?: number } | null)[] {
+    const st = this.current;
+    const { n, x } = axes;
+    const y = v3.cross(n, x);
+    const P = (q: Vec3): Vec2 => [v3.dot(q, x), v3.dot(q, y)];
+    return refs.map((ref) => {
+      try {
+        if (ref.kind === 'vertex') return { p: P(resolveVertex(st, ref)) };
+        if (ref.kind === 'edge') {
+          const { info } = resolveEdge(st, ref);
+          return { p: P(info.circleCenter ?? info.center), ...(info.radius !== undefined ? { r: info.radius } : {}) };
+        }
+      } catch {
+        // the model no longer has it
+      }
+      return null;
+    });
   }
 
   projection(

@@ -359,12 +359,53 @@ export interface ProjectionResult {
   breaks?: Vec2[][];
 }
 
+/** The model vertex or circle a point of a drawing view stands for (a dimension's anchor). */
+export interface ViewAnchorRequest {
+  type: 'viewAnchor';
+  reqId: number;
+  studioKey: string;
+  partIds: string[];
+  axes: { n: Vec3; x: Vec3 };
+  p: Vec2;
+  /** An edge circle seen end-on centred at `p` (of radius `r` when given) instead of a vertex. */
+  circle?: { r?: number };
+}
+
+export interface ViewAnchorResult {
+  type: 'viewAnchor';
+  reqId: number;
+  ref: SelRef | null;
+}
+
+/** Where anchors are in a view now (the model may have changed): a point, a circle's radius; null — gone. */
+export interface ViewRefsRequest {
+  type: 'viewRefs';
+  reqId: number;
+  studioKey: string;
+  axes: { n: Vec3; x: Vec3 };
+  refs: SelRef[];
+}
+
+export interface ViewRefsResult {
+  type: 'viewRefs';
+  reqId: number;
+  points: ({ p: Vec2; r?: number } | null)[];
+}
+
 export interface PingRequest {
   type: 'ping';
   reqId: number;
 }
 
-export type WorkerRequest = (BuildRequest & { studioKey: string }) | ExportRequest | MeshRequest | MeasureRequest | ProjectionRequest | PingRequest;
+export type WorkerRequest =
+  | (BuildRequest & { studioKey: string })
+  | ExportRequest
+  | MeshRequest
+  | MeasureRequest
+  | ProjectionRequest
+  | ViewAnchorRequest
+  | ViewRefsRequest
+  | PingRequest;
 
 export type WorkerResponse =
   | BuildResult
@@ -372,6 +413,8 @@ export type WorkerResponse =
   | MeshResult
   | MeasureResult
   | ProjectionResult
+  | ViewAnchorResult
+  | ViewRefsResult
   | { type: 'ping'; reqId: number }
   | { type: 'error'; reqId: number; message: string }
   | { type: 'ready' }

@@ -11,6 +11,10 @@ import type {
   MeshResult,
   ProjectionRequest,
   ProjectionResult,
+  ViewAnchorRequest,
+  ViewAnchorResult,
+  ViewRefsRequest,
+  ViewRefsResult,
   WorkerRequest,
   WorkerResponse,
 } from './protocol';
@@ -83,6 +87,14 @@ class KernelClient {
 
   projection(req: Omitted<ProjectionRequest>): Promise<ProjectionResult> {
     return this.send<ProjectionResult>({ ...req, type: 'projection' } as never);
+  }
+
+  viewAnchor(req: Omitted<ViewAnchorRequest>): Promise<ViewAnchorResult> {
+    return this.send<ViewAnchorResult>({ ...req, type: 'viewAnchor' } as never);
+  }
+
+  viewRefs(req: Omitted<ViewRefsRequest>): Promise<ViewRefsResult> {
+    return this.send<ViewRefsResult>({ ...req, type: 'viewRefs' } as never);
   }
 }
 

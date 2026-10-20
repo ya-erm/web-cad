@@ -9,6 +9,7 @@ import type { DocumentOp } from '../agent/document';
 import type { DrawingView, PartStudioTab, Vec2, Vec3 } from '../core/types';
 import { nextViewLetter, sectionCut, sectionPlane, stepPoint, VIEW_AXES, viewAxes } from '../core/drawingViews';
 import { threadLines } from '../kernel/build';
+import { v3 } from '../core/math';
 import { clipPolyline, clipToCircle, hatchLines, viewPrims, type ProjectionData } from './sheet';
 
 const wasm = fileURLToPath(new URL('../../node_modules/replicad-opencascadejs/dist/replicad_single.wasm', import.meta.url));
@@ -41,6 +42,21 @@ describe('Section view axes', () => {
     expect(viewAxes(det, views)).toEqual(viewAxes(sec, views));
     // the parent gone: as its own orientation
     expect(viewAxes(det, [det])).toEqual(VIEW_AXES.front);
+  });
+
+  it('sees pictorial views with Z up; the dimetric one shortens X and Z alike, Y by half (ISO 5456-3)', () => {
+    for (const o of ['iso', 'dimetric', 'trimetric'] as const) {
+      const { n, x } = VIEW_AXES[o];
+      expect(v3.dot(n, x)).toBeCloseTo(0, 12);
+      expect(x[2]).toBeCloseTo(0, 12);
+      // Z points up the sheet
+      expect(v3.cross(n, x)[2]).toBeGreaterThan(0);
+    }
+    const { n } = VIEW_AXES.dimetric;
+    const shortening = (axis: number) => Math.sqrt(1 - n[axis] ** 2);
+    expect(shortening(0)).toBeCloseTo(0.943, 3);
+    expect(shortening(2)).toBeCloseTo(0.943, 3);
+    expect(shortening(1)).toBeCloseTo(0.471, 3);
   });
 
   it('gives the letters in order, skipping the ones standards leave out', () => {

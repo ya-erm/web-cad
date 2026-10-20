@@ -1,5 +1,7 @@
 // Expression evaluator with units, used for every numeric field (Onshape style):
 //   "25", "25 mm", "1 in + 3 mm", "#width / 2", "30 deg", "sqrt(#a^2 + #b^2)".
+// A decimal comma is read as well as the point ("2,5 mm"), except right inside min / max / atan2 where the comma parts
+// the arguments ("max(1,5)" — of 1 and 5; "max((2,5), 3)" or "max(2.5, 3)" for a decimal there).
 // Quantities carry a length exponent and an angle exponent so units are checked loosely.
 
 import type { AngleUnit, LengthUnit } from './types';
@@ -48,8 +50,13 @@ type Token =
   | { t: 'var'; v: string }
   | { t: 'op'; v: string };
 
+/** Functions of several arguments: right inside their brackets a comma parts the arguments, not a number's digits. */
+const LIST_FUNCS = new Set(['min', 'max', 'atan2']);
+
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
+  // for each open bracket: whether it holds the arguments of a function of several
+  const brackets: boolean[] = [];
   let i = 0;
   while (i < src.length) {
     const ch = src[i];
@@ -58,9 +65,10 @@ function tokenize(src: string): Token[] {
       continue;
     }
     if (/[0-9.]/.test(ch)) {
-      const m = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(src.slice(i));
+      const list = brackets[brackets.length - 1] === true;
+      const m = (list ? /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i : /^(\d+,\d+|\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i).exec(src.slice(i));
       if (!m) throw new ExprError(`Bad number near "${src.slice(i)}"`);
-      out.push({ t: 'num', v: parseFloat(m[0]) });
+      out.push({ t: 'num', v: parseFloat(m[0].replace(',', '.')) });
       i += m[0].length;
       continue;
     }
@@ -78,6 +86,10 @@ function tokenize(src: string): Token[] {
       continue;
     }
     if ('+-*/^(),'.includes(ch)) {
+      if (ch === '(') {
+        const prev = out[out.length - 1];
+        brackets.push(prev?.t === 'id' && LIST_FUNCS.has(prev.v));
+      } else if (ch === ')') brackets.pop();
       out.push({ t: 'op', v: ch });
       i++;
       continue;
@@ -289,6 +301,12 @@ export function tryEvaluate(src: string, kind: ValueKind, ctx: EvalContext): num
 /** Variable definition: keeps the dimension of the expression; bare numbers stay unitless. */
 export function evaluateVariable(src: string, vars: VariableTable): Quantity {
   return parseExpression(src, vars);
+}
+
+/** A plain number typed with a decimal comma or point ("2,5", "2.5"); NaN when empty or not a number. */
+export function parseDecimal(s: string): number {
+  const t = s.trim().replace(',', '.');
+  return t ? Number(t) : NaN;
 }
 
 export function formatNumber(v: number, digits = 3): string {

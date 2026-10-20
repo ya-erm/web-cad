@@ -96,6 +96,12 @@ async function handle(req: WorkerRequest) {
       post({ type: 'projection', reqId: req.reqId, ...r });
       return;
     }
+    case 'viewAnchor':
+      post({ type: 'viewAnchor', reqId: req.reqId, ref: builderFor(req.studioKey).viewAnchor(req.partIds, req.axes, req.p, req.circle) });
+      return;
+    case 'viewRefs':
+      post({ type: 'viewRefs', reqId: req.reqId, points: builderFor(req.studioKey).viewRefs(req.axes, req.refs) });
+      return;
   }
 }
 
