@@ -1202,6 +1202,52 @@ const ICONS = {
       <path d="M14.5 5.5 H21.5" strokeWidth={1.75} />
     </>
   ),
+  // a drawing's angle dimension: two lines from a vertex, the arc between them with its arrows
+  angleDimension: (
+    <>
+      <path d="M3.5 20.5 H21 M3.5 20.5 L14.5 4.5" />
+      <path d="M15 20.5 A11.5 11.5 0 0 0 10 11" stroke={BLUE} {...THIN} />
+      <polygon points="15,20.5 13.6,17.6 15.9,17.3" fill={BLUE} stroke="none" />
+      <polygon points="10,11 13,11.9 11.9,13.5" fill={BLUE} stroke="none" />
+    </>
+  ),
+  // a drawing's chain dimensions: three in a row on one line
+  chainDimension: (
+    <>
+      <path d="M3 20 V8 M9 20 V8 M15 20 V8 M21 20 V8" {...THIN} />
+      <path d="M3 11 H21" stroke={BLUE} {...THIN} />
+      <polygon points="3,11 5.6,9.9 5.6,12.1" fill={BLUE} stroke="none" />
+      <polygon points="21,11 18.4,9.9 18.4,12.1" fill={BLUE} stroke="none" />
+      <path d="M9 9.6 V12.4 M15 9.6 V12.4" stroke={BLUE} strokeWidth={1.75} />
+    </>
+  ),
+  // a drawing's baseline dimensions: all from one point, each a line further out
+  baselineDimension: (
+    <>
+      <path d="M3 21 V3 M11 21 V15 M21 21 V7" {...THIN} />
+      <path d="M3 17.5 H11 M3 10 H21" stroke={BLUE} {...THIN} />
+      <polygon points="11,17.5 8.4,16.4 8.4,18.6" fill={BLUE} stroke="none" />
+      <polygon points="21,10 18.4,8.9 18.4,11.1" fill={BLUE} stroke="none" />
+    </>
+  ),
+  // a drawing's ordinate dimensions: points of an edge, their lines up to one line of values, the base "0"
+  ordinateDimension: (
+    <>
+      <path d="M3 20.5 H21" />
+      <path d="M5 18.5 V8.5 M12 18.5 V8.5 M19 18.5 V8.5" stroke={BLUE} {...THIN} />
+      <circle cx={5} cy={4.75} r={1.6} {...THIN} />
+      <path d="M12 3 V6.5 M19 3 V6.5" strokeWidth={1.75} />
+    </>
+  ),
+  // a drawing's centre line and centre mark: the outline of a bore seen from the side, its axis; a circle's centre
+  centerline: (
+    <>
+      <path d="M3 8.5 H14 M3 15.5 H14" />
+      <path d="M1.5 12 H5 M7 12 H9 M11 12 H15.5" stroke={BLUE} {...THIN} />
+      <circle cx={19} cy={12} r={3.5} {...THIN} />
+      <path d="M19 6.5 V9 M19 11 V13 M19 15 V17.5" stroke={BLUE} {...THIN} />
+    </>
+  ),
   // a drawing's detail view: a circle on a view, enlarged
   detailView: (
     <>

@@ -10,6 +10,7 @@ import type {
   Vec2,
   Vec3,
   ViewOrientation,
+  ViewRef,
 } from '../core/types';
 
 export interface FaceInfo {
@@ -225,6 +226,16 @@ export interface PlacedPart {
   name: string;
   position: Vec3;
   rotation: Vec3;
+  /** The instance's id (an assembly placed for a drawing: its part's id there). */
+  id?: string;
+}
+
+/** An assembly's parts placed as one builder's (`studioKey`), for drawing views of it. */
+export interface PlaceRequest {
+  type: 'place';
+  reqId: number;
+  studioKey: string;
+  instances: PlacedPart[];
 }
 
 export interface ExportResult {
@@ -320,12 +331,16 @@ export interface HoleCallout {
   thread?: { designation: string; depth?: number };
 }
 
-/** A hole seen end-on in a view: its centre and outer radius there, its callout and how many the feature made. */
+/**
+ * A hole of a view, its callout and how many the feature made: seen end-on — its centre and outer radius; seen from
+ * the side (`side`) — the centre of its mouth, the outer radius, its axis's direction in the view and length.
+ */
 export interface ProjectedHole {
   c: Vec2;
   r: number;
   callout: HoleCallout;
   count: number;
+  side?: { dir: Vec2; len: number };
 }
 
 /** A face of a part cut by a section view's plane: its edges in view coordinates (closed loops, any order), hatched. */
@@ -367,14 +382,24 @@ export interface ViewAnchorRequest {
   partIds: string[];
   axes: { n: Vec3; x: Vec3 };
   p: Vec2;
-  /** An edge circle seen end-on centred at `p` (of radius `r` when given) instead of a vertex. */
-  circle?: { r?: number };
+  /** An edge circle seen end-on (`side`: edge-on) centred at `p` (of radius `r` when given) instead of a vertex. */
+  circle?: { r?: number; side?: boolean };
+  /** A straight edge seen along the view's line `p` → `lineTo` instead (an angle dimension's line). */
+  lineTo?: Vec2;
+  /** The view's cut (a section view, a local section): what it shows of the parts. */
+  cut?: ViewCut;
+}
+
+/** What a view cuts away: a section's plane (or steps), a local section's pocket. */
+export interface ViewCut {
+  section?: SectionCut;
+  breakout?: Breakout;
 }
 
 export interface ViewAnchorResult {
   type: 'viewAnchor';
   reqId: number;
-  ref: SelRef | null;
+  ref: ViewRef | null;
 }
 
 /** Where anchors are in a view now (the model may have changed): a point, a circle's radius; null — gone. */
@@ -383,13 +408,18 @@ export interface ViewRefsRequest {
   reqId: number;
   studioKey: string;
   axes: { n: Vec3; x: Vec3 };
-  refs: SelRef[];
+  refs: ViewRef[];
+  cut?: ViewCut;
+  /** The view's parts (a local section's depth depends on them). */
+  partIds?: string[];
+  /** Where each was (a point on it): of a cut's several crossings, lines or circles — the one nearest. */
+  near?: (Vec2 | null)[];
 }
 
 export interface ViewRefsResult {
   type: 'viewRefs';
   reqId: number;
-  points: ({ p: Vec2; r?: number } | null)[];
+  points: ({ p: Vec2; r?: number; ends?: [Vec2, Vec2] } | null)[];
 }
 
 export interface PingRequest {
@@ -405,6 +435,7 @@ export type WorkerRequest =
   | ProjectionRequest
   | ViewAnchorRequest
   | ViewRefsRequest
+  | PlaceRequest
   | PingRequest;
 
 export type WorkerResponse =
@@ -415,6 +446,7 @@ export type WorkerResponse =
   | ProjectionResult
   | ViewAnchorResult
   | ViewRefsResult
+  | { type: 'place'; reqId: number }
   | { type: 'ping'; reqId: number }
   | { type: 'error'; reqId: number; message: string }
   | { type: 'ready' }

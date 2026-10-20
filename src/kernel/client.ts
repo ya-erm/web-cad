@@ -9,6 +9,7 @@ import type {
   MeasureResult,
   MeshRequest,
   MeshResult,
+  PlacedPart,
   ProjectionRequest,
   ProjectionResult,
   ViewAnchorRequest,
@@ -95,6 +96,11 @@ class KernelClient {
 
   viewRefs(req: Omitted<ViewRefsRequest>): Promise<ViewRefsResult> {
     return this.send<ViewRefsResult>({ ...req, type: 'viewRefs' } as never);
+  }
+
+  /** An assembly's parts placed as builder `studioKey`'s (its views on drawings project, cut and anchor them). */
+  place(studioKey: string, instances: PlacedPart[]): Promise<unknown> {
+    return this.send({ type: 'place', studioKey, instances } as never);
   }
 }
 

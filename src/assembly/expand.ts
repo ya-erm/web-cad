@@ -182,6 +182,16 @@ export function foldPlacements(tab: AssemblyTab, sources: AssemblySources, moved
  * What an assembly is made of, through its sub-assemblies: the Part Studios of its parts and the sub-assembly
  * tabs — the deepest first, so each one can be solved before the assemblies that use it.
  */
+/**
+ * An assembly's parts as a drawing shows it: its shown instances with sub-assemblies unfolded (ids `X/inner`), where
+ * the assemblies store them (as last solved).
+ */
+export function shownParts(tabs: { id: string; type: string }[], asm: AssemblyTab): AssemblyInstance[] {
+  const sources: AssemblySources = new Map();
+  for (const sub of usedTabs(tabs, asm).subs) sources.set(sub.id, { parts: new Map(), mates: [], assembly: sub });
+  return expandAssembly(asm, sources).instances.filter((i) => !i.hidden && !i.assemblyId);
+}
+
 export function usedTabs(
   tabs: { id: string; type: string }[],
   asm: AssemblyTab,

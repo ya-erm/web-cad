@@ -13,6 +13,8 @@ import type {
   BuildRequest,
   BuildResult,
   CurveResult,
+  EdgeInfo,
+  FaceInfo,
   FeatureStatus,
   MeasureResult,
   PartMesh,
@@ -26,15 +28,16 @@ import type {
   SectionFace,
   SketchResult,
   ThreadResult,
+  ViewCut,
 } from './protocol';
 import { VIEW_AXES, type ViewAxes } from '../core/drawingViews';
 import { halfSpace } from './faceOps';
 import { trackFaceOrigins } from './faceOrigins';
 import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint, resolveVertex } from './refs';
-import { edgeSig, vertexSig } from './sigs';
+import { edgeSig, faceSig, vertexSig } from './sigs';
 import { angleBetween, centerDistance, maxDistance, type Center, type Direction } from './measure';
 import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
-import type { SelRef } from '../core/types';
+import type { SelRef, ViewRef } from '../core/types';
 
 export const DEFAULT_PART_COLOR = '#a9bfd6';
 
@@ -246,6 +249,34 @@ export class StudioBuilder {
       .map((p) => ({ id: p.id, name: this.partName(st, p.id), color: this.partColor(p.id), shape: p.shape }));
   }
 
+  /**
+   * An assembly's parts as this builder's own (its views on a drawing): each instance its Part Studio's part (built by
+   * builder `studioKey`), placed — under the instance's id and name, in the part's colour, with its holes and cosmetic
+   * threads (their callouts and lines). Instances whose part is not built are left out.
+   */
+  place(instances: PlacedPart[], builderOf: (key: string) => StudioBuilder | undefined) {
+    const st = emptyState();
+    const meta: Meta = {};
+    for (const p of instances) {
+      const src = builderOf(p.studioKey);
+      const part = src?.current.parts.get(p.partId);
+      if (!src || !part) continue;
+      const id = p.id ?? p.name;
+      st.parts.set(id, { ...part, id, shape: placedShape(part.shape, p) });
+      st.partOrder.push(id);
+      meta[id] = { name: p.name, color: src.partColor(p.partId) };
+      // p' = Rz·Ry·Rx·p + t
+      const M = rotationMatrix(p.rotation);
+      const turn = (q: Vec3): Vec3 => [0, 1, 2].map((i) => M[i * 3] * q[0] + M[i * 3 + 1] * q[1] + M[i * 3 + 2] * q[2]) as Vec3;
+      const at = (q: Vec3) => v3.add(turn(q), p.position);
+      // each instance's holes counted apart ("4×" — of one part, as its Hole feature made them)
+      for (const [k, h] of src.current.holes) if (h.owner === p.partId) st.holes.set(`${id}/${k}`, { ...h, owner: id, source: `${id}/${h.source}`, origin: at(h.origin), dir: turn(h.dir) });
+      for (const [k, th] of src.current.threads) if (th.owner === p.partId) st.threads.set(`${id}/${k}`, { ...th, owner: id, origin: at(th.origin), dir: turn(th.dir) });
+    }
+    this.current = st;
+    this.meta = meta;
+  }
+
   async exportStep(partIds: string[], unit: 'mm' | 'in' = 'mm'): Promise<Uint8Array> {
     return stepOf(this.shapesFor(partIds), unit);
   }
@@ -425,9 +456,11 @@ export class StudioBuilder {
   /**
    * What a point of a drawing view stands for in the model (a dimension's anchor, so it follows the model): of the parts
    * shown, the vertex projecting to `p` nearest the viewer — or, with `circle`, an edge circle seen end-on centred at `p`
-   * (of radius `circle.r` when given). A circle's centre is the anchor of a point that is no vertex too.
+   * (of radius `circle.r` when given). A circle's centre is the anchor of a point that is no vertex too. In a view
+   * with a `cut` — of the parts as cut: a point of the cut is where an edge of the model crosses it, a line or a circle
+   * of the cut — where a face meets it.
    */
-  viewAnchor(partIds: string[], axes: ViewAxes, p: Vec2, circle?: { r?: number }): SelRef | null {
+  viewAnchor(partIds: string[], axes: ViewAxes, p: Vec2, circle?: { r?: number; side?: boolean }, lineTo?: Vec2, cut?: ViewCut): ViewRef | null {
     const st = this.current;
     const { n, x } = axes;
     const y = v3.cross(n, x);
@@ -436,40 +469,138 @@ export class StudioBuilder {
       const s = P(q);
       return Math.hypot(s[0] - p[0], s[1] - p[1]) < 0.01;
     };
-    let vertex: { ref: SelRef; depth: number } | null = null;
-    let ring: { ref: SelRef; depth: number } | null = null;
-    for (const it of this.shapesFor(partIds)) {
+    // what the view shows there (a vertex, an edge of a part as it is shown), nearest the viewer
+    type Hit = { what: 'vertex' | 'circle' | 'line'; partId: string; shape: Shape3D; index: number; depth: number };
+    let vertex: Hit | null = null;
+    let ring: Hit | null = null;
+    // a line of the view p → lineTo: the straight edge seen along it (on its line, overlapping it)
+    let straight: Hit | null = null;
+    const along = lineTo ? v2norm([lineTo[0] - p[0], lineTo[1] - p[1]]) : null;
+    const offLine = (s: Vec2) => (along ? Math.abs((s[0] - p[0]) * along[1] - (s[1] - p[1]) * along[0]) : Infinity);
+    const items = this.shapesFor(partIds);
+    const cutting = cut ? viewCutting(items, n, cut) : null;
+    const cutKey = cut ? cutKeyOf(cut, n, items) : '';
+    for (const it of items) {
       const part = st.parts.get(it.id);
       if (!part) continue;
-      const topo = topologyOf(part.shape);
-      const bbox = bboxOf(part.shape);
+      const shape = cutting ? cutPart(part.shape, cutting, cutKey) : part.shape;
+      if (!shape) continue;
+      const topo = topologyOf(shape);
+      if (lineTo && along) {
+        const len = Math.hypot(lineTo[0] - p[0], lineTo[1] - p[1]);
+        topo.edgeInfo.forEach((e, i) => {
+          if (e.type !== 'LINE') return;
+          const s = P(e.start);
+          const t = P(e.end);
+          if (Math.hypot(t[0] - s[0], t[1] - s[1]) < 1e-6 || offLine(s) > 0.01 || offLine(t) > 0.01) return;
+          // overlapping the view's segment along it
+          const ts = [(s[0] - p[0]) * along[0] + (s[1] - p[1]) * along[1], (t[0] - p[0]) * along[0] + (t[1] - p[1]) * along[1]];
+          if (Math.max(...ts) < 0.01 || Math.min(...ts) > len - 0.01) return;
+          const depth = v3.dot(e.center, n);
+          if (!straight || depth > straight.depth) straight = { what: 'line', partId: it.id, shape, index: i, depth };
+        });
+        continue;
+      }
       if (!circle)
         topo.vertices.forEach((v, i) => {
           const depth = v3.dot(v, n);
-          if (near(v) && (!vertex || depth > vertex.depth)) vertex = { ref: { kind: 'vertex', partId: it.id, index: i, sig: vertexSig(v, bbox) }, depth };
+          if (near(v) && (!vertex || depth > vertex.depth)) vertex = { what: 'vertex', partId: it.id, shape, index: i, depth };
         });
       topo.edgeInfo.forEach((e, i) => {
-        if (!e.circleCenter || !e.axis || Math.abs(v3.dot(e.axis, n)) < 1 - 1e-6 || !near(e.circleCenter)) return;
+        // seen end-on; or edge-on (`side`: a hole's mouth seen from the side)
+        const seen = circle?.side ? Math.abs(v3.dot(e.axis ?? [0, 0, 0], n)) < 1e-6 : Math.abs(v3.dot(e.axis ?? [0, 0, 0], n)) > 1 - 1e-6;
+        if (!e.circleCenter || !e.axis || !seen || !near(e.circleCenter)) return;
         if (circle?.r !== undefined && Math.abs((e.radius ?? 0) - circle.r) > 0.01) return;
         const depth = v3.dot(e.circleCenter, n);
-        if (!ring || depth > ring.depth) ring = { ref: { kind: 'edge', partId: it.id, index: i, sig: edgeSig(e, bbox) }, depth };
+        if (!ring || depth > ring.depth) ring = { what: 'circle', partId: it.id, shape, index: i, depth };
       });
     }
-    return (vertex as { ref: SelRef } | null)?.ref ?? (ring as { ref: SelRef } | null)?.ref ?? null;
+    const hit = (lineTo ? straight : (vertex ?? ring)) as Hit | null;
+    if (!hit) return null;
+    const part = st.parts.get(hit.partId)!;
+    const model = topologyOf(part.shape);
+    const bbox = bboxOf(part.shape);
+    const edgeRef = (i: number, cut?: true): ViewRef => ({ kind: 'edge', partId: hit.partId, index: i, sig: edgeSig(model.edgeInfo[i], bbox), ...(cut ? { cut } : {}) });
+    // the part itself: what was found is the model's own
+    if (hit.shape === part.shape) {
+      if (hit.what === 'vertex') return { kind: 'vertex', partId: hit.partId, index: hit.index, sig: vertexSig(model.vertices[hit.index], bbox) };
+      return edgeRef(hit.index);
+    }
+    // the part as cut: the model's own vertex, circle or straight edge where the cut left it whole; or what the cut made
+    const seen = topologyOf(hit.shape);
+    if (hit.what === 'vertex') {
+      const q = seen.vertices[hit.index];
+      const vi = model.vertices.findIndex((v) => v3.dist(v, q) < ON);
+      if (vi >= 0) return { kind: 'vertex', partId: hit.partId, index: vi, sig: vertexSig(model.vertices[vi], bbox) };
+      // where an edge crosses the cut
+      const ei = model.edgeInfo.findIndex((e, i) => onEdge(model.edges[i], e, q));
+      return ei >= 0 ? edgeRef(ei, true) : null;
+    }
+    const e = seen.edgeInfo[hit.index];
+    const pts = [e.start, e.center, e.end];
+    const own =
+      hit.what === 'circle'
+        ? model.edgeInfo.findIndex((o) => !!o.circleCenter && !!o.axis && v3.dist(o.circleCenter, e.circleCenter!) < ON && Math.abs((o.radius ?? 0) - (e.radius ?? 0)) < ON && Math.abs(v3.dot(o.axis, e.axis!)) > 1 - 1e-6)
+        : model.edgeInfo.findIndex((o) => o.type === 'LINE' && pts.every((q) => segDist(q, o.start, o.end) < ON));
+    if (own >= 0) return edgeRef(own);
+    // where a face meets the cut: a round one — a circle, a flat one — a line
+    const fi = model.faceInfo.findIndex((f, i) => pts.every((q) => onFace(model.faces[i], f, q)));
+    return fi >= 0 ? { kind: 'face', partId: hit.partId, index: fi, sig: faceSig(model.faceInfo[fi], bbox), cut: true } : null;
   }
 
-  /** Where references (`viewAnchor`'s) are in a view now: a vertex, a circle's centre with its radius; null — gone. */
-  viewRefs(axes: ViewAxes, refs: SelRef[]): ({ p: Vec2; r?: number } | null)[] {
+  /**
+   * Where references (`viewAnchor`'s) are in a view now: a vertex, a circle's centre with its radius, a straight edge's
+   * ends; null — gone. Those of a `cut` (of its view's parts `partIds`): where the edge crosses it, the line or circle
+   * where the face meets it — of several, the one nearest to where it was (`near`).
+   */
+  viewRefs(axes: ViewAxes, refs: ViewRef[], cut?: ViewCut, near?: (Vec2 | null)[], partIds: string[] = []): ({ p: Vec2; r?: number; ends?: [Vec2, Vec2] } | null)[] {
     const st = this.current;
     const { n, x } = axes;
     const y = v3.cross(n, x);
     const P = (q: Vec3): Vec2 => [v3.dot(q, x), v3.dot(q, y)];
-    return refs.map((ref) => {
+    const items = cut && refs.some((r) => r.cut) ? this.shapesFor(partIds) : [];
+    const cutting = items.length ? viewCutting(items, n, cut!) : null;
+    const cutKey = cutting ? cutKeyOf(cut!, n, items) : '';
+    const dist = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    return refs.map((ref, k) => {
       try {
+        const was = near?.[k] ?? null;
+        if (ref.cut && cutting && (ref.kind === 'edge' || ref.kind === 'face')) {
+          const rest = cutPart(st.parts.get(ref.partId)!.shape, cutting, cutKey);
+          if (!rest) return null;
+          const seen = topologyOf(rest);
+          if (ref.kind === 'edge') {
+            // the cut's points on the edge (no hint: the one nearest the viewer)
+            const { edge, info } = resolveEdge(st, ref);
+            let best: { p: Vec2; d: number } | null = null;
+            for (const q of seen.vertices) {
+              if (!onCut(q, cutting) || !onEdge(edge, info, q)) continue;
+              const d = was ? dist(P(q), was) : -v3.dot(q, n);
+              if (!best || d < best.d) best = { p: P(q), d };
+            }
+            return best && { p: best.p };
+          }
+          // the cut's circles or lines on the face
+          const { face, info } = resolveFace(st, ref);
+          let best: { r: { p: Vec2; r?: number; ends?: [Vec2, Vec2] }; d: number } | null = null;
+          for (const e of seen.edgeInfo) {
+            if (e.seam || ![e.start, e.center, e.end].every((q) => onCut(q, cutting) && onFace(face, info, q))) continue;
+            const ends: [Vec2, Vec2] = [P(e.start), P(e.end)];
+            const r = e.circleCenter && e.radius !== undefined ? { p: P(e.circleCenter), r: e.radius } : e.type === 'LINE' ? { p: P(e.center), ends } : null;
+            if (!r) continue;
+            const d = was ? ('ends' in r ? segDist(was, ends[0], ends[1]) : dist(r.p, was)) : 0;
+            if (!best || d < best.d) best = { r, d };
+          }
+          return best?.r ?? null;
+        }
         if (ref.kind === 'vertex') return { p: P(resolveVertex(st, ref)) };
         if (ref.kind === 'edge') {
           const { info } = resolveEdge(st, ref);
-          return { p: P(info.circleCenter ?? info.center), ...(info.radius !== undefined ? { r: info.radius } : {}) };
+          return {
+            p: P(info.circleCenter ?? info.center),
+            ...(info.radius !== undefined ? { r: info.radius } : {}),
+            ...(info.type === 'LINE' ? { ends: [P(info.start), P(info.end)] as [Vec2, Vec2] } : {}),
+          };
         }
       } catch {
         // the model no longer has it
@@ -493,53 +624,26 @@ export class StudioBuilder {
     let jogs: { p: Vec2; d: Vec2 }[] = [];
     // a half section: the axis between the section and the view (its last step)
     let halfAxis: { p: Vec2; d: Vec2 } | null = null;
-    // a local section's outline in the view: its walls are seen edge-on there (drawn as a freehand line instead)
-    let breakPoly: Vec2[] | null = null;
-    // what is cut away: a part as cut (its size), the planes the cut faces lie on, their normal
-    let cutting: { apply: (shape: Shape3D, size: number) => Shape3D; planes: Vec3[]; normal: Vec3 } | null = null;
+    // what is cut away: a part as cut, the planes the cut faces lie on (hatched), their normal
+    const cutting = viewCutting(items, n, opts);
+    const cutKey = cutKeyOf(opts, n, items);
     if (opts.section?.aligned && opts.section.line && opts.section.line.length >= 3 && opts.section.along) {
-      // an aligned section (ГОСТ «ломаный»): the part beyond the bend cut by its own plane, turned into the first one
-      const sec = opts.section;
-      cutting = { apply: (s, size) => alignedCut(s, sec, size), planes: [sec.origin], normal: sec.normal };
       // the bend's axis, seen edge-on where the two pieces meet
-      jogs = [{ p: P(sec.line![1]), d: v2norm(P(sec.along!)) }];
+      jogs = [{ p: P(opts.section.line[1]), d: v2norm(P(opts.section.along)) }];
     } else if (opts.section) {
-      // a section view: the parts without what lies on the viewer's side of the plane, the faces it cut hatched
       const sec = opts.section;
       const steps = sectionSteps(sec);
       jogs = steps?.jogs.map((j) => ({ p: P(j), d: v2norm(P(sec.along!)) })) ?? [];
       if (steps?.half) halfAxis = jogs[jogs.length - 1] ?? null;
-      cutting = { apply: (s, size) => s.cut(steps ? steppedCut(sec, size) : halfSpace(sec.origin, sec.normal, size)), planes: steps?.planes ?? [sec.origin], normal: sec.normal };
-    } else if (opts.breakout && opts.breakout.outline.length >= 3 && items.length) {
-      // a local section: inside the outline, from the viewer down to its depth (the parts' middle by default)
-      let front = -Infinity;
-      let back = Infinity;
-      for (const it of items) {
-        const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
-        for (let i = 0; i < 8; i++) {
-          const d = v3.dot([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]], n);
-          front = Math.max(front, d);
-          back = Math.min(back, d);
-        }
-      }
-      const depth = opts.breakout.depth === undefined ? (front + back) / 2 : front - opts.breakout.depth;
-      const outline = opts.breakout.outline.map((q) => v3.add(q, v3.scale(n, depth - v3.dot(q, n))));
-      breakPoly = outline.map(P);
-      cutting = { apply: (s, size) => s.cut(prism(R.makePolygon(outline), n, 0, Math.max(front - depth, 0) + size)), planes: [outline[0]], normal: n };
     }
+    // a local section's outline in the view: its walls are seen edge-on there (drawn as a freehand line instead)
+    const breakPoly: Vec2[] | null = cutting?.outline?.map(P) ?? null;
     if (cutting) {
       const { planes, normal } = cutting;
       const cut: typeof items = [];
       for (const it of items) {
-        const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
-        const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), planes[0]))) + 10;
-        let rest: Shape3D;
-        try {
-          rest = cutting.apply(it.shape, size);
-        } catch {
-          continue;
-        }
-        if (!rest.faces.length) continue;
+        const rest = cutPart(it.shape, cutting, cutKey);
+        if (!rest) continue;
         cut.push({ ...it, shape: rest });
         for (const f of rest.faces) {
           if (f.geomType !== 'PLANE') continue;
@@ -629,16 +733,28 @@ export class StudioBuilder {
         lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])];
         hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])];
       }
-    // the Hole features' holes seen end-on (either side), for callouts; counted by the feature they come from
+    // the Hole features' holes seen end-on (either side) or from the side, for callouts; counted by the feature they come from
     const holes: ProjectedHole[] = [];
     if (!opts.section) {
       const shown = [...this.current.holes.values()].filter((h) => h.owner && ids.has(h.owner));
       const count = new Map<string, number>();
       for (const h of shown) count.set(h.source, (count.get(h.source) ?? 0) + 1);
       for (const h of shown) {
-        if (Math.abs(v3.dot(h.dir, n)) < 0.999) continue;
+        const along = Math.abs(v3.dot(h.dir, n));
         const c = h.callout;
-        holes.push({ c: P(h.origin), r: Math.max(c.diameter, c.cbore?.diameter ?? 0, c.csink?.diameter ?? 0) / 2, callout: c, count: count.get(h.source) ?? 1 });
+        const hole: ProjectedHole = { c: P(h.origin), r: Math.max(c.diameter, c.cbore?.diameter ?? 0, c.csink?.diameter ?? 0) / 2, callout: c, count: count.get(h.source) ?? 1 };
+        if (along >= 0.999) holes.push(hole);
+        else if (along < 1e-3) {
+          // from the side: its axis across the view, as deep as it goes (a through one: across its part)
+          let len = c.depth;
+          const part = h.owner ? this.current.parts.get(h.owner) : undefined;
+          if (len === undefined && part) {
+            const [lo, hi] = bboxOf(part.shape);
+            len = 0;
+            for (let i = 0; i < 8; i++) len = Math.max(len, v3.dot(v3.sub([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]], h.origin), h.dir));
+          }
+          if (len) holes.push({ ...hole, side: { dir: v2norm(P(h.dir)), len } });
+        }
       }
     }
     // the half section's axis across the parts, a little beyond them (a thin chain line, ГОСТ 2.305)
@@ -685,6 +801,113 @@ const v2norm = (a: Vec2): Vec2 => {
   const l = Math.hypot(a[0], a[1]) || 1;
   return [a[0] / l, a[1] / l];
 };
+
+/** The distance from `p` to segment a – b (in a view, in space). */
+function segDist<T extends Vec2 | Vec3>(p: T, a: T, b: T): number {
+  const d = a.map((v, i) => b[i] - v);
+  const l2 = d.reduce((s, v) => s + v * v, 0);
+  const t = l2 < 1e-18 ? 0 : Math.max(0, Math.min(1, d.reduce((s, v, i) => s + v * (p[i] - a[i]), 0) / l2));
+  return Math.hypot(...a.map((v, i) => p[i] - v - d[i] * t));
+}
+
+/** What a view cuts away from its parts, the planes its cut faces lie on and their normal (towards the viewer). */
+interface Cutting {
+  apply: (shape: Shape3D, size: number) => Shape3D;
+  planes: Vec3[];
+  normal: Vec3;
+  /** A local section's outline at its depth. */
+  outline?: Vec3[];
+}
+
+function viewCutting(items: { shape: Shape3D }[], n: Vec3, cut: ViewCut): Cutting | null {
+  const sec = cut.section;
+  // an aligned section (ГОСТ «ломаный»): the part beyond the bend cut by its own plane, turned into the first one
+  if (sec?.aligned && sec.line && sec.line.length >= 3 && sec.along) return { apply: (s, size) => alignedCut(s, sec, size), planes: [sec.origin], normal: sec.normal };
+  if (sec) {
+    // a section view: the parts without what lies on the viewer's side of the plane (an offset one: of its steps)
+    const steps = sectionSteps(sec);
+    return { apply: (s, size) => s.cut(steps ? steppedCut(sec, size) : halfSpace(sec.origin, sec.normal, size)), planes: steps?.planes ?? [sec.origin], normal: sec.normal };
+  }
+  const bo = cut.breakout;
+  if (!bo || bo.outline.length < 3 || !items.length) return null;
+  // a local section: inside the outline, from the viewer down to its depth (the parts' middle by default)
+  let front = -Infinity;
+  let back = Infinity;
+  for (const it of items) {
+    const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
+    for (let i = 0; i < 8; i++) {
+      const d = v3.dot([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]], n);
+      front = Math.max(front, d);
+      back = Math.min(back, d);
+    }
+  }
+  const depth = bo.depth === undefined ? (front + back) / 2 : front - bo.depth;
+  const outline = bo.outline.map((q) => v3.add(q, v3.scale(n, depth - v3.dot(q, n))));
+  return { apply: (s, size) => s.cut(prism(R.makePolygon(outline), n, 0, Math.max(front - depth, 0) + size)), planes: [outline[0]], normal: n, outline };
+}
+
+/** Parts as views' cuts leave them (a projection's, then its dimensions'): part shape → the cut's key → what is left. */
+const cutCache = new WeakMap<Shape3D, Map<string, Shape3D | null>>();
+
+/** A view's cut as a key (a local section's depth depends on the view's parts too). */
+const cutKeyOf = (cut: ViewCut, n: Vec3, items: { id: string }[]) =>
+  JSON.stringify([cut.section ?? null, cut.breakout ?? null, n, cut.breakout ? items.map((i) => i.id) : null]);
+
+/** A part as a view's cut leaves it (`key` names the cut); null — nothing left, or the cut failed. */
+function cutPart(shape: Shape3D, cutting: Cutting, key: string): Shape3D | null {
+  let byCut = cutCache.get(shape);
+  if (!byCut) cutCache.set(shape, (byCut = new Map()));
+  if (byCut.has(key)) return byCut.get(key)!;
+  const [lo, hi] = shape.boundingBox.bounds as [Vec3, Vec3];
+  const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), cutting.planes[0]))) + 10;
+  let rest: Shape3D | null = null;
+  try {
+    rest = cutting.apply(shape, size);
+    if (!rest.faces.length) rest = null;
+  } catch {
+    rest = null;
+  }
+  byCut.set(key, rest);
+  return rest;
+}
+
+/** How near a point must be to lie on an edge, a face, a cut (mm). */
+const ON = 1e-4;
+
+/** The distance from a point to a shape (an edge, a face). */
+function distTo(s: R.AnyShape, p: Vec3): number {
+  const oc = R.getOC();
+  const v = R.makeVertex(p);
+  const d = new oc.BRepExtrema_DistShapeShape(s.wrapped, v.wrapped);
+  const out = d.IsDone() ? d.Value() : Infinity;
+  d.delete();
+  v.delete();
+  return out;
+}
+
+/** Whether a point lies on an edge of the model (its line or circle first, then the edge itself). */
+function onEdge(e: R.Edge, info: EdgeInfo, p: Vec3): boolean {
+  if (info.type === 'LINE') return segDist(p, info.start, info.end) < ON;
+  if (info.circleCenter && info.axis && info.radius !== undefined) {
+    const d = v3.sub(p, info.circleCenter);
+    const h = v3.dot(d, info.axis);
+    if (Math.abs(h) > ON || Math.abs(v3.len(v3.sub(d, v3.scale(info.axis, h))) - info.radius) > ON) return false;
+  }
+  return distTo(e, p) < ON;
+}
+
+/** Whether a point lies on a face of the model (its plane or cylinder first, then the face itself). */
+function onFace(f: R.Face, info: FaceInfo, p: Vec3): boolean {
+  if (info.type === 'PLANE' && info.normal && Math.abs(v3.dot(v3.sub(p, info.center), info.normal)) > ON) return false;
+  if (info.type === 'CYLINDRE' && info.axis && info.axisPoint && info.radius !== undefined) {
+    const d = v3.sub(p, info.axisPoint);
+    if (Math.abs(v3.len(v3.sub(d, v3.scale(info.axis, v3.dot(d, info.axis)))) - info.radius) > ON) return false;
+  }
+  return distTo(f, p) < ON;
+}
+
+/** Whether a point lies on a cut face of a view (its plane, an offset section's step planes). */
+const onCut = (q: Vec3, c: Cutting) => c.planes.some((o) => Math.abs(v3.dot(v3.sub(q, o), c.normal)) < ON);
 
 /**
  * An offset section's line (more than one segment): the planes its segments along the first one cut (a point of each)

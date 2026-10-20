@@ -408,7 +408,45 @@ export function detailCirclePrims(v: DrawingView, proj: ProjectionData | undefin
 const ARROW = 3;
 const TEXT_H = 3.5;
 
+/**
+ * An angle dimension: its vertex, the two rays of the sector measured — each line towards `b` / `c` (sign 1) or away
+ * (−1): as `signs` say, else the sector `toward` points into, else the one between `b` and `c` — and the angle, degrees.
+ */
+export function angleSector(
+  A: Vec2,
+  B: Vec2,
+  C: Vec2,
+  toward?: Vec2,
+  signs?: readonly [number, number],
+): { r1: Vec2; r2: Vec2; deg: number; signs: [1 | -1, 1 | -1] } | null {
+  const u1 = norm([B[0] - A[0], B[1] - A[1]]);
+  const u2 = norm([C[0] - A[0], C[1] - A[1]]);
+  if (![...u1, ...u2].every(Number.isFinite)) return null;
+  const between = (r1: Vec2, r2: Vec2, w: Vec2) => {
+    // w inside the angle r1–r2 (less than 180°): on r2's side of r1 and on r1's side of r2
+    const c12 = r1[0] * r2[1] - r1[1] * r2[0];
+    return (r1[0] * w[1] - r1[1] * w[0]) * c12 >= 0 && (w[0] * r2[1] - w[1] * r2[0]) * c12 >= 0;
+  };
+  let s: [1 | -1, 1 | -1] = signs ? [signs[0] < 0 ? -1 : 1, signs[1] < 0 ? -1 : 1] : [1, 1];
+  if (!signs && toward) {
+    const w = norm([toward[0] - A[0], toward[1] - A[1]]);
+    if (Number.isFinite(w[0]))
+      for (const c of [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {
+        if (between([u1[0] * c[0], u1[1] * c[0]], [u2[0] * c[1], u2[1] * c[1]], w)) {
+          s = [c[0], c[1]];
+          break;
+        }
+      }
+  }
+  const r1: Vec2 = [u1[0] * s[0], u1[1] * s[0]];
+  const r2: Vec2 = [u2[0] * s[1], u2[1] * s[1]];
+  const deg = (Math.acos(Math.max(-1, Math.min(1, r1[0] * r2[0] + r1[1] * r2[1]))) * 180) / Math.PI;
+  return { r1, r2, deg, signs: s };
+}
+
 export function measureDim(d: DrawingDimension): number {
+  if (d.kind === 'angle') return d.b && d.c ? (angleSector(d.a, d.b, d.c, undefined, d.sector)?.deg ?? 0) : 0;
+  if (d.kind === 'ordinate') return d.b ? Math.abs(d.ordinate === 'y' ? d.b[1] - d.a[1] : d.b[0] - d.a[0]) : 0;
   if (d.kind === 'radius' || d.kind === 'diameter') {
     const r = d.b ? Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]) : 0;
     return d.kind === 'diameter' ? 2 * r : r;
@@ -420,6 +458,7 @@ export function measureDim(d: DrawingDimension): number {
 }
 
 export function dimText(d: DrawingDimension, unitFactor: number, comma = false): string {
+  if (d.kind === 'angle') return `${sheetNumber(measureDim(d), 2, comma)}°`;
   const v = measureDim(d) / unitFactor;
   const s = sheetNumber(v, 2, comma);
   if (d.kind === 'diameter') return `Ø${s}`;
@@ -485,14 +524,21 @@ function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData 
   const lines: CalloutToken[][] = hole ? calloutLines(hole, unitFactor, translate, comma) : [['?']];
   const r = (hole?.r ?? 0) * v.scale;
   const u = norm([T[0] - A[0], T[1] - A[1]]);
-  const P: Vec2 = [A[0] + u[0] * r, A[1] + u[1] * r];
+  // the arrow: on the hole's outer circle (seen end-on) or at its mouth's edge on the text's side (seen from the side)
+  let P: Vec2 = [A[0] + u[0] * r, A[1] + u[1] * r];
+  if (hole?.side) {
+    const across: Vec2 = [-hole.side.dir[1], hole.side.dir[0]];
+    const s = dot([T[0] - A[0], T[1] - A[1]], across) >= 0 ? r : -r;
+    P = [A[0] + across[0] * s, A[1] + across[1] * s];
+  }
+  const toP = norm([P[0] - T[0], P[1] - T[1]]);
   const h = TEXT_H;
   const widths = lines.map((l) => l.reduce((w, x) => w + tokenWidth(x, h), 0));
   const W = Math.max(...widths) + 2;
   const right = T[0] >= A[0];
   const out: Prim2D[] = [
     { t: 'line', a: P, b: T, style: 'dimension' },
-    { t: 'arrow', tip: P, dir: [-u[0], -u[1]], size: ARROW, style: 'dimension' },
+    { t: 'arrow', tip: P, dir: Number.isFinite(toP[0]) ? toP : [-u[0], -u[1]], size: ARROW, style: 'dimension' },
     { t: 'line', a: T, b: [T[0] + (right ? W : -W), T[1]], style: 'dimension' },
   ];
   lines.forEach((line, i) => {
@@ -512,6 +558,127 @@ function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData 
   return out;
 }
 
+/**
+ * An angle dimension: an arc about where the lines cross, through `textPos`, in the sector it is in; arrows at its ends,
+ * extension lines from the lines out to the arc, the angle in degrees outside its middle.
+ */
+function anglePrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined, comma: boolean): Prim2D[] {
+  if (!d.b || !d.c) return [];
+  const A = toSheet(v, proj, d.a);
+  const B = toSheet(v, proj, d.b);
+  const C = toSheet(v, proj, d.c);
+  const T = d.textPos ?? add(A, mul(norm(add(norm([B[0] - A[0], B[1] - A[1]]), norm([C[0] - A[0], C[1] - A[1]]))), 15));
+  // the sector chosen when it was placed (or dragged); without one — the one the text is in
+  const s = angleSector(A, B, C, T, d.sector);
+  if (!s) return [];
+  const R = Math.max(Math.hypot(T[0] - A[0], T[1] - A[1]), 4);
+  // CCW from the first ray to the second, the short way
+  let a0 = Math.atan2(s.r1[1], s.r1[0]);
+  let a1 = Math.atan2(s.r2[1], s.r2[0]);
+  let sweep = a1 - a0;
+  while (sweep <= -Math.PI) sweep += 2 * Math.PI;
+  while (sweep > Math.PI) sweep -= 2 * Math.PI;
+  if (sweep < 0) {
+    [a0, a1] = [a1, a0];
+    sweep = -sweep;
+  }
+  a1 = a0 + sweep;
+  const at = (ang: number, r: number): Vec2 => [A[0] + r * Math.cos(ang), A[1] + r * Math.sin(ang)];
+  const out: Prim2D[] = [{ t: 'arc', c: A, r: R, a0, a1, style: 'dimension' }];
+  // extension lines: where a line does not reach the arc (on its side of the vertex)
+  for (const [P, r] of [[B, s.r1], [C, s.r2]] as const) {
+    const reach = Math.max(0, (P[0] - A[0]) * r[0] + (P[1] - A[1]) * r[1]);
+    if (R > reach + 0.5) out.push({ t: 'line', a: add(A, mul(r, reach + (reach > 0 ? 1.5 : 0.5))), b: add(A, mul(r, R + 2)), style: 'dimension' });
+  }
+  out.push({ t: 'arrow', tip: at(a0, R), dir: [Math.sin(a0), -Math.cos(a0)], size: ARROW, style: 'dimension' });
+  out.push({ t: 'arrow', tip: at(a1, R), dir: [-Math.sin(a1), Math.cos(a1)], size: ARROW, style: 'dimension' });
+  // the value along the arc's middle, read from below or the right
+  const am = a0 + sweep / 2;
+  let ang = am - Math.PI / 2;
+  while (ang > Math.PI / 2 + 1e-6) ang -= Math.PI;
+  while (ang < -Math.PI / 2 + 1e-6) ang += Math.PI;
+  const up: Vec2 = [-Math.sin(ang), Math.cos(ang)];
+  out.push({ t: 'text', p: add(at(am, R), mul(up, 1)), text: `${sheetNumber(s.deg, 2, comma)}°`, h: TEXT_H, angle: ang, align: 'center', style: 'dimension' });
+  return out;
+}
+
+/** A linear dimension's direction across its line (sheet): up for a horizontal one, left for a vertical, to the left of A → B else. */
+export function dimNormal(kind: DrawingDimension['kind'], A: Vec2, B: Vec2): Vec2 {
+  const axis: Vec2 = kind === 'horizontal' ? [1, 0] : kind === 'vertical' ? [0, 1] : norm([B[0] - A[0], B[1] - A[1]]);
+  return [-axis[1], axis[0]];
+}
+
+/** Where a linear dimension's line is across it (sheet, along `dimNormal`): `offset` past the farther point, or the nearer. */
+export function dimLevel(kind: DrawingDimension['kind'], A: Vec2, B: Vec2, offset: number): number {
+  const n = dimNormal(kind, A, B);
+  return offset >= 0 ? Math.max(dot(A, n), dot(B, n)) + offset : Math.min(dot(A, n), dot(B, n)) + offset;
+}
+
+/** The offset that puts a linear dimension's line at `level` (sheet, along `dimNormal`). */
+export function offsetForLevel(kind: DrawingDimension['kind'], A: Vec2, B: Vec2, level: number): number {
+  const n = dimNormal(kind, A, B);
+  const hi = Math.max(dot(A, n), dot(B, n));
+  const lo = Math.min(dot(A, n), dot(B, n));
+  return level >= hi ? level - hi : level <= lo ? level - lo : level - hi;
+}
+
+/** How far a centre line goes past what it is the axis of, sheet mm (ISO 128: a little beyond the outline). */
+const AXIS_OVER = 3;
+
+/** The axis between two parallel lines (view coordinates): along them, midway, over the length both span; none if not parallel. */
+export function centerlineOf(l1: [Vec2, Vec2], l2: [Vec2, Vec2]): [Vec2, Vec2] | null {
+  const u = norm([l1[1][0] - l1[0][0], l1[1][1] - l1[0][1]]);
+  const u2 = norm([l2[1][0] - l2[0][0], l2[1][1] - l2[0][1]]);
+  if (![...u, ...u2].every(Number.isFinite) || Math.abs(u[0] * u2[1] - u[1] * u2[0]) > 1e-3) return null;
+  const n: Vec2 = [-u[1], u[0]];
+  const mid = (dot(l1[0], n) + dot(l2[0], n)) / 2;
+  const ts = [l1[0], l1[1], l2[0], l2[1]].map((p) => dot(p, u));
+  const at = (t: number): Vec2 => add(mul(u, t), mul(n, mid));
+  return [at(Math.min(...ts)), at(Math.max(...ts))];
+}
+
+/** A centre line between two lines, or a circle's centre mark: chain lines a little past the outline. */
+function axisPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined): Prim2D[] {
+  if (d.kind === 'centermark') {
+    if (!d.b) return [];
+    const c = toSheet(v, proj, d.a);
+    const r = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]) * v.scale + AXIS_OVER;
+    return [
+      { t: 'line', a: [c[0] - r, c[1]], b: [c[0] + r, c[1]], style: 'center' },
+      { t: 'line', a: [c[0], c[1] - r], b: [c[0], c[1] + r], style: 'center' },
+    ];
+  }
+  const axis = d.b && d.c && d.d ? centerlineOf([d.a, d.b], [d.c, d.d]) : null;
+  if (!axis) return [];
+  const [p, q] = axis.map((x) => toSheet(v, proj, x));
+  const u = norm([q[0] - p[0], q[1] - p[1]]);
+  if (!Number.isFinite(u[0])) return [];
+  return [{ t: 'line', a: add(p, mul(u, -AXIS_OVER)), b: add(q, mul(u, AXIS_OVER)), style: 'center' }];
+}
+
+/**
+ * An ordinate dimension (ISO 129-1): a thin line from the point across the measured axis out to the line of values
+ * (`textPos`), the value written on along it — upright for X (the line runs up or down), level for Y.
+ */
+function ordinatePrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData | undefined, unitFactor: number, comma: boolean): Prim2D[] {
+  if (!d.b) return [];
+  const B = toSheet(v, proj, d.b);
+  const x = d.ordinate !== 'y';
+  const T = d.textPos ?? (x ? [B[0], B[1] + 10] : [B[0] + 10, B[1]]);
+  // along the line, from the point (a gap) to the line of values
+  const to = x ? T[1] - B[1] : T[0] - B[0];
+  const sgn = to < 0 ? -1 : 1;
+  const gap = 1.5;
+  const end: Vec2 = x ? [B[0], T[1]] : [T[0], B[1]];
+  const out: Prim2D[] = [];
+  if (Math.abs(to) > gap) out.push({ t: 'line', a: x ? [B[0], B[1] + sgn * gap] : [B[0] + sgn * gap, B[1]], b: end, style: 'dimension' });
+  const text = sheetNumber(measureDim(d) / unitFactor, 2, comma);
+  // the value on past the line's end, centred on it
+  const p: Vec2 = x ? [end[0] + TEXT_H * 0.35, end[1] + sgn * 1] : [end[0] + sgn * 1, end[1] - TEXT_H * 0.35];
+  out.push({ t: 'text', p, text, h: TEXT_H, ...(x ? { angle: Math.PI / 2 } : {}), align: sgn > 0 ? 'left' : 'right', style: 'dimension' });
+  return out;
+}
+
 /** Dimension primitives in sheet coordinates. For radius/diameter `a` is the centre and `b` a point on the circle. */
 export function dimPrims(
   d: DrawingDimension,
@@ -522,6 +689,9 @@ export function dimPrims(
   comma = false,
 ): Prim2D[] {
   if (d.kind === 'hole') return calloutPrims(d, v, proj, unitFactor, translate, comma);
+  if (d.kind === 'angle') return anglePrims(d, v, proj, comma);
+  if (d.kind === 'ordinate') return ordinatePrims(d, v, proj, unitFactor, comma);
+  if (d.kind === 'centerline' || d.kind === 'centermark') return axisPrims(d, v, proj);
   const out: Prim2D[] = [];
   const A = toSheet(v, proj, d.a);
   const text = dimText(d, unitFactor, comma);

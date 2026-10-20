@@ -202,6 +202,12 @@ export type SelRef =
   | { kind: 'plane'; planeId: string } // 'top' | 'front' | 'right' | <plane feature id>
   | { kind: 'origin' };
 
+/**
+ * What a point, circle or line of a drawing view stands for in the model. `cut` — in a section: where the edge crosses
+ * the cut (a point), where the face meets it (a line or a circle).
+ */
+export type ViewRef = SelRef & { cut?: true };
+
 export type StdPlane = 'top' | 'front' | 'right';
 
 export type PlaneRef =
@@ -772,19 +778,34 @@ export interface DrawingView {
 export interface DrawingDimension {
   id: string;
   viewId: string;
-  /** `hole` — a hole callout: `a` is the hole's centre, `textPos` the start of its shelf (Onshape Hole callout). */
-  kind: 'linear' | 'horizontal' | 'vertical' | 'radius' | 'diameter' | 'hole';
+  /**
+   * `hole` — a hole callout: `a` is the hole's centre, `textPos` the start of its shelf (Onshape Hole callout).
+   * `angle` — between two lines: `a` where they cross, `b` and `c` on the first and the second; `textPos` on the arc
+   * (the sector it is in is the angle measured).
+   * `ordinate` — the distance of `b` from the base `a` along the view's X or Y (`ordinate`), written at the end of a
+   * line from `b` across that axis out to `textPos` (ISO 129-1).
+   * `centerline` — the axis between two parallel lines `a`–`b` and `c`–`d` (a chain line a little beyond them);
+   * `centermark` — the centre of a circle or arc: `a`, `b` on it (ISO 128).
+   */
+  kind: 'linear' | 'horizontal' | 'vertical' | 'radius' | 'diameter' | 'hole' | 'angle' | 'ordinate' | 'centerline' | 'centermark';
+  /** An ordinate dimension's axis: `x` — measured along the view's X (its line runs up / down), `y` — along Y. */
+  ordinate?: 'x' | 'y';
   /** Points in view model coordinates (unscaled, mm, view-local 2D). */
   a: Vec2;
   b?: Vec2;
+  c?: Vec2;
+  d?: Vec2;
+  /** An angle's sector: each line towards its point `b` / `c` (1) or away from it (−1); kept when the model changes. */
+  sector?: [1 | -1, 1 | -1];
   /** Label offset in sheet mm relative to the measured geometry. */
   offset: number;
   textPos?: Vec2;
   /**
    * What `a` and `b` stand for in the model — a vertex, or an edge circle (its centre; a diameter's, radius's or hole
-   * callout's `a`): the dimension follows the model through them. Without them (or when lost) — the points as stored.
+   * callout's `a`); an angle's: its two lines' straight edges. The dimension follows the model through them. Without
+   * them (or when lost) — the points as stored.
    */
-  refs?: { a?: SelRef; b?: SelRef };
+  refs?: { a?: ViewRef; b?: ViewRef };
 }
 
 export interface DrawingNote {

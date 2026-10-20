@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { emptyDocument, initOpenCascade, nodeKernel } from '../agent/headless';
 import { runOps } from '../agent/runner';
 import type { PartStudioTab } from '../core/types';
+import { VIEW_AXES } from '../core/drawingViews';
 import type { ProjectedHole } from '../kernel/protocol';
 import { calloutLines, calloutText, dimPrims, dimText, scaleLabel, sheetNumber, type ProjectionData } from './sheet';
 import { t } from '../i18n';
@@ -79,7 +80,18 @@ describe('Holes in projections (OpenCascade)', () => {
       { c: [5, 0], text: '2× Ø9 THRU\n⌴ Ø15 ↧8.6' },
       { c: [25, 0], text: '2× Ø9 THRU\n⌴ Ø15 ↧8.6' },
     ]);
-    // seen from the side: none
-    expect(k.builder.projection([], 'front', false).holes).toBeUndefined();
+    // seen from the side (the Front view): their mouths on the top face, axes down, as deep as they go (through: 25)
+    const side = (k.builder.projection([], 'front', false).holes ?? []).map((h) => ({
+      c: h.c.map((v) => Math.round(v * 1e6) / 1e6 + 0),
+      dir: h.side?.dir.map((v) => Math.round(v * 1e6) / 1e6 + 0),
+      len: h.side && Math.round(h.side.len * 1e6) / 1e6,
+    }));
+    expect(side.sort((a, b) => a.c[0] - b.c[0])).toEqual([
+      { c: [-25, 25], dir: [0, -1], len: 20 },
+      { c: [5, 25], dir: [0, -1], len: 25 },
+      { c: [25, 25], dir: [0, -1], len: 25 },
+    ]);
+    // a side hole's mouth circle anchors its callout (edge-on in the view)
+    expect(k.builder.viewAnchor([], VIEW_AXES.front, [5, 25], { r: 7.5, side: true })?.kind).toBe('edge');
   }, 60000);
 });

@@ -97,10 +97,14 @@ async function handle(req: WorkerRequest) {
       return;
     }
     case 'viewAnchor':
-      post({ type: 'viewAnchor', reqId: req.reqId, ref: builderFor(req.studioKey).viewAnchor(req.partIds, req.axes, req.p, req.circle) });
+      post({ type: 'viewAnchor', reqId: req.reqId, ref: builderFor(req.studioKey).viewAnchor(req.partIds, req.axes, req.p, req.circle, req.lineTo, req.cut) });
       return;
     case 'viewRefs':
-      post({ type: 'viewRefs', reqId: req.reqId, points: builderFor(req.studioKey).viewRefs(req.axes, req.refs) });
+      post({ type: 'viewRefs', reqId: req.reqId, points: builderFor(req.studioKey).viewRefs(req.axes, req.refs, req.cut, req.near, req.partIds) });
+      return;
+    case 'place':
+      builderFor(req.studioKey).place(req.instances, (key) => builders.get(key));
+      post({ type: 'place', reqId: req.reqId });
       return;
   }
 }

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { CadDocument, ConfigInput, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, SelRef, Vec2, ViewOrientation } from '../core/types';
+import type { AssemblyTab, CadDocument, ConfigInput, DocTab, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation, ViewRef } from '../core/types';
+import { shownParts } from '../assembly/expand';
+import { sourceKey } from '../assembly/compose';
 import { uid } from '../core/ids';
 import { cuttingLine, isDerivedView, isPictorial, nextViewLetter, parentView, sectionCut, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
-import type { Breakout, SectionCut } from '../kernel/protocol';
+import type { Breakout, PlacedPart, SectionCut, ViewCut } from '../kernel/protocol';
 import { v3 } from '../core/math';
 import { chosenLabel, configuredFeatures, inputName, variantStudio } from '../core/config';
 import { ConfigurationFields } from '../ui/ConfigurationFields';
@@ -27,12 +29,16 @@ import { DecimalInput } from '../ui/DecimalInput';
 import { Toast } from '../ui/Overlays';
 import { getLang, t } from '../i18n';
 import {
+  angleSector,
+  centerlineOf,
   chooseScale,
   cuttingLinePrims,
   detailCirclePrims,
+  dimLevel,
   dimPrims,
   frameRect,
   notePrims,
+  offsetForLevel,
   projectedOrientation,
   scaleLabel,
   sheetSize,
@@ -87,9 +93,56 @@ function viewGeometry(v: DrawingView, views: DrawingView[]) {
   return `${JSON.stringify([req.axes ?? v.orientation, req.section ?? null, req.breakout ?? null])}|${v.partIds.join(',')}|${v.showHidden}`;
 }
 
-function viewKey(v: DrawingView, views: DrawingView[], studio: PartStudioTab, doc?: CadDocument) {
-  return `${studioKeyOf(studio, doc)}|${viewGeometry(v, views)}`;
+function viewKey(v: DrawingView, views: DrawingView[], src: ViewSource) {
+  return `${src.version}|${viewGeometry(v, views)}`;
 }
+
+/** What a view shows, as the kernel has it: a Part Studio (as the view's configuration has it), an assembly's parts. */
+interface ViewSource {
+  /** The kernel's builder of it. */
+  key: string;
+  /** What it is built from: `${key}:${hash}`. */
+  version: string;
+  /** Built (placed) in the kernel. */
+  ensure: () => Promise<void>;
+}
+
+/** What a drawing's views come from: a Part Studio, an assembly. */
+type SourceTab = PartStudioTab | AssemblyTab;
+
+/** Assemblies placed in the kernel for drawings: builder key → the version placed. */
+const placedAssemblies = new Map<string, string>();
+
+function tabSource(doc: CadDocument, tab: DocTab | undefined, configuration?: Record<string, string>): ViewSource | undefined {
+  if (tab?.type === 'partStudio') {
+    const studio = variantStudio(tab, configuration);
+    return { key: studio.id, version: studioKeyOf(studio, doc), ensure: () => ensureBuilt(doc, studio) };
+  }
+  if (tab?.type !== 'assembly') return undefined;
+  // an assembly: its parts' Part Studios (each as its instances choose it), then the parts placed as one builder's
+  const parts = shownParts(doc.tabs, tab);
+  const studios = new Map<string, PartStudioTab>();
+  for (const i of parts) {
+    const s = doc.tabs.find((x) => x.id === i.studioId);
+    if (s?.type === 'partStudio' && !studios.has(sourceKey(i))) studios.set(sourceKey(i), variantStudio(s, i.configuration));
+  }
+  const key = `drawing-assembly:${tab.id}`;
+  const placed: PlacedPart[] = parts.map((i) => ({ id: i.id, studioKey: sourceKey(i), partId: i.partId, name: i.name, position: i.position, rotation: i.rotation }));
+  const version = `${key}:${hash(JSON.stringify([placed, [...studios.values()].map((s) => studioKeyOf(s, doc))]))}`;
+  return {
+    key,
+    version,
+    ensure: async () => {
+      for (const s of studios.values()) await ensureBuilt(doc, s);
+      if (placedAssemblies.get(key) === version) return;
+      await kernel().place(key, placed);
+      placedAssemblies.set(key, version);
+    },
+  };
+}
+
+/** A view's source: its Part Studio as its configuration has it, or its assembly. */
+const viewSource = (doc: CadDocument, v: DrawingView) => tabSource(doc, doc.tabs.find((x) => x.id === v.studioId), v.configuration);
 
 /** The kernel's projection of a view: a section view — along its own axes, cut by its plane. */
 function projectionRequest(v: DrawingView, views: DrawingView[]): { axes?: ViewAxes; section?: SectionCut; breakout?: Breakout } {
@@ -115,12 +168,6 @@ function projectedView(v: DrawingView, views: DrawingView[]): DrawingView {
   return cur;
 }
 
-/** The Part Studio of a view as the view's own configuration has it (its id: the variant's key). */
-function viewStudio(doc: CadDocument, v: DrawingView): PartStudioTab | undefined {
-  const studio = doc.tabs.find((x) => x.id === v.studioId);
-  return studio?.type === 'partStudio' ? variantStudio(studio, v.configuration) : undefined;
-}
-
 /** A view and the views projected with it (its parent, the parent's other views): they share scale and configuration. */
 const sameFamily = (a: DrawingView, b: DrawingView) => a.id === b.id || a.parent === b.id || b.parent === a.id || (!!a.parent && a.parent === b.parent);
 /** …but a detail view keeps its own scale (it enlarges). */
@@ -144,14 +191,30 @@ function alignCut(a: Vec2, b: Vec2): Vec2 {
 }
 
 /** Where dimensions' anchors are in their views: `${studio version}|${axes}|${refs}` → points (null — lost). */
-const refCache = new Map<string, ({ p: Vec2; r?: number } | null)[]>();
+const refCache = new Map<string, ({ p: Vec2; r?: number; ends?: [Vec2, Vec2] } | null)[]>();
 
 /** A new dimension's `refs` from the anchors found (none — no field). */
-const refsOf = (a: SelRef | null, b: SelRef | null = null): Pick<DrawingDimension, 'refs'> =>
+const refsOf = (a: ViewRef | null, b: ViewRef | null = null): Pick<DrawingDimension, 'refs'> =>
   a || b ? { refs: { ...(a ? { a } : {}), ...(b ? { b } : {}) } } : {};
 
 /** The anchors of a dimension in order: its first point (a circle's centre), its second. */
-const dimRefs = (dm: DrawingDimension): SelRef[] => [dm.refs?.a, dm.refs?.b].filter((r): r is SelRef => !!r);
+const dimRefs = (dm: DrawingDimension): ViewRef[] => [dm.refs?.a, dm.refs?.b].filter((r): r is ViewRef => !!r);
+
+/**
+ * Where a dimension's anchors were, in the same order (a point on each): of a cut's several crossings, lines or
+ * circles the kernel takes the nearest. An angle's lines — their points; a centre line's — their middles.
+ */
+function dimHints(dm: DrawingDimension): Vec2[] {
+  const mid = (p: Vec2, q: Vec2 = p): Vec2 => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const at = dm.kind === 'angle' ? [dm.b, dm.c] : dm.kind === 'centerline' ? [mid(dm.a, dm.b), dm.c && mid(dm.c, dm.d)] : [dm.a, dm.b];
+  return [dm.refs?.a && (at[0] ?? dm.a), dm.refs?.b && (at[1] ?? dm.a)].filter((p): p is Vec2 => !!p);
+}
+
+/** What a view cuts away (a section, a local section; a detail view — as its parent): none for a plain view. */
+function viewCutOf(v: DrawingView, views: DrawingView[]): ViewCut | undefined {
+  const { section, breakout } = projectionRequest(projectedView(v, views), views);
+  return section ? { section } : breakout ? { breakout } : undefined;
+}
 
 /**
  * Dimensions that follow the model (their points anchored to its vertices and circles): the kernel finds the anchors
@@ -162,30 +225,37 @@ function useLiveDimensions(doc: CadDocument, drawing: DrawingData) {
   const pending = useRef(new Set<string>());
   // each anchored dimension's key (its studio's version, the axes of its view, its anchors) and the key without the version
   const keys = useMemo(() => {
-    const out = new Map<string, { key: string; tail: string; studio: PartStudioTab; axes: ViewAxes; refs: SelRef[] }>();
-    const version = new Map<string, string>();
+    type Key = { key: string; tail: string; src: ViewSource; axes: ViewAxes; refs: ViewRef[]; cut?: ViewCut; near?: Vec2[]; partIds: string[] };
+    const out = new Map<string, Key>();
+    const sources = new Map<string, ViewSource | undefined>();
     for (const dm of drawing.dimensions) {
       const refs = dimRefs(dm);
       const view = drawing.views.find((v) => v.id === dm.viewId);
       if (!refs.length || !view) continue;
-      const studio = viewStudio(doc, projectedView(view, drawing.views));
-      if (!studio) continue;
-      if (!version.has(studio.id)) version.set(studio.id, studioKeyOf(studio, doc));
+      const pv = projectedView(view, drawing.views);
+      const sk = `${pv.studioId}|${JSON.stringify(pv.configuration ?? {})}`;
+      if (!sources.has(sk)) sources.set(sk, viewSource(doc, pv));
+      const src = sources.get(sk);
+      if (!src) continue;
       const axes = viewAxes(view, drawing.views);
-      const tail = `|${JSON.stringify(axes)}|${JSON.stringify(refs)}`;
-      out.set(dm.id, { key: version.get(studio.id) + tail, tail, studio, axes, refs });
+      // anchors on a section's cut: the cut, where they were
+      const onCut = refs.some((r) => r.cut);
+      const cut = onCut ? viewCutOf(view, drawing.views) : undefined;
+      const near = onCut ? dimHints(dm) : undefined;
+      const tail = `|${JSON.stringify(axes)}|${JSON.stringify(refs)}${cut ? `|${JSON.stringify([cut, near, pv.partIds])}` : ''}`;
+      out.set(dm.id, { key: src.version + tail, tail, src, axes, refs, cut, near, partIds: pv.partIds });
     }
     return out;
   }, [doc, drawing]);
   useEffect(() => {
     (async () => {
       await kernel().ready();
-      for (const { key, studio, axes, refs } of keys.values()) {
+      for (const { key, src, axes, refs, cut, near, partIds } of keys.values()) {
         if (refCache.has(key) || pending.current.has(key)) continue;
         pending.current.add(key);
         try {
-          await ensureBuilt(doc, studio);
-          refCache.set(key, (await kernel().viewRefs({ studioKey: studio.id, axes, refs })).points);
+          await src.ensure();
+          refCache.set(key, (await kernel().viewRefs({ studioKey: src.key, axes, refs, ...(cut ? { cut, near, partIds } : {}) })).points);
         } catch (e) {
           console.error(e);
         } finally {
@@ -205,11 +275,25 @@ function useLiveDimensions(doc: CadDocument, drawing: DrawingData) {
     let i = 0;
     const a = dm.refs?.a ? pts[i++] : null;
     const b = dm.refs?.b ? pts[i++] : null;
+    // a centre line: between its two lines as they are now
+    if (dm.kind === 'centerline') return a?.ends && b?.ends ? { ...dm, a: a.ends[0], b: a.ends[1], c: b.ends[0], d: b.ends[1] } : dm;
+    // an angle: where its lines cross now, each line's end on the side it was measured from
+    if (dm.kind === 'angle') {
+      const x = a?.ends && b?.ends ? lineCross(a.ends, b.ends) : null;
+      if (!x || !dm.b || !dm.c) return dm;
+      const dir = (p: Vec2): Vec2 => [p[0] - dm.a[0], p[1] - dm.a[1]];
+      const nb = lineEnd(a!.ends!, x, dir(dm.b));
+      const nc = lineEnd(b!.ends!, x, dir(dm.c));
+      // the same sector as before: a line whose point is now on the other side of the vertex counts the other way
+      const turned = (n: Vec2, was: Vec2): 1 | -1 => ((n[0] - x[0]) * dir(was)[0] + (n[1] - x[1]) * dir(was)[1] < 0 ? -1 : 1);
+      const sector: [1 | -1, 1 | -1] | undefined = dm.sector && [(dm.sector[0] * turned(nb, dm.b)) as 1 | -1, (dm.sector[1] * turned(nc, dm.c)) as 1 | -1];
+      return { ...dm, a: x, b: nb, c: nc, ...(sector ? { sector } : {}) };
+    }
     const live = { ...dm };
     if (a) {
       live.a = a.p;
       // a circle's size: its point on the circle from the centre
-      if ((dm.kind === 'diameter' || dm.kind === 'radius') && a.r !== undefined) live.b = [a.p[0] + a.r, a.p[1]];
+      if ((dm.kind === 'diameter' || dm.kind === 'radius' || dm.kind === 'centermark') && a.r !== undefined) live.b = [a.p[0] + a.r, a.p[1]];
     }
     if (b) live.b = b.p;
     return live;
@@ -219,19 +303,30 @@ function useLiveDimensions(doc: CadDocument, drawing: DrawingData) {
 function useProjections(doc: CadDocument, drawing: DrawingData) {
   const [, force] = useState(0);
   const pending = useRef(new Set<string>());
+  // each view's source (by its Part Studio and configuration, or its assembly)
+  const sources = useMemo(() => {
+    const bySource = new Map<string, ViewSource | undefined>();
+    const out = new Map<string, ViewSource | undefined>();
+    for (const v of drawing.views) {
+      const sk = `${v.studioId}|${JSON.stringify(v.configuration ?? {})}`;
+      if (!bySource.has(sk)) bySource.set(sk, viewSource(doc, v));
+      out.set(v.id, bySource.get(sk));
+    }
+    return out;
+  }, [doc, drawing.views]);
   useEffect(() => {
     (async () => {
       await kernel().ready();
       for (const v of drawing.views) {
-        const studio = viewStudio(doc, v);
+        const src = sources.get(v.id);
         // a detail view shows its parent's projection
-        if (!studio || v.detail) continue;
-        const key = viewKey(v, drawing.views, studio, doc);
+        if (!src || v.detail) continue;
+        const key = viewKey(v, drawing.views, src);
         if (projCache.has(key) || pending.current.has(key)) continue;
         pending.current.add(key);
         try {
-          await ensureBuilt(doc, studio);
-          const res = await kernel().projection({ studioKey: studio.id, partIds: v.partIds, orientation: v.orientation, hidden: true, ...projectionRequest(v, drawing.views) });
+          await src.ensure();
+          const res = await kernel().projection({ studioKey: src.key, partIds: v.partIds, orientation: v.orientation, hidden: true, ...projectionRequest(v, drawing.views) });
           projCache.set(key, { ...res, key });
         } catch (e) {
           console.error(e);
@@ -242,16 +337,16 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
         force((n) => n + 1);
       }
     })();
-  }, [doc, drawing.views]);
+  }, [sources, drawing.views]);
   return (view: DrawingView): ProjectionData | undefined => {
     const v = projectedView(view, drawing.views);
-    const studio = viewStudio(doc, v);
-    if (!studio) return undefined;
-    const exact = projCache.get(viewKey(v, drawing.views, studio, doc));
+    const src = sources.get(v.id);
+    if (!src) return undefined;
+    const exact = projCache.get(viewKey(v, drawing.views, src));
     if (exact) return exact;
     // stale projection of the same view while the new one is computed
     const geometry = `|${viewGeometry(v, drawing.views)}`;
-    for (const p of projCache.values()) if (p.key.startsWith(`${studio.id}:`) && p.key.endsWith(geometry)) return p;
+    for (const p of projCache.values()) if (p.key.startsWith(`${src.key}:`) && p.key.endsWith(geometry)) return p;
     return undefined;
   };
 }
@@ -322,7 +417,43 @@ function PrimSvg({ p, color }: { p: Prim2D; color?: string }) {
 
 // ---------------------------------------------------------------------------
 
-type Tool = 'select' | 'dimension' | 'note' | 'section' | 'detail' | 'callout' | 'breakout';
+type Tool = 'select' | 'dimension' | 'chain' | 'baseline' | 'angle' | 'ordinate' | 'axis' | 'note' | 'section' | 'detail' | 'callout' | 'breakout';
+
+/**
+ * Ordinate dimensions being made: their base on a view, a point picked (until the first is placed), then their axis and
+ * the line of values (sheet: its y for X ordinates, x for Y ones) for the next points.
+ */
+type OrdinateDraft = { viewId: string; base: Vec2; point?: Vec2; axis?: 'x' | 'y'; line?: number };
+
+/**
+ * Chain or baseline dimensions being made: their view, the first point, then the second; once the first is placed —
+ * their kind, the line's level across them (sheet) and which way further lines go, the last point.
+ */
+type RunDraft = { viewId: string; first: Vec2; second?: Vec2; kind?: DrawingDimension['kind']; level?: number; out?: number; last?: Vec2 };
+
+/** How far apart baseline dimensions' lines are, sheet mm. */
+const BASELINE_STEP = 8;
+
+/** An angle dimension being made: its view and the lines picked (view coordinates). */
+type AngleDraft = { viewId: string; l1: [Vec2, Vec2]; l2?: [Vec2, Vec2] };
+
+/** Where two lines (through their two points each) cross; none when parallel. */
+function lineCross(l1: [Vec2, Vec2], l2: [Vec2, Vec2]): Vec2 | null {
+  const [p, q] = l1;
+  const [r, s] = l2;
+  const d1: Vec2 = [q[0] - p[0], q[1] - p[1]];
+  const d2: Vec2 = [s[0] - r[0], s[1] - r[1]];
+  const den = d1[0] * d2[1] - d1[1] * d2[0];
+  if (Math.abs(den) < 1e-9 * Math.hypot(...d1) * Math.hypot(...d2)) return null;
+  const t = ((r[0] - p[0]) * d2[1] - (r[1] - p[1]) * d2[0]) / den;
+  return [p[0] + t * d1[0], p[1] + t * d1[1]];
+}
+
+/** The end of a line farthest from `x` along `dir` (the side an angle was measured on); else the farthest one. */
+function lineEnd(l: [Vec2, Vec2], x: Vec2, dir?: Vec2): Vec2 {
+  const score = (e: Vec2) => (dir ? (e[0] - x[0]) * dir[0] + (e[1] - x[1]) * dir[1] : Math.hypot(e[0] - x[0], e[1] - x[1]));
+  return score(l[0]) >= score(l[1]) ? l[0] : l[1];
+}
 
 interface DimDraft {
   viewId: string;
@@ -455,7 +586,12 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const [dimDraft, setDimDraft] = useState<DimDraft | null>(null);
   const [viewDraft, setViewDraft] = useState<ViewDraft | null>(null);
   /** A hole callout being placed: its view and the hole's centre there. */
-  const [calloutDraft, setCalloutDraft] = useState<{ viewId: string; a: Vec2 } | null>(null);
+  const [calloutDraft, setCalloutDraft] = useState<{ viewId: string; a: Vec2; r?: number; side?: boolean } | null>(null);
+  const [angleDraft, setAngleDraft] = useState<AngleDraft | null>(null);
+  const [ordDraft, setOrdDraft] = useState<OrdinateDraft | null>(null);
+  const [runDraft, setRunDraft] = useState<RunDraft | null>(null);
+  /** A centre line's first line picked (its view, its ends). */
+  const [axisDraft, setAxisDraft] = useState<{ viewId: string; l1: [Vec2, Vec2] } | null>(null);
   /** A local section's outline being clicked: its view and the points so far (view coordinates). */
   const [breakDraft, setBreakDraft] = useState<{ viewId: string; pts: Vec2[] } | null>(null);
   const [noteEdit, setNoteEdit] = useState<{ id: string; text: string } | null>(null);
@@ -471,7 +607,11 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const [labelEdit, setLabelEdit] = useState<{ id: string; text: string } | null>(null);
   /** The section view whose cutting line is being drawn anew (its context menu, a double click). */
   const [editSection, setEditSection] = useState<string | null>(null);
-  const studios = doc.tabs.filter((x): x is PartStudioTab => x.type === 'partStudio');
+  // what views can show: Part Studios, then assemblies
+  const studios: SourceTab[] = [
+    ...doc.tabs.filter((x): x is PartStudioTab => x.type === 'partStudio'),
+    ...doc.tabs.filter((x): x is AssemblyTab => x.type === 'assembly'),
+  ];
   const [W, H] = sheetSize(d);
   const titleRect = titleBlockRect(d);
   const unit = doc.units.length;
@@ -520,14 +660,15 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   };
 
   // ---------------------------------------------------------------- views
-  const insertStandard = async (studio: PartStudioTab) => {
+  const insertStandard = async (studio: SourceTab) => {
     if (inserting) return;
     setInserting(true);
     try {
       await kernel().ready();
-      await ensureBuilt(doc, studio);
-      const front = await kernel().projection({ studioKey: studio.id, partIds: [], orientation: 'front', hidden: false });
-      const top = await kernel().projection({ studioKey: studio.id, partIds: [], orientation: 'top', hidden: false });
+      const src = tabSource(doc, studio)!;
+      await src.ensure();
+      const front = await kernel().projection({ studioKey: src.key, partIds: [], orientation: 'front', hidden: false });
+      const top = await kernel().projection({ studioKey: src.key, partIds: [], orientation: 'top', hidden: false });
       if (!front.bounds || !top.bounds) {
         useEditor.getState().showToast(t('The part studio has no parts to draw'), 'error');
         return;
@@ -592,7 +733,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     }
   };
 
-  const insertView = (studio: PartStudioTab, orientation: ViewOrientation) => {
+  const insertView = (studio: SourceTab, orientation: ViewOrientation) => {
     const f = frameRect(d);
     const scale = d.views[0]?.scale ?? 1;
     upd((dd) => {
@@ -696,15 +837,16 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   };
 
   /** The hole (of a Hole feature, seen end-on) under a sheet point: its view and centre. */
-  const holeAt = (p: Vec2): { viewId: string; a: Vec2; r: number } | null => {
-    let best: { viewId: string; a: Vec2; r: number; d: number } | null = null;
+  const holeAt = (p: Vec2): { viewId: string; a: Vec2; r: number; side?: { dir: Vec2; len: number } } | null => {
+    let best: { viewId: string; a: Vec2; r: number; side?: { dir: Vec2; len: number }; d: number } | null = null;
     for (const v of d.views) {
       const pr = proj(v);
       for (const h of pr?.holes ?? []) {
         if (v.detail && Math.hypot(h.c[0] - v.detail.c[0], h.c[1] - v.detail.c[1]) > v.detail.r) continue;
         const s = toSheet(v, pr, h.c);
-        const dist = Math.hypot(s[0] - p[0], s[1] - p[1]);
-        if (dist <= h.r * v.scale + 4 / c.zoom && (!best || dist < best.d)) best = { viewId: v.id, a: h.c, r: h.r, d: dist };
+        // seen end-on: from its centre; from the side: from its axis (inside its outline)
+        const dist = h.side ? segDist(p, s, [s[0] + h.side.dir[0] * h.side.len * v.scale, s[1] + h.side.dir[1] * h.side.len * v.scale]) : Math.hypot(s[0] - p[0], s[1] - p[1]);
+        if (dist <= h.r * v.scale + 4 / c.zoom && (!best || dist < best.d)) best = { viewId: v.id, a: h.c, r: h.r, ...(h.side ? { side: h.side } : {}), d: dist };
       }
     }
     return best;
@@ -767,17 +909,71 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     setCam({ x: nx, y: ny, zoom });
   };
 
-  /** The model vertex (or circle, `circle`) a point of a view stands for: a dimension follows the model through it. */
-  const anchorOf = async (v: DrawingView, p: Vec2, circle?: { r?: number }): Promise<SelRef | null> => {
+  /**
+   * The model vertex (or circle, `circle`; or the straight edge along the line to `lineTo`) a point of a view stands
+   * for: a dimension follows the model through it.
+   */
+  const anchorOf = async (v: DrawingView, p: Vec2, circle?: { r?: number; side?: boolean }, lineTo?: Vec2): Promise<ViewRef | null> => {
     const pv = projectedView(v, d.views);
-    const studio = viewStudio(doc, pv);
-    if (!studio) return null;
+    const src = viewSource(doc, pv);
+    if (!src) return null;
+    // in a section: of the parts as cut (a point of the cut — where an edge crosses it)
+    const cut = viewCutOf(v, d.views);
     try {
-      await ensureBuilt(doc, studio);
-      return (await kernel().viewAnchor({ studioKey: studio.id, partIds: pv.partIds, axes: viewAxes(v, d.views), p, ...(circle ? { circle } : {}) })).ref;
+      await src.ensure();
+      return (
+        await kernel().viewAnchor({
+          studioKey: src.key,
+          partIds: pv.partIds,
+          axes: viewAxes(v, d.views),
+          p,
+          ...(circle ? { circle } : {}),
+          ...(lineTo ? { lineTo } : {}),
+          ...(cut ? { cut } : {}),
+        })
+      ).ref;
     } catch {
       return null;
     }
+  };
+
+  /** The straight line of a view under sheet point `p` (an angle dimension's line): its view and ends. */
+  const lineAt = (p: Vec2): { viewId: string; l: [Vec2, Vec2] } | null => {
+    const tol = 6 / c.zoom;
+    let best: { viewId: string; l: [Vec2, Vec2]; d: number } | null = null;
+    for (const v of d.views) {
+      const pr = proj(v);
+      if (!pr || isPictorial(v.orientation)) continue;
+      for (const e of pr.edges) {
+        if (e.pts.length !== 2 || e.circle) continue;
+        const dist = segDist(p, toSheet(v, pr, e.pts[0]), toSheet(v, pr, e.pts[1]));
+        if (dist < tol && (!best || dist < best.d)) best = { viewId: v.id, l: [e.pts[0], e.pts[1]], d: dist };
+      }
+    }
+    return best && { viewId: best.viewId, l: best.l };
+  };
+
+  /** The circle or arc of a view under sheet point `p`: its view, centre and radius (view coordinates). */
+  const arcAt = (p: Vec2): { viewId: string; c: Vec2; r: number } | null => {
+    const tol = 6 / c.zoom;
+    let best: { viewId: string; c: Vec2; r: number; d: number } | null = null;
+    for (const v of d.views) {
+      const pr = proj(v);
+      if (!pr || isPictorial(v.orientation)) continue;
+      for (const e of pr.edges) {
+        if (!e.circle || e.pts.length < 2) continue;
+        const s = e.pts.map((q) => toSheet(v, pr, q));
+        const dist = Math.min(...s.slice(1).map((q, i) => segDist(p, s[i], q)));
+        if (dist < tol && (!best || dist < best.d)) best = { viewId: v.id, c: e.circle.c, r: e.circle.r, d: dist };
+      }
+    }
+    return best && { viewId: best.viewId, c: best.c, r: best.r };
+  };
+
+  /** An angle dimension from its two lines: where they cross, each line's far end from there. */
+  const angleOf = (l1: [Vec2, Vec2], l2: [Vec2, Vec2]): { a: Vec2; b: Vec2; c: Vec2 } | null => {
+    const x = lineCross(l1, l2);
+    return x && { a: x, b: lineEnd(l1, x), c: lineEnd(l2, x) };
   };
 
   // dimensions made before they followed the model: anchored once to what is at their points now, if anything
@@ -786,7 +982,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   useEffect(() => {
     for (const dm of d.dimensions) {
       const v = d.views.find((x) => x.id === dm.viewId);
-      if (dm.refs || anchoring.current.has(dm.id) || !v || !proj(v)) continue;
+      // (an angle is made anchored to its lines, or never)
+      if (dm.refs || dm.kind === 'angle' || dm.kind === 'centerline' || dm.kind === 'centermark' || anchoring.current.has(dm.id) || !v || !proj(v)) continue;
       anchoring.current.add(dm.id);
       const round = dm.kind === 'diameter' || dm.kind === 'radius' || dm.kind === 'hole';
       const circle = round ? (dm.b ? { r: Math.hypot(dm.b[0] - dm.a[0], dm.b[1] - dm.a[1]) } : {}) : undefined;
@@ -804,11 +1001,14 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     }
   });
 
-  /** The dimension or hole callout whose text is at sheet point `p`. */
+  /** The dimension or hole callout whose text is at sheet point `p` (a centre line or mark: one of its lines). */
   const dimAt = (p: Vec2): DrawingDimension | undefined =>
     d.dimensions.find((dm) => {
       const v = d.views.find((x) => x.id === dm.viewId);
-      return !!v && !!proj(v) && dimPrims(live(dm), v, proj(v), uf, t, comma).some((pr) => pr.t === 'text' && Math.hypot(pr.p[0] - p[0], pr.p[1] - p[1]) < 5);
+      if (!v || !proj(v)) return false;
+      const prims = dimPrims(live(dm), v, proj(v), uf, t, comma);
+      if (dm.kind === 'centerline' || dm.kind === 'centermark') return prims.some((pr) => pr.t === 'line' && segDist(p, pr.a, pr.b) < 6 / c.zoom);
+      return prims.some((pr) => pr.t === 'text' && Math.hypot(pr.p[0] - p[0], pr.p[1] - p[1]) < 5);
     });
 
   /** The view whose label is at sheet point `p`. */
@@ -959,16 +1159,163 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       else setBreakDraft({ ...breakDraft, pts: [...breakDraft.pts, toModel(v, proj(v), p)] });
       return;
     }
+    if (tool === 'chain' || tool === 'baseline') {
+      const sp = snapPoint(p);
+      const pt = sp && !sp.circle ? sp : null;
+      if (!runDraft) {
+        if (pt) setRunDraft({ viewId: pt.viewId, first: pt.p });
+        return;
+      }
+      const v = d.views.find((x) => x.id === runDraft.viewId);
+      if (!v) return setRunDraft(null);
+      const pr = proj(v);
+      const same = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6;
+      // a dimension from a to b with its line at `level` (anchored, as all dimensions)
+      const add = (a: Vec2, b: Vec2, kind: DrawingDimension['kind'], offset: number) =>
+        void Promise.all([anchorOf(v, a), anchorOf(v, b)]).then(([ra, rb]) =>
+          upd((dd) => {
+            dd.dimensions.push({ id: uid('d'), viewId: v.id, kind, a, b, offset, ...refsOf(ra, rb) });
+          }),
+        );
+      if (!runDraft.second) {
+        if (!pt || pt.viewId !== v.id || same(pt.p, runDraft.first)) return;
+        setRunDraft({ ...runDraft, second: pt.p });
+        return;
+      }
+      if (!runDraft.kind) {
+        // the first: as a dimension is placed; its line sets the others'
+        const A = toSheet(v, pr, runDraft.first);
+        const B = toSheet(v, pr, runDraft.second);
+        const { kind, offset } = placeLinear(A, B, p);
+        add(runDraft.first, runDraft.second, kind, offset);
+        setRunDraft({ ...runDraft, kind, level: dimLevel(kind, A, B, offset), out: offset < 0 ? -1 : 1, last: runDraft.second });
+        return;
+      }
+      // the next point: on from the last one (a chain) or from the first, a step further out (baseline)
+      if (!pt || pt.viewId !== v.id) return;
+      const from = tool === 'chain' ? runDraft.last! : runDraft.first;
+      if (same(pt.p, from)) return;
+      const level = tool === 'chain' ? runDraft.level! : runDraft.level! + runDraft.out! * BASELINE_STEP;
+      add(from, pt.p, runDraft.kind, offsetForLevel(runDraft.kind, toSheet(v, pr, from), toSheet(v, pr, pt.p), level));
+      setRunDraft({ ...runDraft, level, last: pt.p });
+      return;
+    }
+    if (tool === 'axis') {
+      if (!axisDraft) {
+        // a circle or an arc: its centre mark at once (anchored to the model's circle)
+        const arc = arcAt(p);
+        const av = arc && d.views.find((x) => x.id === arc.viewId);
+        if (arc && av) {
+          void anchorOf(av, arc.c, { r: arc.r }).then((ra) =>
+            upd((dd) => {
+              dd.dimensions.push({ id: uid('d'), viewId: av.id, kind: 'centermark', a: arc.c, b: [arc.c[0] + arc.r, arc.c[1]], offset: 0, ...refsOf(ra) });
+            }),
+          );
+          return;
+        }
+        // a straight line: the first of two
+        const hit = lineAt(p);
+        if (hit) setAxisDraft({ viewId: hit.viewId, l1: hit.l });
+        return;
+      }
+      const v = d.views.find((x) => x.id === axisDraft.viewId);
+      if (!v) return setAxisDraft(null);
+      const hit = lineAt(p);
+      // the second: of the same view, parallel to the first and apart from it
+      const l1 = axisDraft.l1;
+      const axis = hit && hit.viewId === v.id ? centerlineOf(l1, hit.l) : null;
+      if (!hit || !axis) return;
+      const u = [l1[1][0] - l1[0][0], l1[1][1] - l1[0][1]];
+      const apart = Math.abs((hit.l[0][0] - l1[0][0]) * u[1] - (hit.l[0][1] - l1[0][1]) * u[0]) / Math.hypot(u[0], u[1]);
+      if (apart < 1e-6) return;
+      const l2 = hit.l;
+      setAxisDraft(null);
+      void Promise.all([anchorOf(v, l1[0], undefined, l1[1]), anchorOf(v, l2[0], undefined, l2[1])]).then(([ra, rb]) =>
+        upd((dd) => {
+          dd.dimensions.push({ id: uid('d'), viewId: v.id, kind: 'centerline', a: l1[0], b: l1[1], c: l2[0], d: l2[1], offset: 0, ...refsOf(ra, rb) });
+        }),
+      );
+      return;
+    }
+    if (tool === 'ordinate') {
+      const sp = snapPoint(p);
+      if (!ordDraft) {
+        if (sp && !sp.circle) setOrdDraft({ viewId: sp.viewId, base: sp.p });
+        return;
+      }
+      const v = d.views.find((x) => x.id === ordDraft.viewId);
+      if (!v) return setOrdDraft(null);
+      const pr = proj(v);
+      // an ordinate of point q on the line of values (anchored, as all dimensions)
+      const place = (q: Vec2, axis: 'x' | 'y', line: number) => {
+        const s = toSheet(v, pr, q);
+        const textPos: Vec2 = axis === 'x' ? [s[0], line] : [line, s[1]];
+        const base = ordDraft.base;
+        void Promise.all([anchorOf(v, base), q === base ? Promise.resolve(null) : anchorOf(v, q)]).then(([ra, rb]) =>
+          upd((dd) => {
+            dd.dimensions.push({ id: uid('d'), viewId: v.id, kind: 'ordinate', ordinate: axis, a: base, b: q, offset: 0, textPos, ...refsOf(ra, q === base ? ra : rb) });
+          }),
+        );
+      };
+      if (!ordDraft.axis) {
+        if (!ordDraft.point) {
+          // the first point measured (not the base itself)
+          if (!sp || sp.circle || sp.viewId !== v.id || Math.hypot(sp.p[0] - ordDraft.base[0], sp.p[1] - ordDraft.base[1]) < 1e-6) return;
+          setOrdDraft({ ...ordDraft, point: sp.p });
+          return;
+        }
+        // where the line of values goes: up / down from the point — X ordinates, aside — Y ones; the base's "0" too
+        const s = toSheet(v, pr, ordDraft.point);
+        const axis = Math.abs(p[1] - s[1]) >= Math.abs(p[0] - s[0]) ? 'x' : 'y';
+        const line = axis === 'x' ? p[1] : p[0];
+        place(ordDraft.base, axis, line);
+        place(ordDraft.point, axis, line);
+        setOrdDraft({ viewId: v.id, base: ordDraft.base, axis, line });
+        return;
+      }
+      // more points: on the same line of values
+      if (sp && !sp.circle && sp.viewId === v.id) place(sp.p, ordDraft.axis, ordDraft.line!);
+      return;
+    }
+    if (tool === 'angle') {
+      const hit = lineAt(p);
+      if (!angleDraft) {
+        if (hit) setAngleDraft({ viewId: hit.viewId, l1: hit.l });
+        return;
+      }
+      const v = d.views.find((x) => x.id === angleDraft.viewId);
+      if (!v) return setAngleDraft(null);
+      if (!angleDraft.l2) {
+        // the second line: of the same view, not parallel to the first
+        if (!hit || hit.viewId !== v.id || !lineCross(angleDraft.l1, hit.l)) return;
+        setAngleDraft({ ...angleDraft, l2: hit.l });
+        return;
+      }
+      const ang = angleOf(angleDraft.l1, angleDraft.l2);
+      const { l1, l2 } = angleDraft;
+      setAngleDraft(null);
+      if (!ang) return;
+      // the sector the arc is placed in, kept from now on
+      const sector = angleSector(ang.a, ang.b, ang.c, toModel(v, proj(v), p))?.signs;
+      // anchored to the model's straight edges: it follows the model
+      void Promise.all([anchorOf(v, l1[0], undefined, l1[1]), anchorOf(v, l2[0], undefined, l2[1])]).then(([ra, rb]) =>
+        upd((dd) => {
+          dd.dimensions.push({ id: uid('d'), viewId: v.id, kind: 'angle', ...ang, ...(sector ? { sector } : {}), offset: 0, textPos: p, ...refsOf(ra, rb) });
+        }),
+      );
+      return;
+    }
     if (tool === 'callout') {
       if (!calloutDraft) {
         const h = holeAt(p);
-        if (h) setCalloutDraft({ viewId: h.viewId, a: h.a });
+        if (h) setCalloutDraft({ viewId: h.viewId, a: h.a, r: h.r, ...(h.side ? { side: true } : {}) });
         return;
       }
       const dr = calloutDraft;
       const cv = d.views.find((x) => x.id === dr.viewId);
       // anchored to the hole's circle: it follows the hole when the model changes
-      void (cv ? anchorOf(cv, dr.a, {}) : Promise.resolve(null)).then((ra) =>
+      // (from the side: its mouth's circle, seen edge-on)
+      void (cv ? anchorOf(cv, dr.a, dr.side ? { r: dr.r, side: true } : {}) : Promise.resolve(null)).then((ra) =>
         upd((dd) => {
           dd.dimensions.push({ id: uid('d'), viewId: dr.viewId, kind: 'hole', a: dr.a, offset: 0, textPos: p, ...refsOf(ra) });
         }),
@@ -1096,6 +1443,15 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         if (lv.b && (x.kind === 'linear' || x.kind === 'horizontal' || x.kind === 'vertical')) x.offset = linearOffset(toSheet(v, pr, lv.a), toSheet(v, pr, lv.b), x.kind, p);
         // the text keeps where it was grabbed
         else x.textPos = dr.orig ? [dr.orig[0] + p[0] - dr.start[0], dr.orig[1] + p[1] - dr.start[1]] : p;
+        // an angle: the sector its arc is dragged into (stored against its own points, as the live ones may be turned)
+        if (x.kind === 'angle' && x.textPos && lv.b && lv.c) {
+          const s = angleSector(lv.a, lv.b, lv.c, toModel(v, pr, x.textPos))?.signs;
+          if (s) {
+            const was = dm.sector ?? [1, 1];
+            const now = lv.sector ?? [1, 1];
+            x.sector = [(s[0] * was[0] * now[0]) as 1 | -1, (s[1] * was[1] * now[1]) as 1 | -1];
+          }
+        }
       }, `dim-${dr.id}`);
     } else if (dr.kind === 'label' && dr.id && dr.orig) {
       const off: Vec2 = [dr.orig[0] + p[0] - dr.start[0], dr.orig[1] + p[1] - dr.start[1]];
@@ -1282,6 +1638,11 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   // a cutting line drawn anew only while the section tool is on
   useEffect(() => {
     if (tool !== 'section' && tool !== 'detail') setEditSection(null);
+    // an angle's lines picked so far, ordinates' base: for their tools only
+    if (tool !== 'angle') setAngleDraft(null);
+    if (tool !== 'ordinate') setOrdDraft(null);
+    if (tool !== 'axis') setAxisDraft(null);
+    setRunDraft(null);
   }, [tool]);
 
   // (for the keys: the outline being clicked, closed by Enter)
@@ -1298,6 +1659,10 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         setViewDraft(null);
         setCalloutDraft(null);
         setBreakDraft(null);
+        setAngleDraft(null);
+        setOrdDraft(null);
+        setAxisDraft(null);
+        setRunDraft(null);
         setTool('select');
         setSelected(null);
       }
@@ -1398,9 +1763,67 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const calloutView = calloutDraft && d.views.find((x) => x.id === calloutDraft.viewId);
   if (calloutDraft && calloutView && cursor)
     previewPrims.push(...dimPrims({ id: 'p', viewId: calloutView.id, kind: 'hole', a: calloutDraft.a, offset: 0, textPos: cursor }, calloutView, proj(calloutView), uf, t, comma));
+  // …of an angle: its lines picked, then the arc through the cursor
+  const angleView = angleDraft && d.views.find((x) => x.id === angleDraft.viewId);
+  if (angleDraft && angleView) {
+    const pr = proj(angleView);
+    for (const l of [angleDraft.l1, angleDraft.l2]) if (l) previewPrims.push({ t: 'line', a: toSheet(angleView, pr, l[0]), b: toSheet(angleView, pr, l[1]), style: 'visible' });
+    const ang = angleDraft.l2 && angleOf(angleDraft.l1, angleDraft.l2);
+    if (ang && cursor) previewPrims.push(...dimPrims({ id: 'p', viewId: angleView.id, kind: 'angle', ...ang, offset: 0, textPos: cursor }, angleView, pr, uf, t, comma));
+  }
+  // …of chain / baseline dimensions: the first as a dimension is, then the next one to the point under the cursor
+  const runView = runDraft && d.views.find((x) => x.id === runDraft.viewId);
+  if (runDraft && runView && cursor) {
+    const pr = proj(runView);
+    const A = toSheet(runView, pr, runDraft.first);
+    if (!runDraft.second) previewPrims.push({ t: 'line', a: A, b: cursor, style: 'dimension' });
+    else if (!runDraft.kind) {
+      const { kind, offset } = placeLinear(A, toSheet(runView, pr, runDraft.second), cursor);
+      previewPrims.push(...dimPrims({ id: 'p', viewId: runView.id, kind, a: runDraft.first, b: runDraft.second, offset }, runView, pr, uf, t, comma));
+    } else {
+      const sp = snapPoint(cursor);
+      const from = tool === 'chain' ? runDraft.last! : runDraft.first;
+      if (sp && !sp.circle && sp.viewId === runView.id) {
+        const level = tool === 'chain' ? runDraft.level! : runDraft.level! + runDraft.out! * BASELINE_STEP;
+        const offset = offsetForLevel(runDraft.kind, toSheet(runView, pr, from), toSheet(runView, pr, sp.p), level);
+        previewPrims.push(...dimPrims({ id: 'p', viewId: runView.id, kind: runDraft.kind, a: from, b: sp.p, offset }, runView, pr, uf, t, comma));
+      }
+    }
+  }
+  // …of ordinates: the base, then the first point's value following the cursor
+  const ordView = ordDraft && d.views.find((x) => x.id === ordDraft.viewId);
+  if (ordDraft && ordView) {
+    const pr = proj(ordView);
+    previewPrims.push({ t: 'circle', c: toSheet(ordView, pr, ordDraft.base), r: 1.2, style: 'thin' });
+    if (ordDraft.point && !ordDraft.axis && cursor) {
+      const s = toSheet(ordView, pr, ordDraft.point);
+      const axis = Math.abs(cursor[1] - s[1]) >= Math.abs(cursor[0] - s[0]) ? 'x' : 'y';
+      for (const q of [ordDraft.base, ordDraft.point]) {
+        const qs = toSheet(ordView, pr, q);
+        const textPos: Vec2 = axis === 'x' ? [qs[0], cursor[1]] : [cursor[0], qs[1]];
+        previewPrims.push(...dimPrims({ id: 'p', viewId: ordView.id, kind: 'ordinate', ordinate: axis, a: ordDraft.base, b: q, offset: 0, textPos }, ordView, pr, uf, t, comma));
+      }
+    }
+  }
+  /** The line an angle would be measured from, lit up under the cursor. */
+  const lineHint = ((tool === 'angle' && !angleDraft?.l2) || tool === 'axis') && cursor ? lineAt(cursor) : null;
+  // …of a centre line: its first line; a circle or arc that would get a centre mark, lit up
+  const axisView = axisDraft && d.views.find((x) => x.id === axisDraft.viewId);
+  if (axisDraft && axisView) {
+    const pr = proj(axisView);
+    previewPrims.push({ t: 'line', a: toSheet(axisView, pr, axisDraft.l1[0]), b: toSheet(axisView, pr, axisDraft.l1[1]), style: 'visible' });
+  }
+  const arcHint = tool === 'axis' && !axisDraft && cursor ? arcAt(cursor) : null;
   /** The hole a callout would point at, lit up under the cursor. */
   const holeHint = tool === 'callout' && !calloutDraft && cursor ? holeAt(cursor) : null;
-  const snapHint = (tool === 'dimension' || ((tool === 'section' || tool === 'detail') && !viewDraft?.b)) && cursor ? snapPoint(cursor) : null;
+  const snapHint =
+    (tool === 'dimension' ||
+      ((tool === 'chain' || tool === 'baseline') && !(runDraft?.second && !runDraft.kind)) ||
+      (tool === 'ordinate' && !(ordDraft?.point && !ordDraft.axis)) ||
+      ((tool === 'section' || tool === 'detail') && !viewDraft?.b)) &&
+    cursor
+      ? snapPoint(cursor)
+      : null;
   const selView = selected?.kind === 'view' ? d.views.find((v) => v.id === selected.id) : undefined;
   const studioOf = (v: DrawingView) => doc.tabs.find((x): x is PartStudioTab => x.id === v.studioId && x.type === 'partStudio');
   const selStudio = selView && studioOf(selView);
@@ -1656,6 +2079,45 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           <button className={'icon-btn' + (tool === 'dimension' ? ' active' : '')} title={t('Dimension') + ' (D)'} onClick={() => setTool('dimension')}>
             <Icon name="dimension" />
           </button>
+          <button className={'icon-btn' + (tool === 'chain' ? ' active' : '')} title={t('Chain dimensions')} disabled={!d.views.length} onClick={() => setTool('chain')}>
+            <Icon name="chainDimension" />
+          </button>
+          <button className={'icon-btn' + (tool === 'baseline' ? ' active' : '')} title={t('Baseline dimensions')} disabled={!d.views.length} onClick={() => setTool('baseline')}>
+            <Icon name="baselineDimension" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'angle' ? ' active' : '')}
+            title={t('Angular dimension (between two lines)')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setAngleDraft(null);
+              setTool('angle');
+            }}
+          >
+            <Icon name="angleDimension" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'ordinate' ? ' active' : '')}
+            title={t('Ordinate dimensions (from a base point)')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setOrdDraft(null);
+              setTool('ordinate');
+            }}
+          >
+            <Icon name="ordinateDimension" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'axis' ? ' active' : '')}
+            title={t('Centre line or centre mark')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setAxisDraft(null);
+              setTool('axis');
+            }}
+          >
+            <Icon name="centerline" />
+          </button>
           <button
             className={'icon-btn' + (tool === 'callout' ? ' active' : '')}
             title={t('Hole callout')}
@@ -1781,10 +2243,32 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
               {previewPrims.map((p, i) => (
                 <PrimSvg key={`pv${i}`} p={p} color="#1f6fd1" />
               ))}
+              {lineHint &&
+                !arcHint &&
+                (() => {
+                  const v = d.views.find((x) => x.id === lineHint.viewId)!;
+                  const [s, e] = lineHint.l.map((q) => toSheet(v, proj(v), q));
+                  return <line x1={s[0]} y1={s[1]} x2={e[0]} y2={e[1]} stroke="#ff7a00" strokeWidth={0.6} />;
+                })()}
+              {arcHint &&
+                (() => {
+                  const v = d.views.find((x) => x.id === arcHint.viewId)!;
+                  const s = toSheet(v, proj(v), arcHint.c);
+                  return <circle cx={s[0]} cy={s[1]} r={arcHint.r * v.scale} fill="none" stroke="#ff7a00" strokeWidth={0.6} />;
+                })()}
               {holeHint &&
                 (() => {
                   const v = d.views.find((x) => x.id === holeHint.viewId)!;
                   const s = toSheet(v, proj(v), holeHint.a);
+                  const sd = holeHint.side;
+                  if (sd) {
+                    // seen from the side: its outline, mouth to bottom
+                    const r = holeHint.r * v.scale;
+                    const l = sd.len * v.scale;
+                    const [ux, uy] = sd.dir;
+                    const pts = [[-uy * r, ux * r], [-uy * r + ux * l, ux * r + uy * l], [uy * r + ux * l, -ux * r + uy * l], [uy * r, -ux * r]].map(([x, y]) => `${s[0] + x},${s[1] + y}`);
+                    return <polygon points={pts.join(' ')} fill="none" stroke="#ff7a00" strokeWidth={0.6} />;
+                  }
                   return <circle cx={s[0]} cy={s[1]} r={holeHint.r * v.scale} fill="none" stroke="#ff7a00" strokeWidth={0.6} />;
                 })()}
               {snapHint &&
@@ -1873,8 +2357,34 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         <div className="drawing-status">
           {tool === 'dimension'
             ? t('Click two points or a circle, then place the dimension. Shift = radius.')
+            : tool === 'chain' || tool === 'baseline'
+              ? t(
+                  !runDraft
+                    ? 'Click the first point on a view.'
+                    : !runDraft.second
+                      ? 'Click the second point.'
+                      : !runDraft.kind
+                        ? 'Click where the dimension line goes.'
+                        : tool === 'chain'
+                          ? 'Click the next point: its dimension goes on from the last one, on the same line. Esc — done.'
+                          : 'Click the next point: its dimension is from the first one, a line further out. Esc — done.',
+                )
+            : tool === 'axis'
+              ? t(!axisDraft ? 'Centre line: click two parallel lines; a circle or arc — its centre mark.' : 'Click the second line, parallel to the first. Esc — cancel.')
+            : tool === 'ordinate'
+              ? t(
+                  !ordDraft
+                    ? 'Ordinate dimensions: click the base point (0) on a view.'
+                    : !ordDraft.axis && !ordDraft.point
+                      ? 'Click a point to measure from the base.'
+                      : !ordDraft.axis
+                        ? 'Move up or down (along X) or aside (along Y) and click where the values go.'
+                        : 'Click more points: their values go on the same line. Esc — done.',
+                )
+            : tool === 'angle'
+              ? t(!angleDraft ? 'Angular dimension: click a straight line on a view.' : !angleDraft.l2 ? 'Click the second line (not parallel to the first).' : 'Click where the arc goes: the angle of that side is measured. Esc — cancel.')
             : tool === 'callout'
-              ? t(!calloutDraft ? 'Hole callout: click a hole made by the Hole feature (seen end-on).' : 'Click where to place the callout. Esc — cancel.')
+              ? t(!calloutDraft ? 'Hole callout: click a hole made by the Hole feature (end-on or from the side).' : 'Click where to place the callout. Esc — cancel.')
             : tool === 'breakout'
               ? t(!breakDraft ? 'Local section: click points round the area on a view.' : 'Click more points; the first point (or Enter) closes the outline. Esc — cancel.')
             : tool === 'section' && editSection

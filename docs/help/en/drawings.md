@@ -21,9 +21,9 @@ alt: The Drawing tab: standard views of a part on an A3 sheet, the sheet and vie
 
 1. Click **+** in the bottom bar and choose **Drawing**. A tab with an empty sheet appears.
 2. Click **Standard views (3 + iso)** (on the empty sheet or in the **Insert view** menu). WebCAD inserts the front, side, top, and isometric views and picks a scale that fits the sheet size.
-3. To add a single view, use **Insert view** → Part Studio → **Front**, **Back**, **Top**, **Bottom**, **Left**, **Right**, **Isometric**, **Dimetric**, or **Trimetric**. The dimetric view follows ISO 5456-3 / GOST 2.317: X and Z are shortened alike (0.94), Y by half (0.47); the trimetric one is the same as the graphics area's Trimetric view.
+3. To add a single view, use **Insert view** → Part Studio or assembly → **Front**, **Back**, **Top**, **Bottom**, **Left**, **Right**, **Isometric**, **Dimetric**, or **Trimetric**. The dimetric view follows ISO 5456-3 / GOST 2.317: X and Z are shortened alike (0.94), Y by half (0.47); the trimetric one is the same as the graphics area's Trimetric view.
 
-Views are built from the current Part Studio model with hidden lines removed; you can show hidden lines as dashed lines. Tapped [holes](hole#thread) are shown by the ISO 6410 convention: a thin three-quarter circle from the hole's mouth, thin hidden lines from the side.
+Views are built from the current Part Studio model with hidden lines removed; you can show hidden lines as dashed lines. The **Insert view** menu offers [assembly](assembly) tabs too: an assembly's view shows all its visible instances (sub-assemblies' parts as well) where they stand in it — with sections, hole callouts, and dimensions that follow both the parts and the instances' moves. Tapped [holes](hole#thread) are shown by the ISO 6410 convention: a thin three-quarter circle from the hole's mouth, thin hidden lines from the side.
 
 ## Sheet {#sheet}
 
@@ -142,8 +142,12 @@ Deleting a view also deletes the sections and details made from it.
 ## Dimensions and notes {#annotations}
 
 - **Dimension** (`D`): click two points (view vertices are highlighted), then click where to place the dimension; a horizontal, vertical, or aligned dimension is chosen based on the cursor position. Clicking a circle places a diameter, `Shift` + click places a radius. Decimal numbers on the sheet — in dimensions, callouts, and scales — use a point (`1:2.5`) or a comma (`1:2,5`), as chosen in the **Decimal sign** field of the **Sheet** block.
-- **Dimensions follow the model.** A dimension's points are anchored to the model's vertices and circles (a diameter's, radius's, and callout's — to the circle): change the model — make the part taller, say — and the dimension moves to the new points and shows the new value. If the element is gone from the model, the dimension stays where it was. Dimensions placed earlier are anchored when the drawing opens, if the model has not changed since.
-- **Hole callout**: click a hole made by the [Hole](hole) feature in a view along its axis (it lights up under the cursor), then where the text goes. The callout, with an arrow at the hole's outer circle and a shelf, gives its sizes per ISO 15786: the thread and its depth (`M8 ↧16`), the diameter and depth or **THRU** (`Ø6.8 ↧20`), the counterbore (`⌴ Ø15 ↧8.6`), the countersink (`⌵ Ø18 × 90°`); when the feature made several holes (a pattern of it too), their number comes first — `4×`. The symbols are drawn as lines, so they look the same in SVG, DXF, and PDF. The callout follows changes of the hole in the model.
+- **Chain dimensions** and **Baseline dimensions**: the first is placed as an ordinary one — two points and where its line goes (horizontal, vertical, or aligned); then each further point takes one click. Chain: a dimension from the previous point on the same line; baseline: from the first point, each next one 8 mm further out from the part. `Esc` ends.
+- **Angular dimension**: click a straight line on a view (it lights up under the cursor), then a second one not parallel to it, then where the arc goes. The angle of the side the arc is on is measured: a chamfer against the face line's extension (45°), say, or the corner inside (135°); dragging the arc into another corner changes the angle measured. The arc with its arrows goes round where the lines cross, extension lines reach out to it, and the value is in degrees.
+- **Ordinate dimensions** (from a base, ISO 129-1): click the base point (it gets "0"), then a point to measure from it, and move the cursor up or down — for dimensions along X — or aside — along Y; a click sets the line of values. Further points are placed with one click each on the same line; `Esc` ends. A thin line runs from each point to the line of values, and the value is written at its end (upright along X).
+- **Centre line or centre mark**: click two parallel lines of a view — a hole's or a shaft's outline seen from the side, say — and an axis goes midway between them (a chain line 3 mm past the outline); a click on a circle or an arc puts its centre mark — two chain lines across it (full circles get theirs by themselves; the tool is for arcs — fillets, slots). Centre lines and marks follow the model and are deleted from the context menu.
+- **Dimensions follow the model.** A dimension's points are anchored to the model's vertices and circles (a diameter's, radius's, and callout's — to the circle; an angle's — to straight edges): change the model — make the part taller, say — and the dimension moves to the new points and shows the new value. The same goes for what a section or a broken-out section makes: a point of the cut is where an edge of the model crosses the cutting plane, a line or circle of the cut is where a face meets it (a hole's wall, a cylinder), so dimensions and centre lines on the cut follow the model too. If the element is gone from the model, the dimension stays where it was. Dimensions placed earlier are anchored when the drawing opens, if the model has not changed since.
+- **Hole callout**: click a hole made by the [Hole](hole) feature — in a view along its axis or from the side, across it (it lights up under the cursor) — then where the text goes. The callout, with an arrow at the hole's outer circle (from the side, at the edge of its mouth) and a shelf, gives its sizes per ISO 15786: the thread and its depth (`M8 ↧16`), the diameter and depth or **THRU** (`Ø6.8 ↧20`), the counterbore (`⌴ Ø15 ↧8.6`), the countersink (`⌵ Ø18 × 90°`); when the feature made several holes (a pattern of it too), their number comes first — `4×`. The symbols are drawn as lines, so they look the same in SVG, DXF, and PDF. The callout follows changes of the hole in the model.
 - **Note**: click a spot on the sheet and type the text in the window; double-click a note to edit its text again.
 - Drag dimensions, callouts, and notes with the select tool (the move cursor shows over them): a linear dimension by its dimension line, a diameter, radius, or callout by its text.
 - A dimension's context menu: **Show as radius** / **Show as diameter**, **Horizontal dimension** / **Vertical dimension** / **Aligned dimension**, **Delete**; a note's — **Edit text**, **Delete**.
@@ -154,6 +158,41 @@ image: ../images/drawing-hole-callout.svg
 alt: A top view of a block with a tapped hole and two counterbored holes, each with a callout of its sizes
 caption: Hole callouts: the M8 thread with its depth and the tap drill; two holes of one patterned feature, "2×", through, counterbored.
 width: 480
+```
+
+```figure
+image: ../images/drawing-hole-callout-side.svg
+alt: A front view of the same block: the holes seen from the side in dashed lines, the callouts pointing at the edges of their mouths on the top face
+caption: The same holes from the side, in the front view: the callout's arrow at the edge of the mouth, the same text.
+width: 480
+```
+
+```figure
+image: ../images/drawing-chain.svg
+alt: A top view of a block with three holes: a chain of dimensions above it (11, 24, 24, 11), baseline dimensions from the left edge below it (11, 35, 59, 70)
+caption: A chain of dimensions above the view, baseline dimensions (from the left edge) below it — each next one a line further out.
+width: 340
+```
+
+```figure
+image: ../images/drawing-angle.svg
+alt: A front view of a chamfered block: on the right, 45° between the chamfer and the top line's extension; on the left, the inside angle of 135°
+caption: Angular dimensions: the side of the angle is where the arc is placed; on the right an extension line carries the top face out to the arc.
+width: 380
+```
+
+```figure
+image: ../images/drawing-ordinate.svg
+alt: A top view of a block with three holes: ordinates along X below it (0, 11, 35, 59, 70) and along Y on its left (0, 20, 40) from the lower left corner
+caption: Ordinate dimensions from the lower left corner: along X to the holes' centres and the right edge, along Y to the holes' axis and the top edge.
+width: 380
+```
+
+```figure
+image: ../images/drawing-centerline.svg
+alt: A plate with rounded corners and a hole: on the front view the hole's axis between its hidden outlines, on the top view the centres of the corner arcs
+caption: A centre line between a hole's outlines on the front view and centre marks of the corner fillets on the top view.
+width: 300
 ```
 
 ## Navigation {#navigation}
