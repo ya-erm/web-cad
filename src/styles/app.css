@@ -1677,6 +1677,9 @@ textarea {
 
 .bottombar {
   display: flex;
+  /* never wider than the window (a long hint is cut instead of pushing the whole editor wider) */
+  min-width: 0;
+  overflow: hidden;
   align-items: stretch;
   border-top: 1px solid var(--border);
   background: var(--panel);
