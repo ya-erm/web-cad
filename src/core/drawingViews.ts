@@ -86,6 +86,27 @@ export function stepPoint(a: Vec2, b: Vec2, from: Vec2, to: Vec2): Vec2 {
   return Math.abs(along) >= Math.abs(across) ? [from[0] + u[0] * along, from[1] + u[1] * along] : [from[0] - u[1] * across, from[1] + u[0] * across];
 }
 
+/**
+ * A local section's freehand outline: a smooth closed curve through the clicked points (Catmull–Rom), as a polygon —
+ * the cut follows it and it is drawn as it is.
+ */
+export function smoothOutline(pts: Vec2[], perSide = 8): Vec2[] {
+  const n = pts.length;
+  if (n < 3) return pts;
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const [p0, p1, p2, p3] = [pts[(i - 1 + n) % n], pts[i], pts[(i + 1) % n], pts[(i + 2) % n]];
+    for (let k = 0; k < perSide; k++) {
+      const t = k / perSide;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const c = (a: number, b: number, cc: number, d: number) => 0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
+      out.push([c(p0[0], p1[0], p2[0], p3[0]), c(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  return out;
+}
+
 // Letters of sections and details: ГОСТ 2.316 skips Ё З Й О Х Ъ Ы Ь, ASME Y14.3 — I O Q S X Z.
 const LETTERS_RU = 'АБВГДЕЖИКЛМНПРСТУФЦЧШЩЭЮЯ';
 const LETTERS_EN = 'ABCDEFGHJKLMNPRTUVWY';

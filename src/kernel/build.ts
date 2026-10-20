@@ -21,6 +21,7 @@ import type {
   StepAssembly,
   ProjectedEdge,
   ProjectedHole,
+  Breakout,
   SectionCut,
   SectionFace,
   SketchResult,
@@ -424,7 +425,7 @@ export class StudioBuilder {
     partIds: string[],
     orientation: ViewOrientation,
     withHidden: boolean,
-    opts: { axes?: ViewAxes; section?: SectionCut } = {},
+    opts: { axes?: ViewAxes; section?: SectionCut; breakout?: Breakout } = {},
   ): { edges: ProjectedEdge[]; bounds: [Vec2, Vec2] | null; sections?: SectionFace[] } {
     let items = this.shapesFor(partIds);
     const { n, x } = opts.axes ?? VIEW_AXES[orientation];
@@ -433,19 +434,45 @@ export class StudioBuilder {
     const sections: SectionFace[] = [];
     // an offset section's steps: lines of the view where its step faces are seen edge-on (not drawn)
     let jogs: { p: Vec2; d: Vec2 }[] = [];
+    // a half section: the axis between the section and the view (its last step)
+    let halfAxis: { p: Vec2; d: Vec2 } | null = null;
+    // a local section's outline in the view: its walls are seen edge-on there (drawn as a freehand line instead)
+    let breakPoly: Vec2[] | null = null;
+    // what is cut away: the tool for a part (its size), the planes the cut faces lie on, their normal
+    let cutting: { tool: (size: number, origin: Vec3) => Shape3D; planes: Vec3[]; normal: Vec3 } | null = null;
     if (opts.section) {
       // a section view: the parts without what lies on the viewer's side of the plane, the faces it cut hatched
-      const { origin, normal } = opts.section;
-      const steps = sectionSteps(opts.section);
-      jogs = steps?.jogs.map((j) => ({ p: P(j), d: v2norm(P(opts.section!.along!)) })) ?? [];
-      const planes = steps?.planes ?? [origin];
+      const sec = opts.section;
+      const steps = sectionSteps(sec);
+      jogs = steps?.jogs.map((j) => ({ p: P(j), d: v2norm(P(sec.along!)) })) ?? [];
+      if (steps?.half) halfAxis = jogs[jogs.length - 1] ?? null;
+      cutting = { tool: (size) => (steps ? steppedCut(sec, size) : halfSpace(sec.origin, sec.normal, size)), planes: steps?.planes ?? [sec.origin], normal: sec.normal };
+    } else if (opts.breakout && opts.breakout.outline.length >= 3 && items.length) {
+      // a local section: inside the outline, from the viewer down to its depth (the parts' middle by default)
+      let front = -Infinity;
+      let back = Infinity;
+      for (const it of items) {
+        const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
+        for (let i = 0; i < 8; i++) {
+          const d = v3.dot([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]], n);
+          front = Math.max(front, d);
+          back = Math.min(back, d);
+        }
+      }
+      const depth = opts.breakout.depth === undefined ? (front + back) / 2 : front - opts.breakout.depth;
+      const outline = opts.breakout.outline.map((q) => v3.add(q, v3.scale(n, depth - v3.dot(q, n))));
+      breakPoly = outline.map(P);
+      cutting = { tool: (size) => prism(R.makePolygon(outline), n, 0, Math.max(front - depth, 0) + size), planes: [outline[0]], normal: n };
+    }
+    if (cutting) {
+      const { planes, normal } = cutting;
       const cut: typeof items = [];
       for (const it of items) {
         const [lo, hi] = it.shape.boundingBox.bounds as [Vec3, Vec3];
-        const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), origin))) + 10;
+        const size = 2 * (v3.len(v3.sub(hi, lo)) + v3.len(v3.sub(v3.scale(v3.add(lo, hi), 0.5), planes[0]))) + 10;
         let rest: Shape3D;
         try {
-          rest = it.shape.cut(steps ? steppedCut(opts.section, size) : halfSpace(origin, normal, size));
+          rest = it.shape.cut(cutting.tool(size, planes[0]));
         } catch {
           continue;
         }
@@ -465,7 +492,7 @@ export class StudioBuilder {
       }
       items = cut;
     }
-    if (!items.length) return { edges: [], bounds: null, ...(opts.section ? { sections } : {}) };
+    if (!items.length) return { edges: [], bounds: null, ...(cutting ? { sections } : {}) };
     const shape = compoundOf(items.map((i) => i.shape));
     const oc = R.getOC();
     const ax2 = R.makeAx2([0, 0, 0], n, x);
@@ -496,6 +523,8 @@ export class StudioBuilder {
         }
         // an offset section's step, seen edge-on: not drawn (ISO 128-44)
         if (jogs.some((j) => pts.every((q) => Math.abs((q[0] - j.p[0]) * j.d[1] - (q[1] - j.p[1]) * j.d[0]) < 1e-5))) continue;
+        // a local section's walls along its outline: the freehand line stands for them
+        if (breakPoly && pts.every((q) => onPolygon(q, breakPoly!))) continue;
         const pe: ProjectedEdge = { pts, hidden };
         if (type === 'CIRCLE') {
           const ad = new oc.BRepAdaptor_Curve(e.wrapped);
@@ -549,8 +578,44 @@ export class StudioBuilder {
         holes.push({ c: P(h.origin), r: Math.max(c.diameter, c.cbore?.diameter ?? 0, c.csink?.diameter ?? 0) / 2, callout: c, count: count.get(h.source) ?? 1 });
       }
     }
-    return { edges, bounds: edges.length ? [lo, hi] : null, ...(opts.section ? { sections } : {}), ...(holes.length ? { holes } : {}) };
+    // the half section's axis across the parts, a little beyond them (a thin chain line, ГОСТ 2.305)
+    const centerLines: Vec2[][] = [];
+    if (halfAxis && edges.length) {
+      const { p, d } = halfAxis;
+      let t0 = -Infinity;
+      let t1 = Infinity;
+      for (const k of [0, 1]) {
+        if (Math.abs(d[k]) < 1e-12) continue;
+        const ta = (lo[k] - p[k]) / d[k];
+        const tb = (hi[k] - p[k]) / d[k];
+        t0 = Math.max(t0, Math.min(ta, tb));
+        t1 = Math.min(t1, Math.max(ta, tb));
+      }
+      if (t1 > t0) centerLines.push([0, 1].map((i) => { const t = i ? t1 + 2 : t0 - 2; return [p[0] + d[0] * t, p[1] + d[1] * t] as Vec2; }));
+    }
+    return {
+      edges,
+      bounds: edges.length ? [lo, hi] : null,
+      ...(cutting ? { sections } : {}),
+      ...(holes.length ? { holes } : {}),
+      ...(centerLines.length ? { centerLines } : {}),
+      ...(breakPoly ? { breaks: [breakPoly] } : {}),
+    };
   }
+}
+
+/** Whether point `q` lies on a side of closed polygon `poly` (within 10⁻⁵). */
+function onPolygon(q: Vec2, poly: Vec2[]): boolean {
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const d: Vec2 = [b[0] - a[0], b[1] - a[1]];
+    const l2 = d[0] * d[0] + d[1] * d[1];
+    if (l2 < 1e-18) continue;
+    const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * d[0] + (q[1] - a[1]) * d[1]) / l2));
+    if (Math.hypot(q[0] - a[0] - d[0] * t, q[1] - a[1] - d[1] * t) < 1e-5) return true;
+  }
+  return false;
 }
 
 const v2norm = (a: Vec2): Vec2 => {
@@ -562,19 +627,23 @@ const v2norm = (a: Vec2): Vec2 => {
  * An offset section's line (more than one segment): the planes its segments along the first one cut (a point of each)
  * and where its steps across them start; none for a straight cut.
  */
-export function sectionSteps(s: SectionCut): { planes: Vec3[]; jogs: Vec3[] } | null {
+export function sectionSteps(s: SectionCut): { planes: Vec3[]; jogs: Vec3[]; half: boolean } | null {
   const line = s.line;
   if (!line || line.length < 3 || !s.along) return null;
   const u = v3.norm(v3.sub(line[1], line[0]));
   const planes: Vec3[] = [];
   const jogs: Vec3[] = [];
+  let half = false;
   for (let i = 0; i + 1 < line.length; i++) {
     const d = v3.sub(line[i + 1], line[i]);
     if (v3.len(d) < 1e-9) continue;
-    if (Math.abs(v3.dot(v3.norm(d), u)) > 0.999) planes.push(line[i]);
-    else jogs.push(line[i]);
+    const across = Math.abs(v3.dot(v3.norm(d), u)) <= 0.999;
+    if (across) jogs.push(line[i]);
+    else planes.push(line[i]);
+    // ending across: the rest is not cut — a half section (its last step is the line between section and view)
+    half = across;
   }
-  return { planes, jogs };
+  return { planes, jogs, half };
 }
 
 /**

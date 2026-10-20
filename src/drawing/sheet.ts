@@ -183,6 +183,10 @@ export function viewPrims(v: DrawingView, proj: ProjectionData | undefined, view
     out.push({ t: 'line', a: [c[0] - r, c[1]], b: [c[0] + r, c[1]], style: 'center' });
     out.push({ t: 'line', a: [c[0], c[1] - r], b: [c[0], c[1] + r], style: 'center' });
   }
+  // axes: a half section's line between the section and the view
+  for (const l of proj.centerLines ?? []) out.push({ t: 'poly', pts: l.map((p) => toSheet(v, proj, p)), style: 'center' });
+  // a local section's boundary: a thin freehand line (ГОСТ 2.305)
+  for (const b of proj.breaks ?? []) out.push({ t: 'poly', pts: b.map((p) => toSheet(v, proj, p)), closed: true, style: 'thin' });
   // the faces a section cut: hatched at 45°, the next part the other way, then wider (ISO 128-50)
   if (proj.sections?.length) {
     const parts = [...new Set(proj.sections.map((s) => s.partId))];

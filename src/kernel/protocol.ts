@@ -280,6 +280,8 @@ export interface ProjectionRequest {
   axes?: { n: Vec3; x: Vec3 };
   /** A section: the material on the side of the plane through `origin` that `normal` points to is removed. */
   section?: SectionCut;
+  /** A local (broken-out) section of the view itself. */
+  breakout?: Breakout;
   hidden: boolean;
 }
 
@@ -294,6 +296,15 @@ export interface SectionCut {
   normal: Vec3;
   line?: Vec3[];
   along?: Vec3;
+}
+
+/**
+ * A local (broken-out) section: inside the closed `outline` (points across the view; their depth does not matter) the
+ * material is removed from the viewer down to `depth` below the parts' front (none — to their middle).
+ */
+export interface Breakout {
+  outline: Vec3[];
+  depth?: number;
 }
 
 /** A hole's sizes for a drawing's hole callout (mm, degrees). */
@@ -340,6 +351,10 @@ export interface ProjectionResult {
   sections?: SectionFace[];
   /** The Hole features' holes seen end-on (for hole callouts). */
   holes?: ProjectedHole[];
+  /** Axes drawn as thin chain lines: the line between a half section and its view. */
+  centerLines?: Vec2[][];
+  /** Local sections' outlines (view coordinates): drawn as thin freehand lines. */
+  breaks?: Vec2[][];
 }
 
 export interface PingRequest {

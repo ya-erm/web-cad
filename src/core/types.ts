@@ -750,6 +750,11 @@ export interface DrawingView {
     /** An offset section: the cutting line's further points after `b` (segments along a → b cut, those across step). */
     steps?: Vec2[];
   };
+  /**
+   * A local (broken-out) section of this view: inside the closed `outline` (its view coordinates, mm) the parts are
+   * opened down to `depth` mm below their front (none — to their middle).
+   */
+  brokenOut?: { outline: Vec2[]; depth?: number };
   /** A detail view of the parent: its circle (the parent's view coordinates, mm) at the view's own scale. */
   detail?: { c: Vec2; r: number; letter: string };
   /** The view's own configuration of the Part Studio: input id → option id (a variable input: its value). */

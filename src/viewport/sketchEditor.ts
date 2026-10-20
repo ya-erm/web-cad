@@ -12,7 +12,7 @@ import { configuredOf } from '../core/config';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { sampleEntity, sampleSpline } from '../sketch/curves';
 import { arcAngles, closestPointOnEntity, entityMap, naturalHandles, pointOf, type EntityMap } from '../sketch/curves';
-import { extensionPoint, inferDirection, type DirectionInference } from '../sketch/inference';
+import { extensionPoint, guideCrossing, inferDirection, quadrantPos, quadrants, type DirectionInference } from '../sketch/inference';
 import { computeRegions } from '../sketch/regions';
 import { solveSketch, frozenValues, initialVariant, measureConstraint, symmetryFit } from '../sketch/solver';
 import {
@@ -46,6 +46,8 @@ import {
   addText,
   conicControls,
   conicRho,
+  isQuadrantId,
+  quadrantId,
   type Snap,
 } from '../sketch/sketchOps';
 import { expandTexts, loadFonts, onFontLoaded, textOfPart, textOutline } from '../sketch/text';
@@ -514,34 +516,19 @@ export class SketchEditor {
     return this.acquired.filter((id) => map.get(id)?.type === 'line');
   }
 
-  private computeSnap(x: number, y: number, p: Vec2, exclude?: Set<string>, anchor?: Vec2): Snap {
-    this.hvSnap = null;
-    this.dirSnap = null;
+  /** Where an acquired point is: a point of the sketch, or a circle's quarter point (top, bottom, left, right). */
+  private acquiredPoint(id: string): Vec2 | null {
     const map = this.map();
-    const rawHit = this.hitEntity(x, y, exclude);
-    // nothing snaps onto the letters of a text (only to its points)
-    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' && rawHit.type !== 'text' ? rawHit : null;
-    if (hit && hit.type === 'point') {
-      const e = map.get(hit.id);
-      if (e && e.type === 'point') return { kind: 'point', id: e.id, pos: [e.x, e.y] };
-    }
-    // midpoints of lines
-    for (const e of map.values()) {
-      if (e.type !== 'line' || exclude?.has(e.id)) continue;
-      const a = pointOf(map, e.p1);
-      const b = pointOf(map, e.p2);
-      const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-      if (Math.hypot(m[0] - p[0], m[1] - p[1]) / this.px < SNAP_PX - 2 && hit?.id === e.id)
-        return { kind: 'midpoint', id: e.id, pos: m };
-    }
-    // origin of the sketch
-    if (Math.hypot(p[0], p[1]) / this.px < SNAP_PX) return { kind: 'origin', pos: [0, 0] };
-    if (hit && hit.type !== 'point') {
-      const e = map.get(hit.id);
-      if (e) return { kind: 'curve', id: e.id, pos: closestPointOnEntity(p, e, map) };
-    }
-    // Inference (Onshape): horizontal / vertical alignment with the anchor (the line becomes H/V)
-    // and with acquired points (the new point gets a point–point H/V constraint).
+    if (isQuadrantId(id)) return quadrantPos(id, map);
+    const e = map.get(id);
+    return e?.type === 'point' ? [e.x, e.y] : null;
+  }
+
+  /**
+   * Inference (Onshape): horizontal / vertical alignment with the anchor (the line becomes H/V) and with acquired points
+   * (the new point gets a point–point H/V constraint): the guides cursor `p` is near.
+   */
+  private alignGuides(p: Vec2, anchor: Vec2 | undefined, exclude?: Set<string>) {
     let ax = p[0];
     let ay = p[1];
     let bestDx = 7;
@@ -564,23 +551,76 @@ export class SketchEditor {
       }
     }
     for (const id of this.acquired) {
-      const e = map.get(id);
-      if (!e || e.type !== 'point' || exclude?.has(id)) continue;
-      if (anchor && Math.hypot(e.x - anchor[0], e.y - anchor[1]) < 1e-9) continue;
-      const dx = Math.abs(p[0] - e.x) / this.px;
-      const dy = Math.abs(p[1] - e.y) / this.px;
+      const at = this.acquiredPoint(id);
+      if (!at || exclude?.has(id) || exclude?.has(id.split(':')[1])) continue;
+      if (anchor && Math.hypot(at[0] - anchor[0], at[1] - anchor[1]) < 1e-9) continue;
+      const dx = Math.abs(p[0] - at[0]) / this.px;
+      const dy = Math.abs(p[1] - at[1]) / this.px;
       if (Math.hypot(dx, dy) < 10) continue;
       if (dy < bestDy) {
         bestDy = dy;
-        ay = e.y;
+        ay = at[1];
         hId = id;
         anchorH = false;
       }
       if (dx < bestDx) {
         bestDx = dx;
-        ax = e.x;
+        ax = at[0];
         vId = id;
         anchorV = false;
+      }
+    }
+    return { ax, ay, anchorH, anchorV, hId, vId };
+  }
+
+  private computeSnap(x: number, y: number, p: Vec2, exclude?: Set<string>, anchor?: Vec2): Snap {
+    this.hvSnap = null;
+    this.dirSnap = null;
+    const map = this.map();
+    const rawHit = this.hitEntity(x, y, exclude);
+    // nothing snaps onto the letters of a text (only to its points)
+    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' && rawHit.type !== 'text' ? rawHit : null;
+    if (hit && hit.type === 'point') {
+      const e = map.get(hit.id);
+      if (e && e.type === 'point') return { kind: 'point', id: e.id, pos: [e.x, e.y] };
+    }
+    // midpoints of lines
+    for (const e of map.values()) {
+      if (e.type !== 'line' || exclude?.has(e.id)) continue;
+      const a = pointOf(map, e.p1);
+      const b = pointOf(map, e.p2);
+      const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      if (Math.hypot(m[0] - p[0], m[1] - p[1]) / this.px < SNAP_PX - 2 && hit?.id === e.id)
+        return { kind: 'midpoint', id: e.id, pos: m };
+    }
+    // origin of the sketch
+    if (Math.hypot(p[0], p[1]) / this.px < SNAP_PX) return { kind: 'origin', pos: [0, 0] };
+    const { ax, ay, anchorH, anchorV, hId, vId } = this.alignGuides(p, anchor, exclude);
+    if (hit && hit.type !== 'point') {
+      const e = map.get(hit.id);
+      if (e) {
+        // a circle's quarter point near the cursor: exactly there, straight above / level with its centre
+        for (const { q, pos } of quadrants(e, map))
+          if (Math.hypot(pos[0] - p[0], pos[1] - p[1]) / this.px < SNAP_PX && (e.type === 'circle' || e.type === 'arc')) {
+            const c = e.c;
+            return { kind: 'curve', id: e.id, pos, quad: q, ...(q === 'top' || q === 'bottom' ? { v: c } : { h: c }) };
+          }
+        // where an alignment guide crosses the curve near the cursor, the point keeps both (Onshape): the top of a
+        // circle straight above its centre, a horizontal line ending on another line
+        const guides: { guide: { x?: number; y?: number }; hv?: 'h' | 'v'; h?: string; v?: string }[] = [];
+        if (anchorH || hId) guides.push({ guide: { y: ay }, ...(anchorH ? { hv: 'h' as const } : { h: hId }) });
+        if (anchorV || vId) guides.push({ guide: { x: ax }, ...(anchorV ? { hv: 'v' as const } : { v: vId }) });
+        let best: { pos: Vec2; d: number; hv?: 'h' | 'v'; h?: string; v?: string } | null = null;
+        for (const g of guides) {
+          const q = guideCrossing(e, map, g.guide, p);
+          const d = q ? Math.hypot(q[0] - p[0], q[1] - p[1]) / this.px : Infinity;
+          if (q && d < SNAP_PX + 4 && (!best || d < best.d)) best = { pos: q, d, hv: g.hv, h: g.h, v: g.v };
+        }
+        if (best) {
+          this.hvSnap = best.hv ?? null;
+          return { kind: 'curve', id: e.id, pos: best.pos, ...(best.h ? { h: best.h } : {}), ...(best.v ? { v: best.v } : {}) };
+        }
+        return { kind: 'curve', id: e.id, pos: closestPointOnEntity(p, e, map) };
       }
     }
     this.hvSnap = anchorH ? 'h' : anchorV ? 'v' : null;
@@ -617,10 +657,11 @@ export class SketchEditor {
   private acquireCandidate: string | null = null;
 
   private trackAcquire() {
-    // a point (alignment) or a line (parallel, perpendicular, extension)
+    // a point (alignment) or a line (parallel, perpendicular, extension); a circle's quarter point (alignment)
     const s = this.snap;
     const line = s?.kind === 'curve' && this.map().get(s.id)?.type === 'line';
-    const id = (s?.kind === 'point' || line) && DRAW_TOOLS.has(this.toolName) ? s.id : null;
+    const quad = s?.kind === 'curve' && s.quad ? quadrantId(s.id, s.quad) : null;
+    const id = DRAW_TOOLS.has(this.toolName) ? (quad ?? (s?.kind === 'point' || line ? s.id : null)) : null;
     if (id === this.acquireCandidate) return;
     this.acquireCandidate = id;
     if (this.acquireTimer) clearTimeout(this.acquireTimer);
@@ -640,8 +681,8 @@ export class SketchEditor {
     const kinds: ('coincident' | 'midpoint' | 'horizontal' | 'vertical' | 'parallel' | 'perpendicular' | 'tangent')[] = [];
     if (s?.kind === 'point' || s?.kind === 'curve' || s?.kind === 'origin' || s?.kind === 'extension') kinds.push('coincident');
     else if (s?.kind === 'midpoint') kinds.push('midpoint');
-    if (this.hvSnap === 'h' || (s?.kind === 'align' && s.h)) kinds.push('horizontal');
-    if (this.hvSnap === 'v' || (s?.kind === 'align' && s.v)) kinds.push('vertical');
+    if (this.hvSnap === 'h' || ((s?.kind === 'align' || s?.kind === 'curve') && s.h)) kinds.push('horizontal');
+    if (this.hvSnap === 'v' || ((s?.kind === 'align' || s?.kind === 'curve') && s.v)) kinds.push('vertical');
     if (this.dirSnap) kinds.push(this.dirSnap.kind);
     if (!kinds.length || (this.toolName === 'select' && !this.drag)) {
       this.inferLabel.style.display = 'none';
@@ -1834,7 +1875,8 @@ export class SketchEditor {
       // inference: a dragged point snaps to points / curves / midpoints / the origin (Onshape)
       if (dr.exclude && screen) {
         const s = this.computeSnap(screen.x, screen.y, pts[dr.ids[0]], dr.exclude);
-        dr.snap = s.kind === 'none' || s.kind === 'align' ? null : s;
+        // (a drop makes no alignment constraints: onto a curve it is only on it)
+        dr.snap = s.kind === 'none' || s.kind === 'align' ? null : s.kind === 'curve' ? { kind: 'curve', id: s.id, pos: s.pos } : s;
         if (dr.snap) pts[dr.ids[0]] = dr.snap.pos;
         this.snap = dr.snap ?? null;
         useEditor.getState().setSketchHover(dr.snap && 'id' in dr.snap ? dr.snap.id : null);
@@ -3440,9 +3482,10 @@ export class SketchEditor {
     if (DRAW_TOOLS.has(this.toolName)) {
       const map = this.map();
       const halo: Vec2[] = [];
+      // (points and circles' quarter points)
       for (const id of this.acquired) {
-        const e = map.get(id);
-        if (e && e.type === 'point') halo.push([e.x, e.y]);
+        const at = this.acquiredPoint(id);
+        if (at) halo.push(at);
       }
       if (halo.length) {
         const o = pointsObject(halo, COLORS.inference, 15, false);
@@ -3465,10 +3508,11 @@ export class SketchEditor {
       }
       const s = this.snap;
       const guides: number[] = [];
-      if (s?.kind === 'align') {
+      // (a point on a curve level with / straight above an acquired point too)
+      if (s?.kind === 'align' || s?.kind === 'curve') {
         for (const id of [s.h, s.v]) {
-          const e = id ? map.get(id) : undefined;
-          if (e && e.type === 'point') guides.push(e.x, e.y, 0, s.pos[0], s.pos[1], 0);
+          const at = id ? this.acquiredPoint(id) : null;
+          if (at) guides.push(at[0], at[1], 0, s.pos[0], s.pos[1], 0);
         }
       }
       // the extension of a line: from its nearer end to the point

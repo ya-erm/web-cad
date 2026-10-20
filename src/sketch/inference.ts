@@ -1,8 +1,8 @@
 // Inference while drawing (Onshape): the direction of a new line parallel / perpendicular to a line, tangent to the
 // arc it starts on; a point on the extension of a line. Sizes in sketch units; `px` — the size of a screen pixel.
 
-import type { Vec2 } from '../core/types';
-import { pointOf, type EntityMap } from './curves';
+import type { SkEntity, Vec2 } from '../core/types';
+import { closestPointOnEntity, pointOf, sampleEntity, type EntityMap } from './curves';
 
 /** How close (screen pixels) the cursor has to come to an inferred guide. */
 export const INFER_PX = 7;
@@ -56,6 +56,72 @@ export function inferDirection(map: EntityMap, anchor: Vec2, p: Vec2, refs: stri
       best = { ...c, pos: q };
     }
   }
+  return best;
+}
+
+/** The quarter points of a circle or arc (those on the arc): top, bottom, left, right. */
+export function quadrants(e: SkEntity, map: EntityMap): { q: 'top' | 'bottom' | 'left' | 'right'; pos: Vec2 }[] {
+  if (e.type !== 'circle' && e.type !== 'arc') return [];
+  const c = pointOf(map, e.c);
+  const r = e.type === 'circle' ? e.r : Math.hypot(pointOf(map, e.p1)[0] - c[0], pointOf(map, e.p1)[1] - c[1]);
+  const all: { q: 'top' | 'bottom' | 'left' | 'right'; pos: Vec2 }[] = [
+    { q: 'top', pos: [c[0], c[1] + r] },
+    { q: 'bottom', pos: [c[0], c[1] - r] },
+    { q: 'left', pos: [c[0] - r, c[1]] },
+    { q: 'right', pos: [c[0] + r, c[1]] },
+  ];
+  if (e.type === 'circle') return all;
+  return all.filter(({ pos }) => {
+    const on = closestPointOnEntity(pos, e, map);
+    return Math.hypot(on[0] - pos[0], on[1] - pos[1]) < 1e-6 * Math.max(1, r);
+  });
+}
+
+/** Where a quarter point acquired for alignment (`quad:<curve>:<top|bottom|left|right>`) is now, or null. */
+export function quadrantPos(id: string, map: EntityMap): Vec2 | null {
+  const [, curve, q] = id.split(':');
+  const e = map.get(curve);
+  return e ? (quadrants(e, map).find((x) => x.q === q)?.pos ?? null) : null;
+}
+
+/**
+ * Where a horizontal (`y`) or vertical (`x`) guide crosses entity `e`: the crossing nearest `p`, or null — the curve's
+ * point that keeps an alignment too (Onshape: the top of a circle straight above its centre, the end of a horizontal
+ * line on another line).
+ */
+export function guideCrossing(e: SkEntity, map: EntityMap, guide: { x?: number; y?: number }, p: Vec2): Vec2 | null {
+  const k = guide.y !== undefined ? 1 : 0;
+  const at = guide.y ?? guide.x;
+  if (at === undefined) return null;
+  const pts: Vec2[] = [];
+  const pt = (along: number): Vec2 => (k === 1 ? [along, at] : [at, along]);
+  if (e.type === 'circle' || e.type === 'arc') {
+    const c = pointOf(map, e.c);
+    const r = e.type === 'circle' ? e.r : Math.hypot(pointOf(map, e.p1)[0] - c[0], pointOf(map, e.p1)[1] - c[1]);
+    const off = at - c[k];
+    if (Math.abs(off) <= r) {
+      const s = Math.sqrt(r * r - off * off);
+      for (const q of [pt(c[1 - k] - s), pt(c[1 - k] + s)]) {
+        // an arc: only where it is
+        if (e.type === 'arc') {
+          const on = closestPointOnEntity(q, e, map);
+          if (Math.hypot(on[0] - q[0], on[1] - q[1]) > 1e-6 * Math.max(1, r)) continue;
+        }
+        pts.push(q);
+      }
+    }
+  } else {
+    const poly = sampleEntity(e, map);
+    for (let i = 0; i + 1 < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[i + 1];
+      if ((a[k] - at) * (b[k] - at) > 0 || Math.abs(b[k] - a[k]) < 1e-12) continue;
+      const t = (at - a[k]) / (b[k] - a[k]);
+      pts.push(pt(a[1 - k] + (b[1 - k] - a[1 - k]) * t));
+    }
+  }
+  let best: Vec2 | null = null;
+  for (const q of pts) if (!best || Math.hypot(q[0] - p[0], q[1] - p[1]) < Math.hypot(best[0] - p[0], best[1] - p[1])) best = q;
   return best;
 }
 

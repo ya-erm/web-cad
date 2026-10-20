@@ -1185,6 +1185,14 @@ const ICONS = {
       <path d="M14.5 10.5 L18.5 6.5 M14.5 14.5 L21.5 7.5 M15.5 17.5 L21.5 11.5 M19 17.5 L21.5 15" stroke={BLUE} {...THIN} />
     </>
   ),
+  // a drawing's local (broken-out) section: a freehand area of a view opened and hatched
+  localSection: (
+    <>
+      <rect x={3} y={4} width={18} height={16} rx={1} />
+      <path d="M9 8 C12 6.5 16 7.5 16.5 10.5 C17 13.5 15 16.5 11.5 16 C8 15.5 6.5 13 7 10.8 C7.3 9.5 8 8.5 9 8 Z" fill={BLUE_LIGHT} stroke={BLUE} {...THIN} />
+      <path d="M8.2 12.8 L12.6 8.4 M9.8 15.2 L15.6 9.4" stroke={BLUE} {...THIN} />
+    </>
+  ),
   // a drawing's hole callout: a leader from a hole to a shelf with the hole's text
   holeCallout: (
     <>

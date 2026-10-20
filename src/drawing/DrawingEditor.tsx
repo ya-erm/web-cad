@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
 import type { CadDocument, ConfigInput, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, ViewOrientation } from '../core/types';
 import { uid } from '../core/ids';
-import { cuttingLine, isDerivedView, nextViewLetter, parentView, sectionCut, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
-import type { SectionCut } from '../kernel/protocol';
+import { cuttingLine, isDerivedView, nextViewLetter, parentView, sectionCut, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
+import type { Breakout, SectionCut } from '../kernel/protocol';
+import { v3 } from '../core/math';
 import { chosenLabel, configuredFeatures, inputName, variantStudio } from '../core/config';
 import { ConfigurationFields } from '../ui/ConfigurationFields';
 import { derivedBuildOrder, derivedInputs, studioVersion } from '../core/derived';
 import { withDerivedSources } from '../store/rebuild';
-import { LENGTH_FACTOR } from '../core/expr';
+import { formatNumber, LENGTH_FACTOR } from '../core/expr';
 import { kernel } from '../kernel/client';
 import { useDoc } from '../store/docStore';
 import { useEditor } from '../store/editorStore';
@@ -79,7 +80,7 @@ async function ensureBuilt(doc: CadDocument, studio: PartStudioTab) {
 /** What a view's projection depends on besides the Part Studio: the axes it is seen along, its section, its parts. */
 function viewGeometry(v: DrawingView, views: DrawingView[]) {
   const req = projectionRequest(v, views);
-  return `${JSON.stringify([req.axes ?? v.orientation, req.section ?? null])}|${v.partIds.join(',')}|${v.showHidden}`;
+  return `${JSON.stringify([req.axes ?? v.orientation, req.section ?? null, req.breakout ?? null])}|${v.partIds.join(',')}|${v.showHidden}`;
 }
 
 function viewKey(v: DrawingView, views: DrawingView[], studio: PartStudioTab, doc?: CadDocument) {
@@ -87,11 +88,20 @@ function viewKey(v: DrawingView, views: DrawingView[], studio: PartStudioTab, do
 }
 
 /** The kernel's projection of a view: a section view — along its own axes, cut by its plane. */
-function projectionRequest(v: DrawingView, views: DrawingView[]): { axes?: ViewAxes; section?: SectionCut } {
+function projectionRequest(v: DrawingView, views: DrawingView[]): { axes?: ViewAxes; section?: SectionCut; breakout?: Breakout } {
   const parent = v.section && parentView(v, views);
-  if (!v.section || !parent) return {};
-  const { axes, cut } = sectionCut(viewAxes(parent, views), v.section);
-  return { axes, section: cut };
+  if (v.section && parent) {
+    const { axes, cut } = sectionCut(viewAxes(parent, views), v.section);
+    return { axes, section: cut };
+  }
+  // a local section: its outline across the view (in space)
+  if (v.brokenOut && v.brokenOut.outline.length >= 3) {
+    const { n, x } = viewAxes(v, views);
+    const y = v3.cross(n, x);
+    const outline = smoothOutline(v.brokenOut.outline).map((p) => v3.add(v3.scale(x, p[0]), v3.scale(y, p[1])));
+    return { breakout: { outline, ...(v.brokenOut.depth !== undefined ? { depth: v.brokenOut.depth } : {}) } };
+  }
+  return {};
 }
 
 /** The view whose projection a view shows: a detail view — its parent's (the parent's parent's …). */
@@ -235,7 +245,7 @@ function PrimSvg({ p, color }: { p: Prim2D; color?: string }) {
 
 // ---------------------------------------------------------------------------
 
-type Tool = 'select' | 'dimension' | 'note' | 'section' | 'detail' | 'callout';
+type Tool = 'select' | 'dimension' | 'note' | 'section' | 'detail' | 'callout' | 'breakout';
 
 interface DimDraft {
   viewId: string;
@@ -364,6 +374,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const [viewDraft, setViewDraft] = useState<ViewDraft | null>(null);
   /** A hole callout being placed: its view and the hole's centre there. */
   const [calloutDraft, setCalloutDraft] = useState<{ viewId: string; a: Vec2 } | null>(null);
+  /** A local section's outline being clicked: its view and the points so far (view coordinates). */
+  const [breakDraft, setBreakDraft] = useState<{ viewId: string; pts: Vec2[] } | null>(null);
   const [noteEdit, setNoteEdit] = useState<{ id: string; text: string } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -575,6 +587,18 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     return best;
   };
 
+  /** A local section's outline closed: on its view (in place of one it had). */
+  const finishBreakout = (dr: { viewId: string; pts: Vec2[] }) => {
+    if (dr.pts.length >= 3)
+      upd((dd) => {
+        const v = dd.views.find((x) => x.id === dr.viewId);
+        if (v) v.brokenOut = { outline: dr.pts, ...(v.brokenOut?.depth !== undefined ? { depth: v.brokenOut.depth } : {}) };
+      });
+    setBreakDraft(null);
+    setTool('select');
+    setSelected({ kind: 'view', id: dr.viewId });
+  };
+
   /** The hole (of a Hole feature, seen end-on) under a sheet point: its view and centre. */
   const holeAt = (p: Vec2): { viewId: string; a: Vec2; r: number } | null => {
     let best: { viewId: string; a: Vec2; r: number; d: number } | null = null;
@@ -688,6 +712,22 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         dd.dimensions.push({ id: uid('d'), viewId: v.id, kind, a: dimDraft.a!, b: bm, offset });
       });
       setDimDraft(null);
+      return;
+    }
+    if (tool === 'breakout') {
+      if (!breakDraft) {
+        // on a view of its own (not a section or a detail of another)
+        const v = hitView(p);
+        if (!v || !proj(v) || isDerivedView(v)) return;
+        setBreakDraft({ viewId: v.id, pts: [toModel(v, proj(v), p)] });
+        return;
+      }
+      const v = d.views.find((x) => x.id === breakDraft.viewId);
+      if (!v) return setBreakDraft(null);
+      const first = toSheet(v, proj(v), breakDraft.pts[0]);
+      // back at the first point: the outline is closed
+      if (breakDraft.pts.length >= 3 && Math.hypot(first[0] - p[0], first[1] - p[1]) < 6 / c.zoom) finishBreakout(breakDraft);
+      else setBreakDraft({ ...breakDraft, pts: [...breakDraft.pts, toModel(v, proj(v), p)] });
       return;
     }
     if (tool === 'callout') {
@@ -820,6 +860,9 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     setSelected(null);
   }, [selected, upd]);
 
+  // (for the keys: the outline being clicked, closed by Enter)
+  const breakRef = useRef<{ finish: () => void } | null>(null);
+  breakRef.current = breakDraft ? { finish: () => finishBreakout(breakDraft) } : null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (editingTitle) return;
@@ -830,9 +873,12 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
         setDimDraft(null);
         setViewDraft(null);
         setCalloutDraft(null);
+        setBreakDraft(null);
         setTool('select');
         setSelected(null);
       }
+      // Enter closes a local section's outline
+      if (e.key === 'Enter' && breakRef.current) breakRef.current.finish();
       if (e.code === 'KeyD' && !e.ctrlKey && !e.metaKey) setTool('dimension');
       if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey) fitCam();
     };
@@ -909,6 +955,15 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       // where the view goes
       if (viewDraft.b) previewPrims.push({ t: 'circle', c: cursor, r: r * detailScale(draftView.scale), style: 'hidden' });
     }
+  }
+  // …of a local section's outline: through the points and the cursor, closed
+  const breakView = breakDraft && d.views.find((x) => x.id === breakDraft.viewId);
+  if (breakDraft && breakView && cursor) {
+    const pr = proj(breakView);
+    const pts = [...breakDraft.pts, toModel(breakView, pr, cursor)];
+    const sheetPts = (pts.length >= 3 ? smoothOutline(pts) : pts).map((q) => toSheet(breakView, pr, q));
+    previewPrims.push({ t: 'poly', pts: sheetPts, closed: pts.length >= 3, style: 'thin' });
+    for (const q of breakDraft.pts) previewPrims.push({ t: 'circle', c: toSheet(breakView, pr, q), r: 0.8, style: 'thin' });
   }
   // …of a hole callout: it follows the cursor
   const calloutView = calloutDraft && d.views.find((x) => x.id === calloutDraft.viewId);
@@ -1073,6 +1128,35 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
                 <input type="checkbox" checked={selView.showHidden} onChange={(e) => upd((dd) => void (dd.views.find((x) => x.id === selView.id)!.showHidden = e.target.checked))} />
                 {t('Show hidden lines')}
               </label>
+              {selView.brokenOut && (
+                // its local section: how deep it opens the parts (from their front), or take it away
+                <div className="fd-row">
+                  <label>{t('Local section depth')}</label>
+                  <div className="fd-control">
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      placeholder={t('to the middle')}
+                      value={selView.brokenOut.depth === undefined ? '' : formatNumber(selView.brokenOut.depth / uf, 4)}
+                      onChange={(e) =>
+                        upd((dd) => {
+                          const b = dd.views.find((x) => x.id === selView.id)?.brokenOut;
+                          if (!b) return;
+                          const n = parseFloat(e.target.value);
+                          if (Number.isFinite(n) && n >= 0) b.depth = n * uf;
+                          else delete b.depth;
+                        }, `depth-${selView.id}`)
+                      }
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                    <span style={{ color: 'var(--text-3)' }}>{unit}</span>
+                    <button className="icon-btn" title={t('Remove the local section')} onClick={() => upd((dd) => void delete dd.views.find((x) => x.id === selView.id)!.brokenOut)}>
+                      <Icon name="trash" size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
               {selStudio?.configuration?.length ? (
                 // its own configuration of the Part Studio (Onshape): the views projected with it follow
                 <>
@@ -1188,6 +1272,17 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
             }}
           >
             <Icon name="detailView" />
+          </button>
+          <button
+            className={'icon-btn' + (tool === 'breakout' ? ' active' : '')}
+            title={t('Local section (open an area of a view)')}
+            disabled={!d.views.length}
+            onClick={() => {
+              setBreakDraft(null);
+              setTool('breakout');
+            }}
+          >
+            <Icon name="localSection" />
           </button>
           <div className="tb-sep" />
           <button className="btn small drawing-title-tool" onClick={() => setEditingTitle(true)}>
@@ -1328,6 +1423,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
             ? t('Click two points or a circle, then place the dimension. Shift = radius.')
             : tool === 'callout'
               ? t(!calloutDraft ? 'Hole callout: click a hole made by the Hole feature (seen end-on).' : 'Click where to place the callout. Esc — cancel.')
+            : tool === 'breakout'
+              ? t(!breakDraft ? 'Local section: click points round the area on a view.' : 'Click more points; the first point (or Enter) closes the outline. Esc — cancel.')
             : tool === 'section'
               ? t(!viewDraft ? 'Section view: click the start of the cutting line on a view.' : !viewDraft.b ? 'Click the end of the cutting line.' : 'Click where to place the section view (the arrows show the way it is seen); Shift+click — one more point of the line (an offset section). Esc — cancel.')
               : tool === 'detail'

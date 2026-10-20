@@ -66,7 +66,18 @@ The parts are cut by the plane through the cutting line, perpendicular to the vi
 
 **Offset section.** After the second point of the cutting line, **Shift**+click adds another point: each next segment runs along the first one or across it (whichever is nearer the cursor). The segments along the first one each cut their own plane; those across are the steps between them: they are not drawn in the section itself, and on the parent view the bends of the line get thick strokes.
 
+**Half section.** Take the cutting line to the part's axis and **Shift**+click its last segment across — towards the viewer (the side the section goes with first angle) and out of the part. Then one half of the picture is a section and the other a view, with a thin chain line (the axis) between them.
+
 The parent view gets the cutting line (ISO 128-44 / GOST 2.305): a thin chain line across the view, thick strokes beyond it, arrows and letters. The section is labeled **A–A** above it. Letters go in order (Latin — without I, O, Q, S, X, Z; in Russian — without Ё, З, Й, О, Х, Ъ, Ы, Ь) and are changed in the **View letter** field of the section's properties; the button next to it reverses the viewing direction. A section has its parent's scale and configuration. It stays on its line of projection (across the cutting line): dragging moves it along that line only, and it follows its parent when the parent is moved. Hold **Alt** to drag it anywhere.
+
+## Local sections {#local-section}
+
+A local section opens part of a view itself, without a new view (Onshape **Broken-out section**).
+
+1. Click **Local section** on the toolbar.
+2. Click round the area on a view: the outline runs as a smooth curve through the points. Clicking the first point or `Enter` closes it, `Esc` cancels.
+
+Inside the outline the parts are cut away from the viewer down to the **Local section depth** (the view's properties; measured from the parts' front, empty — to their middle). The cut face is hatched, the inner surfaces behind it (hole walls and the like) are seen, and the boundary is a thin freehand line (GOST 2.305). A new outline replaces the old one; the trash button next to the depth removes the local section. A detail view of this view shows it with the local section.
 
 ## Detail views {#detail}
 

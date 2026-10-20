@@ -8,7 +8,11 @@ import { frozenValues } from './solver';
 
 export type Snap =
   | { kind: 'point'; id: string; pos: Vec2 }
-  | { kind: 'curve'; id: string; pos: Vec2 }
+  /**
+   * On curve `id`; where an alignment guide crosses it — also level with point `h` / straight above or below `v`. A
+   * circle's quarter point (`quad`): its top, bottom, left or right (level with / above its centre).
+   */
+  | { kind: 'curve'; id: string; pos: Vec2; h?: string; v?: string; quad?: Quadrant }
   | { kind: 'midpoint'; id: string; pos: Vec2 }
   | { kind: 'origin'; pos: Vec2 }
   /** Inference from acquired points: same y as point `h` (horizontal), same x as point `v` (vertical). */
@@ -33,13 +37,25 @@ export function addConstraint(d: SketchData, type: ConstraintType, refs: string[
 }
 
 /** Apply the snap of a newly created point as a constraint. */
+export type Quadrant = 'top' | 'bottom' | 'left' | 'right';
+
+/** A circle's (arc's) quarter point acquired for alignment: not an entity of its own, it has no constraints. */
+export const quadrantId = (curve: string, q: Quadrant) => `quad:${curve}:${q}`;
+export const isQuadrantId = (id: string | undefined) => !!id?.startsWith('quad:');
+
 export function applySnap(d: SketchData, pointId: string, snap: Snap | null | undefined) {
   if (!snap) return;
+  // an alignment with a quarter point only places the point
+  const real = (id: string | undefined): id is string => !!id && id !== pointId && !isQuadrantId(id);
   switch (snap.kind) {
     case 'point':
       if (snap.id !== pointId) addConstraint(d, 'coincident', [snap.id, pointId]);
       break;
     case 'curve':
+      addConstraint(d, 'coincident', [pointId, snap.id]);
+      if (real(snap.h)) addConstraint(d, 'horizontal', [snap.h, pointId]);
+      if (real(snap.v)) addConstraint(d, 'vertical', [snap.v, pointId]);
+      break;
     case 'extension':
       addConstraint(d, 'coincident', [pointId, snap.id]);
       break;
@@ -50,8 +66,8 @@ export function applySnap(d: SketchData, pointId: string, snap: Snap | null | un
       addConstraint(d, 'fix', [pointId], { frozen: [0, 0] });
       break;
     case 'align':
-      if (snap.h && snap.h !== pointId) addConstraint(d, 'horizontal', [snap.h, pointId]);
-      if (snap.v && snap.v !== pointId) addConstraint(d, 'vertical', [snap.v, pointId]);
+      if (real(snap.h)) addConstraint(d, 'horizontal', [snap.h, pointId]);
+      if (real(snap.v)) addConstraint(d, 'vertical', [snap.v, pointId]);
       break;
   }
 }

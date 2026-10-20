@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SkEntity } from '../core/types';
 import { entityMap } from './curves';
-import { extensionPoint, inferDirection } from './inference';
+import { extensionPoint, guideCrossing, inferDirection, quadrantPos, quadrants } from './inference';
 
 const pt = (id: string, x: number, y: number): SkEntity => ({ id, type: 'point', x, y });
 // a slanted line (1, 2) from (0, 0) to (10, 20), and an arc around (50, 0) of radius 10 from (60, 0) to (50, 10)
@@ -55,5 +55,31 @@ describe('inference while drawing', () => {
     expect(extensionPoint(map, ['L'], [30, 30], px)).toBeNull();
     const g = extensionPoint(map, ['L'], [15.3, 30], px, { y: 30.2 })!;
     expect(g.pos).toEqual([15.1, 30.2]);
+  });
+
+  it('where an alignment guide crosses a curve: the top of a circle above its centre, a horizontal on a line', () => {
+    const m = entityMap([pt('o', 0, 0), { id: 'C', type: 'circle', c: 'o', r: 10 }, ...map.values()]);
+    // the vertical through the centre, the cursor near the top: (0, 10), not the bottom
+    expect(guideCrossing(m.get('C')!, m, { x: 0 }, [0.4, 9.7])).toEqual([0, 10]);
+    expect(guideCrossing(m.get('C')!, m, { x: 0 }, [0.4, -9.7])).toEqual([0, -10]);
+    // a guide that misses the circle
+    expect(guideCrossing(m.get('C')!, m, { y: 12 }, [0, 12])).toBeNull();
+    // the horizontal y = 10 across the slanted line (1, 2): at x = 5
+    const q = guideCrossing(m.get('L')!, m, { y: 10 }, [5.3, 10.2])!;
+    expect(q[0]).toBeCloseTo(5, 9);
+    expect(q[1]).toBe(10);
+    // an arc: only on it (the quarter from (60, 0) to (50, 10)) — y = 5 crosses it at x = 50 + √75, not at 50 − √75
+    const a = guideCrossing(m.get('A')!, m, { y: 5 }, [40, 5])!;
+    expect(a[0]).toBeCloseTo(50 + Math.sqrt(75), 9);
+  });
+
+  it("a circle's quarter points; an arc's — only those on it; found again by their ids", () => {
+    const m = entityMap([pt('o', 0, 0), { id: 'C', type: 'circle', c: 'o', r: 10 }, ...map.values()]);
+    expect(quadrants(m.get('C')!, m).map((q) => `${q.q} ${q.pos.join(' ')}`)).toEqual(['top 0 10', 'bottom 0 -10', 'left -10 0', 'right 10 0']);
+    // the arc from (60, 0) to (50, 10) around (50, 0): its right end and its top
+    expect(quadrants(m.get('A')!, m).map((q) => q.q)).toEqual(['top', 'right']);
+    expect(quadrantPos('quad:C:bottom', m)).toEqual([0, -10]);
+    expect(quadrantPos('quad:A:left', m)).toBeNull();
+    expect(quadrants(m.get('L')!, m)).toEqual([]);
   });
 });

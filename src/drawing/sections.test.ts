@@ -141,6 +141,41 @@ describe('Section views of a model (OpenCascade)', () => {
     expect(res.edges.some((e) => e.pts.every((p) => Math.abs(p[0]) < 1e-6))).toBe(false);
   }, 60000);
 
+  it('makes a half section (a line ending across, out of the part) and a local section', async () => {
+    await initOpenCascade(wasm);
+    const doc = emptyDocument('Half and local');
+    const k = nodeKernel(doc.units);
+    // a 60 × 40 × 10 block, blind holes ⌀6 6 deep at x = ±15
+    const { report } = await runOps(doc.tabs[0] as PartStudioTab, doc.units, [
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 60, h: 40 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'sketch', name: 'P', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [-15, 0] }, { type: 'point', at: [15, 0] }] },
+      { op: 'hole', sketch: 'P', diameter: 6, depth: 6 },
+    ] as DocumentOp[] as never, k);
+    expect(report.failed).toEqual([]);
+    // half: cut along y = 0 to the middle, then across towards the viewer and out of the block
+    const s = { a: [-40, 0] as Vec2, b: [0, 0] as Vec2, steps: [[0, -40]] as Vec2[], side: 1 as const, letter: 'A' };
+    const { axes, cut } = sectionCut(VIEW_AXES.top, s);
+    const half = k.builder.projection([], 'top', false, { axes, section: cut });
+    const xs = half.sections!.map((f) => Math.max(...f.edges.flat().map((p) => p[0])));
+    expect(Math.max(...xs)).toBeCloseTo(0, 6);
+    // the axis between section and view: along x = 0, a little beyond the block (z 0 … 10)
+    expect(half.centerLines?.length).toBe(1);
+    const [p0, p1] = half.centerLines![0];
+    expect([p0[0], p1[0]].map((v) => Math.round(v * 1e6) / 1e6 + 0)).toEqual([0, 0]);
+    expect(Math.min(p0[1], p1[1])).toBeCloseTo(-2, 6);
+    expect(Math.max(p0[1], p1[1])).toBeCloseTo(12, 6);
+    // local: on the Front view round the left hole, to the middle (z = 5) — the hole is opened, the cut face hatched
+    const outline: Vec3[] = [[-25, 0, 1], [-5, 0, 1], [-5, 0, 11], [-25, 0, 11]];
+    const local = k.builder.projection([], 'front', false, { breakout: { outline } });
+    expect(local.sections?.length).toBeGreaterThan(0);
+    expect(local.breaks?.[0].length).toBe(4);
+    // the hole's walls are seen (visible lines at x = −18 and −12), the outline's own walls are not drawn
+    const vertical = (x: number) => local.edges.some((e) => !e.hidden && e.pts.every((p) => Math.abs(p[0] - x) < 1e-6));
+    expect(vertical(-18) && vertical(-12)).toBe(true);
+    expect(local.edges.some((e) => e.pts.every((p) => Math.abs(p[0] + 5) < 1e-6))).toBe(false);
+  }, 60000);
+
   it('turns an offset line along or across its first segment', () => {
     expect(stepPoint([0, 0], [10, 0], [10, 0], [12, 9])).toEqual([10, 9]);
     expect(stepPoint([0, 0], [10, 0], [10, 9], [30, 10])).toEqual([30, 9]);

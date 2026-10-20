@@ -260,7 +260,11 @@ function BottomBar() {
         </div>
       ))}
       <div className="status">
-        {sketch?.hint && <span>{t(sketch.hint)}</span>}
+        {sketch?.hint && (
+          <span className="status-hint" title={t(sketch.hint)}>
+            {t(sketch.hint)}
+          </span>
+        )}
         {sv && (sketchHasEntities || null) && (
           <span className={'sk-state ' + (!sv.ok || sv.conflicting.length ? 'over' : sv.dof === 0 ? 'full' : 'under')}>
             {!sv.ok || sv.conflicting.length
