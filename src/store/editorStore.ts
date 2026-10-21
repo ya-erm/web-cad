@@ -71,6 +71,11 @@ export interface SketchSession {
    * the picks make it, and the tool stays on for the next one.
    */
   constraint?: ConstraintType;
+  /**
+   * The Mirror tool waiting for its picks (Onshape: the mirror line first, then the entities): `axis` — the line
+   * picked; `pending` — entities selected before it (mirrored as soon as the line is picked); `done` — those mirrored.
+   */
+  mirror?: { axis?: string; pending: string[]; done: string[] };
   /** A text just placed by the Text tool: the sketch dialog puts the cursor into its field. */
   editText?: string;
 }
@@ -154,6 +159,12 @@ export interface EditorState {
   hover: SelRef | null;
   /** Features under the pointer in the feature list (a folder: its features): the faces they made light up. */
   hoverFeatures: string[] | null;
+  /**
+   * The model compared with a version on it (Onshape: Compare): its faces new or changed since the version (part id
+   * → face indices) light up; the version's faces that are gone are drawn as a ghost (their triangles). Pending while
+   * the version is being built.
+   */
+  compare: { label: string; tabId: string; changed: Record<string, number[]>; ghost: { positions: Float32Array; indices: Uint32Array }[]; pending?: boolean } | null;
   sketch: SketchSession | null;
   sketchPattern: SketchPatternState | null;
   sketchTransform: SketchTransformState | null;
@@ -325,6 +336,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   selection: [],
   hover: null,
   hoverFeatures: null,
+  compare: null,
   sketch: null,
   sketchPattern: null,
   sketchTransform: null,
@@ -494,7 +506,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       get().showToast('Select a plane or a planar face for the sketch.', 'error');
       return;
     }
-    set({ sketch: { ...s, tool, hint: undefined, constraint: undefined } });
+    set({ sketch: { ...s, tool, hint: undefined, constraint: undefined, mirror: undefined } });
   },
 
   updateSketch(fn, undoable = true) {

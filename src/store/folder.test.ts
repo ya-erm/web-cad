@@ -1,8 +1,8 @@
 // A folder on the computer: its project files listed, read and written (an in-memory folder stands for the disk).
 
 import { describe, expect, it } from 'vitest';
-import { freeFileName, listFolder, readFolderFile, writeFolderFile } from './localFolder';
-import { parseProject, projectText, readProject } from './folderStore';
+import { fileStamp, freeFileName, listFolder, readFolderFile, sameStamp, writeFolderFile } from './localFolder';
+import { parseProject, projectText, readProject, sameContent } from './folderStore';
 import type { CadDocument } from '../core/types';
 import { docId } from '../core/ids';
 
@@ -71,6 +71,22 @@ describe('a folder on the computer', () => {
     expect(parseProject(disk['Bracket.webcad.json'].text, 'x').name).toBe('Bracket 2');
   });
 
+  it("sees another program's change of a file, and whether it changed the document", async () => {
+    const disk: Disk = {};
+    const dir = fakeFolder(disk);
+    await writeFolderFile(dir, 'Bracket.webcad.json', projectText(doc));
+    const ours = await fileStamp(dir, 'Bracket.webcad.json');
+    expect(sameStamp(ours, await fileStamp(dir, 'Bracket.webcad.json'))).toBe(true);
+    // another program: the same size, a later time — or another size
+    disk['Bracket.webcad.json'] = { text: disk['Bracket.webcad.json'].text, modified: 150 };
+    expect(sameStamp(ours, await fileStamp(dir, 'Bracket.webcad.json'))).toBe(false);
+    expect(sameStamp(ours, { modified: ours.modified, size: ours.size + 1 })).toBe(false);
+    // its content: the same document saved again (another time, another tab open) — or really changed
+    const again = parseProject(projectText({ ...doc, modified: 500, activeTab: 'other' }), 'x');
+    expect(sameContent(again, doc)).toBe(true);
+    expect(sameContent(parseProject(projectText({ ...doc, name: 'Bracket 2' }), 'x'), doc)).toBe(false);
+  });
+
   it('keeps the versions of a document in its project file, apart from the document', () => {
     const v1 = { id: 'vr1', name: 'V1', description: 'First', created: 5, units: doc.units, tabs: [], activeTab: '' };
     const text = projectText(doc, [v1]);
@@ -82,6 +98,19 @@ describe('a folder on the computer', () => {
     // none: the plain document, as before
     expect(JSON.parse(projectText(doc))).toEqual(doc);
     expect(readProject(JSON.parse(projectText(doc)), 'x').versions).toEqual([]);
+  });
+
+  it('keeps the workspaces the document is not in apart from its versions (`workspaces`)', () => {
+    const v1 = { id: 'vr1', name: 'V1', created: 5, units: doc.units, tabs: [], activeTab: '' };
+    const branch = { id: 'ws1', kind: 'workspace' as const, name: 'Branch 1', base: 'vr1', created: 9, units: doc.units, tabs: [], activeTab: '' };
+    const file = JSON.parse(projectText({ ...doc, workspace: { id: 'main2', name: 'Main' } } as typeof doc, [v1, branch]));
+    // older readers see the versions as before; the workspaces have no kind in the file
+    expect(file.versions).toEqual([v1]);
+    expect(file.workspaces).toEqual([{ id: 'ws1', name: 'Branch 1', base: 'vr1', created: 9, units: doc.units, tabs: [], activeTab: '' }]);
+    const { doc: read, versions } = readProject(file, 'x');
+    expect('workspaces' in read).toBe(false);
+    expect(read.workspace).toEqual({ id: 'main2', name: 'Main' });
+    expect(versions).toEqual([v1, branch]);
   });
 
   it('takes a project file without id or name, and refuses other JSON', () => {

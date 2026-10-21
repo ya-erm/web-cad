@@ -32,6 +32,12 @@ function startSection() {
   useEditor.setState({ section: s });
 }
 
+/** The section view on (through the selected face or plane, else Front) or off: its button, Shift+X. */
+export function toggleSection() {
+  if (useEditor.getState().section) useEditor.setState({ section: null });
+  else startSection();
+}
+
 /** Onshape-like section view panel: plane, offset (slider + value), side. */
 function SectionPanel({ s }: { s: SectionState }) {
   const units = useDoc((d) => d.doc?.units.length ?? 'mm');
@@ -133,8 +139,8 @@ export function Viewport() {
         </button>
         <button
           className={'icon-btn' + (section ? ' active' : '')}
-          title={t('Section view')}
-          onClick={() => (section ? useEditor.setState({ section: null }) : startSection())}
+          title={`${t('Section view')} (Shift+X)`}
+          onClick={toggleSection}
         >
           <Icon name="sectionView" size={18} />
         </button>

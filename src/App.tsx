@@ -5,6 +5,7 @@ import { Editor } from './ui/Editor';
 import { requestPersistentStorage } from './store/persistence';
 import { startFolder } from './store/folderStore';
 import { startVersions } from './store/versions';
+import { startCompare } from './store/compare';
 import { TooltipLayer } from './ui/Tooltip';
 import { isHelpHash } from './help/toc';
 
@@ -28,6 +29,7 @@ export default function App() {
     void startFolder();
     // versions and history of the open document
     startVersions();
+    startCompare();
     const onHash = () => {
       setDocId(docIdFromHash());
       setHelp(isHelpHash(location.hash));

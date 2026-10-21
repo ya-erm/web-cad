@@ -1086,6 +1086,19 @@ export interface CadDocument {
   tabs: DocTab[];
   activeTab: string;
   version: 1;
+  /**
+   * The workspace (Onshape: a branch) the document is now — none: Main. The others are kept beside the versions
+   * (`DocumentVersion` of kind `workspace`) until switched to.
+   */
+  workspace?: Workspace;
+}
+
+/** A workspace of a document: Main, or a branch made from a version (`base`). */
+export interface Workspace {
+  id: string;
+  name: string;
+  /** The version it was branched from: merges compare with it. */
+  base?: string;
 }
 
 export interface DocumentSummary {
@@ -1106,21 +1119,30 @@ export interface DocumentSummary {
 export interface DocumentVersion {
   id: string;
   docId: string;
-  kind: 'version' | 'auto';
-  /** A version's name ("V1"); the history's entries have none. */
+  /** Made by the user, by the history, a workspace not open now (its state, kept until switched to). */
+  kind: 'version' | 'auto' | 'workspace';
+  /** A version's name ("V1"), a workspace's ("Main", "Branch 1"); the history's entries have none. */
   name: string;
+  /** A workspace: the version it was branched from. */
+  base?: string;
   description?: string;
   /** Why the history saved it. */
-  reason?: 'open' | 'edit' | 'restore';
+  reason?: 'open' | 'edit' | 'restore' | 'merge';
   created: number;
   /** Of the snapshot's content (units and tabs): the same content is not saved twice in a row. */
   hash: string;
 }
 
-/** A version as the project file (.webcad.json) keeps it — its name and content (the history stays in the browser). */
+/**
+ * A version as the project file (.webcad.json) keeps it — its name and content (the history stays in the browser).
+ * Or a workspace (branch) the document is not in (`kind: 'workspace'`, its id and the version it came from): the
+ * file has these apart, in `workspaces`.
+ */
 export interface ProjectVersion extends Pick<CadDocument, 'units' | 'tabs' | 'activeTab'> {
   id: string;
   name: string;
   description?: string;
   created: number;
+  kind?: 'workspace';
+  base?: string;
 }

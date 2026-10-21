@@ -86,7 +86,7 @@ export const SKETCH_TOOLS: (SketchToolDef | '|')[] = [
   '|',
   { id: 'fillet', icon: 'sketchFillet', label: 'Sketch fillet', shortcut: 'Shift+F' },
   { id: 'trim', icon: 'trim', label: 'Trim', shortcut: 'M' },
-  { id: 'extend', icon: 'extend', label: 'Extend' },
+  { id: 'extend', icon: 'extend', label: 'Extend', shortcut: 'X' },
   { id: 'split', icon: 'sketchSplit', label: 'Split curve' },
   { id: 'offset', icon: 'offset', label: 'Offset', shortcut: 'O' },
   { id: 'use', icon: 'use', label: 'Use', shortcut: 'U' },
@@ -335,7 +335,7 @@ function SketchToolbar() {
           ) : (
             <button
               key={tool.id}
-              className={'icon-btn' + (sketch.tool === tool.id && !sketch.constraint ? ' active' : '')}
+              className={'icon-btn' + (sketch.tool === tool.id && !sketch.constraint && !sketch.mirror ? ' active' : '')}
               title={tip(tool.label, tool.shortcut)}
               disabled={off}
               onClick={() => setTool(tool.id)}
@@ -347,7 +347,7 @@ function SketchToolbar() {
         <button className="icon-btn" title={tip('Sketch transform')} disabled={off} onClick={() => getEngine()?.sketchEditor.startTransform()}>
           <Icon name="sketchTransform" />
         </button>
-        <button className="icon-btn" title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
+        <button className={'icon-btn' + (sketch.mirror ? ' active' : '')} title={tip('Sketch mirror')} disabled={off} onClick={() => getEngine()?.sketchEditor.applyMirror()}>
           <Icon name="sketchMirror" />
         </button>
         <button className="icon-btn" title={tip('Sketch linear pattern')} disabled={off} onClick={() => getEngine()?.sketchEditor.startPattern('linear')}>

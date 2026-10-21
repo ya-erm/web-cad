@@ -13,10 +13,10 @@ import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
 import { AgentError, derivedVariant, findDerivedSource, runOps, summarize, queryModel, measureModel, type AgentKernel } from './runner';
-import { studioSources, summarizeAssembly } from './assembly';
+import { animateMate, studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
 import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
-import type { AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
+import type { AnimateQuery, AnimateResult, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
 
 let ocReady: Promise<void> | null = null;
 
@@ -27,9 +27,11 @@ export function initOpenCascade(wasmPath: string): Promise<void> {
       const oc = await opencascade({ locateFile: () => wasmPath } as never);
       setOC(oc);
       if (!fontsLoaded()) {
-        // Node only (the app's types have no Node): the font files next to the module
+        // Node only (the app's types have no Node): the font files next to the module — the built-in module taken
+        // as it is (the CLI's Vite runner is closed once the module is imported: a dynamic import would fail)
         const fsModule = 'node:fs/promises';
-        const { readFile } = (await import(/* @vite-ignore */ fsModule)) as { readFile(p: URL): Promise<Uint8Array> };
+        const proc = (globalThis as { process?: { getBuiltinModule?(id: string): unknown } }).process;
+        const { readFile } = (proc?.getBuiltinModule?.(fsModule) ?? (await import(/* @vite-ignore */ fsModule))) as { readFile(p: URL): Promise<Uint8Array> };
         for (const [k, url] of Object.entries(FONT_FILES)) {
           const buf = await readFile(url);
           registerFont(k as SkFont, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
@@ -86,6 +88,8 @@ export interface HeadlessSession {
   query(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<unknown>;
   /** The measure panel's values of the matched selections (document units, degrees). */
   measure(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<Record<string, number>>;
+  /** A mate's motion in frames (Onshape Animate): where the instances that move are; the document does not change. */
+  animate(q: AnimateQuery): Promise<AnimateResult>;
   /** The active Part Studio's parts, or the active assembly (with its product tree). */
   exportStep(): Promise<Uint8Array>;
   exportStl(binary?: boolean): Promise<Uint8Array>;
@@ -163,6 +167,7 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
     },
     query: (q) => queryModel(studioOf(session.doc), session.doc.units, kernelOf(session.doc, studioOf(session.doc)), q),
     measure: (q) => measureModel(studioOf(session.doc), session.doc.units, kernelOf(session.doc, studioOf(session.doc)), q),
+    animate: (q) => animateMate(session.doc, host, q),
     async exportStep() {
       const a = assemblyOf(session.doc);
       if (a) {

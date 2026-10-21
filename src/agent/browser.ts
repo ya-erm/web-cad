@@ -18,10 +18,12 @@ import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
 import { sourceKey } from '../assembly/compose';
 import { AgentError, derivedVariant, findDerivedSource, measureModel, queryModel, runOps, summarize, type AgentKernel } from './runner';
-import { studioSources, summarizeAssembly } from './assembly';
+import { animateMate, studioSources, summarizeAssembly } from './assembly';
+import { useExplode } from '../assembly/explode';
+import { requestRebuild } from '../store/rebuild';
 import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
-import type { AgentOp, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
+import type { AgentOp, AnimateQuery, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -118,11 +120,14 @@ Methods:
                                     assemblies: {"op":"assembly"}, insert, place, mate, group, relation… ({"op":"studio"} back)
   query({faces|edges|parts})        list matching faces / edges with geometry (to design queries)
   measure({faces|edges|parts})      the measure panel: sizes of one; min / max distance, centre to centre, angle of two
+  animate({mate, motion?, from?, to?, frames?})
+                                    a mate's motion in frames: where the instances that move are (nothing changes)
   feature(name)                     raw feature JSON
   undo() / redo() / cancelEdit()
   view(name)                        iso | top | front | right | … | fit
   section({plane, offset?, flip?})  section view by top | front | right (null = off)
-  screenshot({view?})               PNG data URL of the graphics area
+  screenshot({view?, exploded?, amount?})
+                                    PNG data URL of the graphics area (an assembly's exploded view by name, 0…1)
   export(format)                    stl | step | webcad → { fileName, mime, base64 }
 Ops reference with examples: docs/agent-api.md in the WebCAD repository.`;
 
@@ -211,6 +216,13 @@ export const webcadApi = {
     return measureModel(studio, doc.units, agentKernel(studio, doc), q);
   },
 
+  /** A mate's motion in frames (Onshape Animate): where the instances that move are at each; nothing changes. */
+  async animate(q: AnimateQuery) {
+    const doc = useDoc.getState().doc;
+    if (!doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
+    return animateMate(doc, browserHost, q);
+  },
+
   feature(name: string): Feature {
     const { studio } = current();
     const f = studio.features.find((x) => x.name === name || x.id === name);
@@ -255,15 +267,36 @@ export const webcadApi = {
     return true;
   },
 
-  async screenshot(opts: { view?: ViewName } = {}) {
+  async screenshot(opts: { view?: ViewName; exploded?: string; amount?: number } = {}) {
     // any tab with a graphics area: a Part Studio or an assembly
-    if (!useDoc.getState().doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
+    const doc = useDoc.getState().doc;
+    if (!doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
     // wait for the app's own rebuild of the latest edit
     await waitFor(() => !useEditor.getState().building, 'the model to rebuild', 30000);
-    if (opts.view) await webcadApi.view(opts.view);
-    const e = getEngine();
-    if (!e) throw new AgentError('The graphics area is not visible');
-    return e.snapshot();
+    // an exploded view of the open assembly, shown for the picture (then as it was)
+    const was = useExplode.getState();
+    if (opts.exploded !== undefined) {
+      const asm = activeAssembly(doc);
+      const v = asm?.explodedViews?.find((x) => x.name === opts.exploded) ?? asm?.explodedViews?.find((x) => x.name.toLowerCase() === opts.exploded!.toLowerCase());
+      if (!asm || !v) throw new AgentError(asm ? `No exploded view "${opts.exploded}". Exploded views: ${(asm.explodedViews ?? []).map((x) => x.name).join(', ') || '(none)'}` : 'Open an assembly tab first');
+      const before = useEditor.getState().build;
+      useExplode.setState({ assembly: asm.id, view: v.id, amount: Math.min(1, Math.max(0, opts.amount ?? 1)), pending: null });
+      await waitFor(() => useEditor.getState().build !== before, 'the exploded view', 10000);
+    }
+    try {
+      if (opts.view) await webcadApi.view(opts.view);
+      const e = getEngine();
+      if (!e) throw new AgentError('The graphics area is not visible');
+      return e.snapshot();
+    } finally {
+      if (opts.exploded !== undefined) {
+        if (was.view) useExplode.setState({ assembly: was.assembly, view: was.view, amount: was.amount, pending: null });
+        else {
+          useExplode.setState({ assembly: null, view: null, amount: 1, pending: null });
+          requestRebuild();
+        }
+      }
+    }
   },
 
   async export(format: 'stl' | 'step' | 'webcad' = 'stl') {

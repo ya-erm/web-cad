@@ -13,11 +13,22 @@ width: 600
 
 ## Steps {#steps}
 
-1. In select mode, select the entities you want to mirror.
-2. Select the line to mirror about (usually a construction line) **last**.
-3. Click **Sketch mirror**.
+The tool works in two ways.
 
-If no line is selected, or the line is not selected last, the message "Select entities and the mirror line (select the line last)" appears.
+**The tool first, then the line and the entities** (as in Onshape):
+
+1. With nothing selected, click **Sketch mirror**: the button stays pressed and the status bar tells you what to pick.
+2. Click the line to mirror about (usually a construction line). It stays selected.
+3. Click entities: each one is mirrored at once, and the tool waits for the next. Clicking an entity already mirrored, or a copy, adds nothing.
+4. Press `Esc` (or the button again) to finish.
+
+If entities are selected without a line when you click the button, they are mirrored as soon as you click the line; if only a line is selected, it becomes the axis right away.
+
+**The selection first, then the tool:**
+
+1. In select mode, select the entities you want to mirror.
+2. Select the line to mirror about **last**.
+3. Click **Sketch mirror**: the copies appear at once.
 
 ## Details {#details}
 

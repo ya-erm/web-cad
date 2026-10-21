@@ -107,6 +107,8 @@ export function placeMesh(mesh: PartMesh, pl: Placement, id: string, name: strin
     ...mesh,
     id,
     name,
+    // the same mesh where it stands: the same key (an instance moved — another)
+    ...(mesh.meshKey ? { meshKey: `${mesh.meshKey}|${pl.R.join(',')}|${pl.t.join(',')}` } : {}),
     positions,
     normals: mapArray(mesh.normals, D),
     edgePositions: mapArray(mesh.edgePositions, P),

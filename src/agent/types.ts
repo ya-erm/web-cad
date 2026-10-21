@@ -371,7 +371,43 @@ export type AssemblyOp =
   | { op: 'group'; instances: string[]; name?: string }
   | { op: 'relation'; type: 'gear' | 'rackPinion' | 'screw'; a: string; b?: string; value: Num; reverse?: boolean; name?: string }
   | { op: 'deleteInstance'; instance: string }
-  | { op: 'deleteMate'; mate: string };
+  | { op: 'deleteMate'; mate: string }
+  /**
+   * An exploded view (Onshape): its steps move (`distance` along `dir`) and / or turn (`angle` degrees about `dir`
+   * through `pivot`, by default the centre of the step's instances) instances apart, one after another. Shown only:
+   * the placements stay. Replaces the view of that name (`add` — its steps are added after the view's own).
+   */
+  | { op: 'explodedView'; name?: string; steps: ExplodeStepSpec[]; add?: boolean }
+  | { op: 'deleteExplodedView'; name: string };
+
+/** One step of an exploded view: a direction by axis name ("+z", "-x"…) or a vector; a distance in document units. */
+export interface ExplodeStepSpec {
+  instances: string[];
+  dir: Pt3 | 'x' | 'y' | 'z' | '+x' | '+y' | '+z' | '-x' | '-y' | '-z';
+  distance?: Num;
+  angle?: number;
+  pivot?: Pt3;
+}
+
+/** Animate a mate (Onshape Animate), as a query: where the instances that move are at each frame. */
+export interface AnimateQuery {
+  mate: string;
+  /** `turn` (degrees) or `slide` (document units along the mate's Z); the mate's first free motion by default. */
+  motion?: 'turn' | 'slide';
+  /** The range: the mate's limits, else from where it is now a full turn / 20 mm. */
+  from?: number;
+  to?: number;
+  /** Frames, the ends included (2…50, by default 5). */
+  frames?: number;
+  /** The assembly (by name): the open one by default. */
+  assembly?: string;
+}
+
+export interface AnimateResult {
+  mate: string;
+  motion: 'turn' | 'slide';
+  frames: { value: number; instances: { name: string; position: Pt3; rotation: Pt3; bboxMin?: Pt3; bboxMax?: Pt3 }[] }[];
+}
 
 /** An assembly in a report: instances (placement and box in document units), mates and whether they hold. */
 export interface AssemblySummary {
@@ -392,6 +428,8 @@ export interface AssemblySummary {
   mates: { name: string; type: string; a: string; b: string; ok: boolean }[];
   groups: { name: string; instances: string[] }[];
   relations: { name: string; type: string; ok: boolean }[];
+  /** Exploded views: their steps, and the boxes of the instances they move when fully exploded. */
+  explodedViews?: { name: string; steps: number; moved: { name: string; bboxMin: Pt3; bboxMax: Pt3 }[] }[];
 }
 
 export interface FeatureSummary {

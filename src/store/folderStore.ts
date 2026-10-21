@@ -8,7 +8,10 @@ import { docId } from '../core/ids';
 import * as db from './persistence';
 import { useDoc } from './docStore';
 import { fileVersions, importVersions, useVersions } from './versions';
+import { useEditor } from './editorStore';
+import { t } from '../i18n';
 import {
+  fileStamp,
   folderAccess,
   folderLinks,
   folderSupported,
@@ -19,9 +22,11 @@ import {
   pickFolder,
   readFolderFile,
   renameFolderFile,
+  sameStamp,
   savedFolders,
   writeFolderFile,
   type FileLink,
+  type FileStamp,
   type FolderFile,
 } from './localFolder';
 
@@ -48,23 +53,83 @@ const setFolder = (id: string, patch: Partial<Folder>) => useFolder.setState((s)
 
 /**
  * The text of a project file: the document as JSON (indented, so that it reads and compares well), with its
- * versions (`versions`, oldest first; the history stays in the browser).
+ * versions (`versions`, oldest first; the history stays in the browser) and the workspaces it is not in
+ * (`workspaces`: the ones `versions` has with `kind: 'workspace'`).
  */
-export const projectText = (doc: CadDocument, versions: ProjectVersion[] = []) => JSON.stringify(versions.length ? { ...doc, versions } : doc, null, 1);
+export function projectText(doc: CadDocument, versions: ProjectVersion[] = []): string {
+  const named = versions.filter((v) => v.kind !== 'workspace');
+  const workspaces = versions.flatMap(({ kind, ...w }) => (kind === 'workspace' ? [w] : []));
+  return JSON.stringify({ ...doc, ...(named.length ? { versions: named } : {}), ...(workspaces.length ? { workspaces } : {}) }, null, 1);
+}
 
-/** A document and its versions from a project file (already parsed JSON); throws on anything else. */
+/** A document and its versions (and workspaces: `kind: 'workspace'`) from a project file (already parsed JSON); throws on anything else. */
 export function readProject(raw: unknown, title: string): { doc: CadDocument; versions: ProjectVersion[] } {
-  const { versions, ...doc } = (raw ?? {}) as CadDocument & { versions?: ProjectVersion[] };
+  const { versions, workspaces, ...doc } = (raw ?? {}) as CadDocument & { versions?: ProjectVersion[]; workspaces?: ProjectVersion[] };
   if (!raw || typeof raw !== 'object' || !Array.isArray(doc.tabs) || !doc.units) throw new Error('Invalid project file');
   const now = Date.now();
   return {
     doc: { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : docId(), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 },
-    versions: Array.isArray(versions) ? versions : [],
+    versions: [...(Array.isArray(versions) ? versions : []), ...(Array.isArray(workspaces) ? workspaces.map((w) => ({ ...w, kind: 'workspace' as const })) : [])],
   };
 }
 
 /** A document from the text of a project file (without its versions); throws on anything else. */
 export const parseProject = (text: string, title: string): CadDocument => readProject(JSON.parse(text), title).doc;
+
+/** Whether two copies of a document have the same content (not counting when they were saved, the tab open). */
+export const sameContent = (a: CadDocument, b: CadDocument) => {
+  const content = (d: CadDocument) => JSON.stringify({ ...d, modified: 0, version: 0, activeTab: '' });
+  return content(a) === content(b);
+};
+
+/** The linked files as this tab last wrote or read them: document id → the file's stamp (another program's change shows). */
+const stamps = new Map<string, FileStamp>();
+
+/** Remember a linked file as it is now (just written or read by this tab). */
+async function remember(docId: string, dir: FileSystemDirectoryHandle, name: string) {
+  try {
+    stamps.set(docId, await fileStamp(dir, name));
+  } catch {
+    stamps.delete(docId);
+  }
+}
+
+let checking = false;
+
+/**
+ * The open document's file changed by another program (an editor, git, a cloud folder's sync, WebCAD in another
+ * tab): the document is read again from it. Not while it is being edited (a sketch or a feature open, a save on
+ * its way) — then at the next check; and if the document is written first, the other program's file is kept beside.
+ */
+export async function checkLinked() {
+  const { doc, readOnly } = useDoc.getState();
+  const l = doc && useFolder.getState().links[doc.id];
+  const f = l && folderOf(l.folder);
+  if (checking || !doc || !l || !f?.access || readOnly) return;
+  checking = true;
+  try {
+    const was = stamps.get(doc.id);
+    const now = await fileStamp(f.dir, l.name);
+    if (!was) return void stamps.set(doc.id, now);
+    const busy = () => useDoc.getState().saving || !!useEditor.getState().editing || useDoc.getState().doc !== doc;
+    if (sameStamp(was, now) || busy()) return;
+    const { doc: fromFile, versions } = readProject(JSON.parse(await readFolderFile(f.dir, l.name)), doc.name);
+    // edited meanwhile: the next check
+    if (busy()) return;
+    stamps.set(doc.id, now);
+    if (sameContent(fromFile, doc)) return;
+    // the tab open stays open if the file still has it
+    const next = { ...fromFile, id: doc.id, activeTab: fromFile.tabs.some((x) => x.id === doc.activeTab) ? doc.activeTab : fromFile.activeTab };
+    await db.saveDocument(next);
+    await importVersions(doc.id, versions, true);
+    await useDoc.getState().openDocument(doc.id);
+    useEditor.getState().showToast(t('The file was changed by another program: the document is read again'), 'info');
+  } catch {
+    // the file is gone or busy just now: at the next check
+  } finally {
+    checking = false;
+  }
+}
 
 /** Read a folder's file list again. */
 export async function refreshFolder(id: string) {
@@ -93,11 +158,15 @@ export async function startFolder() {
   useDoc.subscribe((s, prev) => {
     if (prev.saving && !s.saving && s.doc) void writeLinked(s.doc);
   });
-  // a version made or deleted: the file keeps the versions too
-  const named = (s: { versions: { id: string; kind: string }[] }) => s.versions.flatMap((v) => (v.kind === 'version' ? [v.id] : [])).join();
+  // a version made or deleted, a workspace kept or opened: the file keeps the versions and workspaces too
+  const named = (s: { versions: { id: string; kind: string; created: number }[] }) =>
+    s.versions.flatMap((v) => (v.kind === 'version' ? [v.id] : v.kind === 'workspace' ? [`${v.id}@${v.created}`] : [])).join();
   useVersions.subscribe((s, prev) => {
     if (s.docId && s.docId === prev.docId && prev.loaded && named(s) !== named(prev)) void syncLinked(s.docId);
   });
+  // the open document's file changed by another program: read again (every few seconds, and on coming back)
+  setInterval(() => document.visibilityState === 'visible' && void checkLinked(), 3000);
+  window.addEventListener('focus', () => void checkLinked());
 }
 
 /** Add a folder (the system dialog); a folder added before is just allowed again. Its id, or null if cancelled. */
@@ -141,13 +210,24 @@ export async function writeLinked(doc: CadDocument) {
   if (!l || !f) return;
   if (!f.access) return useFolder.setState({ writeError: doc.id });
   try {
+    // changed by another program since this tab wrote or read it (not read again: the document was being edited) —
+    // that file is kept beside this one, not overwritten
+    const was = stamps.get(doc.id);
+    const now = was && (await fileStamp(f.dir, l.name).catch(() => undefined));
+    let kept = '';
+    if (was && now && !sameStamp(was, now)) {
+      kept = freeFileName(`${l.title ?? doc.name} (${t('changed outside')})`, f.files.map((x) => x.name));
+      await writeFolderFile(f.dir, kept, await readFolderFile(f.dir, l.name));
+    }
     let name = l.name;
     if (l.title !== doc.name) {
       if (l.title !== undefined) name = await renameFolderFile(f.dir, l.name, freeFileName(doc.name, f.files.map((x) => x.name).filter((n) => n !== l.name)));
       await link(doc.id, { ...l, name, title: doc.name });
     }
     await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
-    if (name !== l.name) await refreshFolder(f.id);
+    await remember(doc.id, f.dir, name);
+    if (kept) useEditor.getState().showToast(`${t('Another program changed the file at the same time: its version is kept as')} «${kept}»`, 'info');
+    if (name !== l.name || kept) await refreshFolder(f.id);
     if (useFolder.getState().writeError) useFolder.setState({ writeError: null });
   } catch {
     useFolder.setState({ writeError: doc.id });
@@ -187,6 +267,7 @@ export async function renameFolderDoc(folderId: string, name: string, title: str
   await writeFolderFile(f.dir, to, projectText(doc, docId ? await fileVersions(docId) : versions));
   if (docId) {
     await link(docId, { folder: folderId, name: to, title });
+    await remember(docId, f.dir, to);
     await useDoc.getState().renameDocument(docId, title);
   }
   await refreshFolder(folderId);
@@ -223,6 +304,7 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   if (useDoc.getState().docs.find((d) => d.id === doc.id)?.trashed) await db.setTrashed(doc.id, null);
   // the file keeps its name (it may differ from the document's) until the document is renamed
   await link(doc.id, { folder: folderId, name, title: doc.name });
+  await remember(doc.id, f.dir, name);
   await useDoc.getState().loadList();
   return doc.id;
 }
@@ -235,6 +317,7 @@ export async function saveToFolder(docId: string, folderId: string): Promise<str
   const name = freeFileName(doc.name, f.files.map((x) => x.name));
   await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
   await link(doc.id, { folder: folderId, name, title: doc.name });
+  await remember(doc.id, f.dir, name);
   await refreshFolder(folderId);
   return name;
 }

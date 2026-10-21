@@ -13,7 +13,7 @@ import { isTextPart } from '../sketch/text';
 import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
 import type { BuildResult, PartMesh, SketchResult, ThreadResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
-import { useEditor, refKey, sameRef } from '../store/editorStore';
+import { useEditor, refKey, sameRef, type EditorState } from '../store/editorStore';
 import { activeAssembly, activeStudio, activeTab, useDoc } from '../store/docStore';
 import { assemblyDragEnd, assemblyDragMove, assemblyDragStart, dragInstance } from '../assembly/drag';
 import { mateDialogOpen, selectedInstances, selectedUnits } from '../assembly/AssemblyUI';
@@ -76,6 +76,29 @@ interface PartObj {
   pickMats: THREE.Material[];
   /** Section view cap (back faces seen through the cut). */
   cap?: THREE.Mesh;
+}
+
+/** A part mesh's geometry kept by the graphics (see Engine.partGeos). */
+interface PartGeo {
+  key: string;
+  geo: THREE.BufferGeometry;
+  /** Edge segments; the vertices (picking). */
+  eg: THREE.BufferGeometry;
+  vg: THREE.BufferGeometry;
+  /** Each vertex's face, each segment end's edge: their pick ids are numbered from the bases. */
+  faceOf: Int32Array;
+  edgeOf: Int32Array;
+  faceBase: number;
+  edgeBase: number;
+  vertexBase: number;
+  /** Shown by the scene being made. */
+  used: boolean;
+}
+
+function disposePartGeo(c: PartGeo) {
+  c.geo.dispose();
+  c.eg.dispose();
+  c.vg.dispose();
 }
 
 /** Entity id of a whole curve feature (helix) referenced as { kind: 'sketchEntity', sketchId: featureId }. */
@@ -155,6 +178,8 @@ function threadObject(threads: ThreadResult[]): THREE.Object3D {
 }
 
 const TRIAD_COLORS = [0xd64545, 0x3aa655, 0x2f80d1];
+/** Comparing with a version: the faces new or changed since, the version's faces gone (as the legend shows them). */
+export const COMPARE_COLORS = { changed: 0x2fb84f, removed: 0xe0453a };
 const TRIAD_ACTIVE = 0xf29d38;
 /** Screen length of the triad manipulator's arrows, px. */
 const TRIAD_PX = 90;
@@ -391,7 +416,8 @@ export class Engine {
           s.hover !== p.hover ||
           s.hoverFeatures !== p.hoverFeatures ||
           s.editing?.draft !== p.editing?.draft ||
-          s.build !== p.build
+          s.build !== p.build ||
+          s.compare !== p.compare
         )
           this.syncHighlights();
         if (s.viewCmd !== p.viewCmd && s.viewCmd) this.runView(s.viewCmd.cmd);
@@ -602,6 +628,8 @@ export class Engine {
     cancelAnimationFrame(this.raf);
     this.unsub.forEach((u) => u());
     this.sketchEditor.dispose();
+    for (const c of this.partGeos.values()) disposePartGeo(c);
+    this.partGeos.clear();
     this.renderer.dispose();
     this.viewCube.dispose();
     this.picker.dispose();
@@ -640,6 +668,7 @@ export class Engine {
     const changed = new Set(build?.preview?.changed ?? []);
 
     this.threadObj = null;
+    for (const c of this.partGeos.values()) c.used = false;
     if (build) {
       for (const p of build.parts) {
         if (p.hidden) continue;
@@ -692,6 +721,12 @@ export class Engine {
       }
       if (build.preview) this.addPreview(build);
     }
+    // the kept geometry of parts no longer shown (gone, hidden, changed): released
+    for (const [id, c] of this.partGeos)
+      if (!c.used) {
+        disposePartGeo(c);
+        this.partGeos.delete(id);
+      }
     // the origin triad (an eye in the feature list hides it, and then it is not picked either)
     const showOrigin = !hidden.has('origin');
     for (const o of [this.scene.getObjectByName('origin'), this.pickScene.getObjectByName('origin-pick')]) if (o) o.visible = showOrigin;
@@ -732,22 +767,78 @@ export class Engine {
     return b;
   }
 
+  /**
+   * What the graphics made of each part's mesh (its buffers on the GPU): kept while the part's mesh is the same
+   * (`meshKey`) — opening a feature, hiding planes or another part rebuilds the scene without rebuilding them; only
+   * their pick ids are numbered anew when the registry gives the part other ones.
+   */
+  private partGeos = new Map<string, PartGeo>();
+
+  /** A part's geometry: as kept, or made anew; its pick ids from `faceBase` / `edgeBase` / `vertexBase`. */
+  private partGeo(p: PartMesh, faceBase: number, edgeBase: number, vertexBase: number): PartGeo {
+    let c = this.partGeos.get(p.id);
+    if (!c || !p.meshKey || c.key !== p.meshKey) {
+      if (c) disposePartGeo(c);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
+      geo.setIndex(new THREE.BufferAttribute(p.indices, 1));
+      geo.computeBoundingBox();
+      // each vertex's face, each edge segment end's edge (for numbering the pick ids)
+      const faceOf = new Int32Array(p.positions.length / 3);
+      for (let i = 0; i < p.faceRanges.length / 2; i++) {
+        const s = p.faceRanges[i * 2];
+        for (let k = s; k < s + p.faceRanges[i * 2 + 1]; k++) faceOf[p.indices[k]] = i;
+      }
+      let nSeg = 0;
+      for (let i = 0; i < p.edgeRanges.length / 2; i++) if (!p.edges[i]?.seam) nSeg += Math.max(0, p.edgeRanges[i * 2 + 1] - 1);
+      const segs = new Float32Array(nSeg * 6);
+      const edgeOf = new Int32Array(nSeg * 2);
+      let at = 0;
+      for (let i = 0; i < p.edgeRanges.length / 2; i++) {
+        if (p.edges[i]?.seam) continue;
+        const s = p.edgeRanges[i * 2];
+        const c2 = p.edgeRanges[i * 2 + 1];
+        for (let k = s; k + 1 < s + c2; k++, at++) {
+          segs.set(p.edgePositions.subarray(k * 3, k * 3 + 6), at * 6);
+          edgeOf[at * 2] = edgeOf[at * 2 + 1] = i;
+        }
+      }
+      const eg = new THREE.BufferGeometry();
+      eg.setAttribute('position', new THREE.BufferAttribute(segs, 3));
+      const vg = new THREE.BufferGeometry();
+      vg.setAttribute('position', new THREE.BufferAttribute(p.vertices, 3));
+      c = { key: p.meshKey ?? '', geo, eg, vg, faceOf, edgeOf, faceBase: -1, edgeBase: -1, vertexBase: -1, used: false };
+      if (p.meshKey) this.partGeos.set(p.id, c);
+    }
+    if (c.faceBase !== faceBase) {
+      c.geo.setAttribute('pickId', new THREE.BufferAttribute(Float32Array.from(c.faceOf, (f) => faceBase + f), 1));
+      c.faceBase = faceBase;
+    }
+    if (c.edgeBase !== edgeBase) {
+      c.eg.setAttribute('pickId', new THREE.BufferAttribute(Float32Array.from(c.edgeOf, (e) => edgeBase + e), 1));
+      c.edgeBase = edgeBase;
+    }
+    if (c.vertexBase !== vertexBase) {
+      c.vg.setAttribute('pickId', new THREE.BufferAttribute(Float32Array.from({ length: p.vertices.length / 3 }, (_, i) => vertexBase + i), 1));
+      c.vertexBase = vertexBase;
+    }
+    c.used = true;
+    return c;
+  }
+
   private addPart(p: PartMesh, faded: boolean, opacity = 1) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
-    geo.setIndex(new THREE.BufferAttribute(p.indices, 1));
+    // pick ids: faces, edges, vertices (in this order)
     const nFaces = p.faceRanges.length / 2;
     const faceBase = this.registry.size;
     for (let i = 0; i < nFaces; i++) this.registry.alloc({ t: 'face', partId: p.id, index: i, priority: PRIORITY.face, radius: 1.5 });
-    const ids = new Float32Array(p.positions.length / 3);
-    for (let i = 0; i < nFaces; i++) {
-      const s = p.faceRanges[i * 2];
-      const c = p.faceRanges[i * 2 + 1];
-      for (let k = s; k < s + c; k++) ids[p.indices[k]] = faceBase + i;
-    }
-    geo.setAttribute('pickId', new THREE.BufferAttribute(ids, 1));
-    geo.computeBoundingBox();
+    const nEdges = p.edgeRanges.length / 2;
+    const edgeBase = this.registry.size;
+    for (let i = 0; i < nEdges; i++) this.registry.alloc({ t: 'edge', partId: p.id, index: i, priority: PRIORITY.edge, radius: 6 });
+    const nV = p.vertices.length / 3;
+    const vertexBase = this.registry.size;
+    for (let i = 0; i < nV; i++) this.registry.alloc({ t: 'vertex', partId: p.id, index: i, priority: PRIORITY.vertex, radius: 7 });
+    const { geo, eg, vg } = this.partGeo(p, faceBase, edgeBase, vertexBase);
     if (geo.boundingBox) this.sceneBox.union(geo.boundingBox);
     // a part changed by the previewed feature is faded; a see-through one (its appearance) shows the parts inside
     const alpha = faded ? 0.25 : Math.min(1, Math.max(0.1, opacity));
@@ -765,23 +856,6 @@ export class Engine {
     });
     const mesh = new THREE.Mesh(geo, material);
     // edges as segments
-    const segs: number[] = [];
-    const edgeIds: number[] = [];
-    const nEdges = p.edgeRanges.length / 2;
-    const edgeBase = this.registry.size;
-    for (let i = 0; i < nEdges; i++) this.registry.alloc({ t: 'edge', partId: p.id, index: i, priority: PRIORITY.edge, radius: 6 });
-    for (let i = 0; i < nEdges; i++) {
-      if (p.edges[i]?.seam) continue;
-      const s = p.edgeRanges[i * 2];
-      const c = p.edgeRanges[i * 2 + 1];
-      for (let k = s; k + 1 < s + c; k++) {
-        segs.push(...p.edgePositions.subarray(k * 3, k * 3 + 6));
-        edgeIds.push(edgeBase + i, edgeBase + i);
-      }
-    }
-    const eg = new THREE.BufferGeometry();
-    eg.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
-    eg.setAttribute('pickId', new THREE.Float32BufferAttribute(edgeIds, 1));
     const edges = new THREE.LineSegments(
       eg,
       new THREE.LineBasicMaterial({ color: COLORS.partEdge, transparent: faded, opacity: faded ? 0.35 : 1 }),
@@ -790,14 +864,11 @@ export class Engine {
     group.add(mesh, edges);
     this.partsGroup.add(group);
     // vertices (pick only)
-    const nV = p.vertices.length / 3;
-    const vertexBase = this.registry.size;
-    for (let i = 0; i < nV; i++) this.registry.alloc({ t: 'vertex', partId: p.id, index: i, priority: PRIORITY.vertex, radius: 7 });
-    const vg = new THREE.BufferGeometry();
-    vg.setAttribute('position', new THREE.BufferAttribute(p.vertices, 3));
-    vg.setAttribute('pickId', new THREE.BufferAttribute(Float32Array.from({ length: nV }, (_, i) => vertexBase + i), 1));
     const pickMats = [makePickMaterial({ polygonOffset: 2 }), makePickMaterial(), makePickMaterial({ points: 9 })];
-    this.pickParts.add(new THREE.Mesh(geo, pickMats[0]), new THREE.LineSegments(eg, pickMats[1]), new THREE.Points(vg, pickMats[2]));
+    const picks = [new THREE.Mesh(geo, pickMats[0]), new THREE.LineSegments(eg, pickMats[1]), new THREE.Points(vg, pickMats[2])];
+    this.pickParts.add(...picks);
+    // the geometry kept (see partGeos): the objects go, their buffers stay
+    if (this.partGeos.get(p.id)?.geo === geo) for (const o of [mesh, edges, ...picks]) o.userData.sharedGeometry = true;
     this.parts.set(p.id, { data: p, group, mesh, material, edges, faceBase, edgeBase, vertexBase, pickMats });
   }
 
@@ -859,6 +930,8 @@ export class Engine {
       if (planes && !po.cap) {
         const color = po.material.color.clone().multiplyScalar(0.62);
         po.cap = new THREE.Mesh(po.mesh.geometry, new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, clippingPlanes: planes }));
+        // the part's geometry: disposed with the part, not with its cap
+        po.cap.userData.sharedGeometry = true;
         po.group.add(po.cap);
       } else if (po.cap) {
         if (planes) {
@@ -1099,6 +1172,7 @@ export class Engine {
     }
     if (ed.hover && !seen.has(refKey(ed.hover))) this.addHighlight(ed.hover, COLORS.hover);
     if (ed.hoverFeatures?.length && !ed.editing) this.addFeatureHighlight(new Set(ed.hoverFeatures), COLORS.hover);
+    if (ed.compare) this.addCompare(ed.compare);
     this.syncTriad();
     this.needsRender = true;
   }
@@ -1347,6 +1421,38 @@ export class Engine {
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
       );
       m.userData.sharedGeometry = true;
+      this.highlightGroup.add(m);
+    }
+  }
+
+  /** The model compared with a version: its faces new or changed since (green), the version's faces gone (red ghost). */
+  private addCompare(cmp: NonNullable<EditorState['compare']>) {
+    const lit = (color: number, opacity: number) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+    for (const [pid, faces] of Object.entries(cmp.changed)) {
+      const po = this.parts.get(pid);
+      if (!po) continue;
+      const idx: number[] = [];
+      for (const i of faces) {
+        const s = po.data.faceRanges[i * 2];
+        for (let k = s; k < s + po.data.faceRanges[i * 2 + 1]; k++) idx.push(po.data.indices[k]);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', po.mesh.geometry.getAttribute('position'));
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, lit(COMPARE_COLORS.changed, 0.6));
+      m.userData.sharedGeometry = true;
+      this.highlightGroup.add(m);
+    }
+    // the ghost seen through the model too: a hole filled in since is inside it
+    for (const gh of cmp.ghost) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(gh.positions, 3));
+      geo.setIndex(new THREE.BufferAttribute(gh.indices, 1));
+      const mat = lit(COMPARE_COLORS.removed, 0.3);
+      mat.depthTest = false;
+      const m = new THREE.Mesh(geo, mat);
+      m.renderOrder = 5;
       this.highlightGroup.add(m);
     }
   }

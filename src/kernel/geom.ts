@@ -143,9 +143,71 @@ export function isEmptyShape(s: R.AnyShape | null | undefined): boolean {
   }
 }
 
+/** Shapes' exact boxes — once per shape (shapes are not changed in place). */
+const boxCache = new WeakMap<object, [Vec3, Vec3]>();
+
+type OcBox = { CornerMin(): OcXYZ; CornerMax(): OcXYZ; IsVoid(): boolean; delete(): void };
+type OcXYZ = { X(): number; Y(): number; Z(): number };
+
+/**
+ * A shape's exact box (as replicad's AddOptimal has it) without its cost on big parts: face by face, the larger
+ * first; a face whose quick box (BRepBndLib::Add — never smaller than the face) lies within what the others make
+ * cannot widen it and is skipped (the tori of a hundred hole rims inside a plate); the others count exactly.
+ */
+function exactBox(s: R.AnyShape): [Vec3, Vec3] | null {
+  const oc = R.getOC() as unknown as {
+    Bnd_Box: new () => OcBox;
+    BRepBndLib: { Add(s: unknown, b: OcBox, tri: boolean): void; AddOptimal(s: unknown, b: OcBox, tri: boolean, tol: boolean): void };
+  };
+  const corners = (b: OcBox): [Vec3, Vec3] => {
+    const lo = b.CornerMin();
+    const hi = b.CornerMax();
+    return [
+      [lo.X(), lo.Y(), lo.Z()],
+      [hi.X(), hi.Y(), hi.Z()],
+    ];
+  };
+  const faces = [...R.iterTopo(s.wrapped, 'face')].map((f) => {
+    const b = new oc.Bnd_Box();
+    oc.BRepBndLib.Add(f, b, false);
+    const quick = b.IsVoid() ? null : corners(b);
+    b.delete();
+    return { f, quick };
+  });
+  if (!faces.length || faces.some((x) => !x.quick)) return null;
+  const size = (q: [Vec3, Vec3]) => v3.dist(q[0], q[1]);
+  faces.sort((a, b) => size(b.quick!) - size(a.quick!));
+  let lo: Vec3 = [Infinity, Infinity, Infinity];
+  let hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const { f, quick } of faces) {
+    const [qa, qb] = quick!;
+    if ([0, 1, 2].every((i) => qa[i] >= lo[i] && qb[i] <= hi[i])) continue;
+    const b = new oc.Bnd_Box();
+    oc.BRepBndLib.AddOptimal(f, b, false, false);
+    if (!b.IsVoid()) {
+      const [a, c] = corners(b);
+      lo = [Math.min(lo[0], a[0]), Math.min(lo[1], a[1]), Math.min(lo[2], a[2])];
+      hi = [Math.max(hi[0], c[0]), Math.max(hi[1], c[1]), Math.max(hi[2], c[2])];
+    }
+    b.delete();
+  }
+  return Number.isFinite(lo[0]) ? [lo, hi] : null;
+}
+
 export function bboxOf(s: R.AnyShape): [Vec3, Vec3] {
-  const [a, b] = s.boundingBox.bounds;
-  return [a as Vec3, b as Vec3];
+  let box = boxCache.get(s);
+  if (!box) {
+    box = exactBox(s) ?? undefined;
+    if (!box) {
+      // no faces (a wire, a point): as replicad has it
+      const bb = s.boundingBox;
+      const [a, b] = bb.bounds;
+      box = [a as Vec3, b as Vec3];
+      bb.delete();
+    }
+    boxCache.set(s, box);
+  }
+  return [[...box[0]], [...box[1]]];
 }
 
 export function bboxDiag(b: [Vec3, Vec3]) {

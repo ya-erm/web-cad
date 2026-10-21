@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { unzlibSync } from 'three/examples/jsm/libs/fflate.module.js';
 import { encodePdfLiteral, writePDF } from './pdf';
+import opentype from 'opentype.js';
 import { pdfFontOf, sfntOfWoff } from './pdfFont';
 import type { Prim2D } from './prim2d';
 
@@ -96,12 +97,33 @@ describe('writePDF with an embedded font (Cyrillic)', () => {
   it('takes the TrueType font out of the WOFF', () => {
     const sfnt = sfntOfWoff(new Uint8Array(file));
     expect(new DataView(sfnt.buffer).getUint32(0)).toBe(0x00010000);
-    expect(unzlibSync(font.file)).toEqual(sfnt);
     expect(font.glyph('Ж'.codePointAt(0)!)).toBeGreaterThan(0);
   });
 
+  it('embeds only the glyphs the text uses, under their own numbers', () => {
+    const fileObj = Number(/\/FontFile2 (\d+) 0 R/.exec(text)![1]);
+    const obj = text.slice(text.indexOf(`\n${fileObj} 0 obj\n`));
+    const data = obj.slice(obj.indexOf('stream\n') + 7, obj.indexOf('\nendstream'));
+    const zipped = Uint8Array.from(data, (ch) => ch.charCodeAt(0));
+    // a few kilobytes, not the whole font (~140 KB compressed)
+    expect(zipped.length).toBeLessThan(20000);
+    const sub = unzlibSync(zipped);
+    expect(Number(/\/Length1 (\d+)/.exec(obj)![1])).toBe(sub.length);
+    const parsed = opentype.parse(sub.buffer.slice(sub.byteOffset, sub.byteOffset + sub.byteLength) as ArrayBuffer);
+    const whole = opentype.parse(sfntOfWoff(new Uint8Array(file)).slice().buffer as ArrayBuffer);
+    // "П" where it was, with its outline; "Ж" (not in the text) left empty
+    const p = font.glyph(0x41f);
+    expect(parsed.glyphs.get(p).getPath(0, 0, 100).toPathData(2)).toBe(whole.glyphs.get(p).getPath(0, 0, 100).toPathData(2));
+    expect(parsed.glyphs.get(p).getPath(0, 0, 100).commands.length).toBeGreaterThan(0);
+    expect(parsed.glyphs.get(font.glyph('Ж'.codePointAt(0)!)).getPath(0, 0, 100).commands.length).toBe(0);
+    // its own small character map
+    expect(parsed.charToGlyph('П').index).toBe(p);
+    // the name with a subset tag
+    expect(text).toMatch(/\/FontName \/[A-Z]{6}\+Inter-Regular/);
+  });
+
   it('embeds it as a CID font for all the text, with widths and a ToUnicode map', () => {
-    expect(text).toContain('/Subtype /Type0 /BaseFont /Inter-Regular /Encoding /Identity-H');
+    expect(text).toMatch(/\/Subtype \/Type0 \/BaseFont \/[A-Z]{6}\+Inter-Regular \/Encoding \/Identity-H/);
     expect(text).toContain('/Subtype /CIDFontType2');
     expect(text).toMatch(/\/FontFile2 \d+ 0 R/);
     expect(text).toMatch(/\/Length1 \d+ \/Filter \/FlateDecode/);

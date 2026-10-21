@@ -36,7 +36,11 @@ Each row shows the feature type icon and the feature name. For [variables](varia
 - If a feature dialog is open and the active field accepts sketch regions, clicking a sketch in the list adds all of its regions to the field.
 - Double-click a feature to edit it. While you edit a feature, the features below it are temporarily shown as rolled back.
 - Clicking empty space in the list or in the graphics area clears the list selection.
-- `Del` or `Backspace` deletes the selected features.
+- `Del` or `Backspace` deletes the selected features, `Shift+N` renames the one selected.
+
+## Searching features {#search}
+
+The magnifier button in the list's header opens a search field. The list keeps the features whose name or type has the text typed: "hol" finds the holes, "extr" all the extrudes, renamed ones too; a type can be typed in English in any interface language, a variable by its name with a hash (`#width`). Folders with features found open, and the header shows how many are found out of how many. While searching, the rollback bar is hidden. `Esc` or the button again closes the search.
 
 ## Context menu {#context-menu}
 

@@ -145,6 +145,19 @@ export async function readFolderFile(dir: FileSystemDirectoryHandle, name: strin
   return (await (await dir.getFileHandle(name)).getFile()).text();
 }
 
+/** How a file is now: when it was last changed and its size (another program's change shows in them). */
+export interface FileStamp {
+  modified: number;
+  size: number;
+}
+
+export async function fileStamp(dir: FileSystemDirectoryHandle, name: string): Promise<FileStamp> {
+  const f = await (await dir.getFileHandle(name)).getFile();
+  return { modified: f.lastModified, size: f.size };
+}
+
+export const sameStamp = (a: FileStamp, b: FileStamp) => a.modified === b.modified && a.size === b.size;
+
 export async function writeFolderFile(dir: FileSystemDirectoryHandle, name: string, text: string): Promise<void> {
   const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
   await w.write(text);

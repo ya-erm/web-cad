@@ -12,6 +12,7 @@ import { animationKey } from '../assembly/AnimateUI';
 import { closeExploded } from '../assembly/BomExplodeUI';
 import { explodeActive } from '../assembly/explode';
 import { contextHelpPage, openHelp } from '../help/context';
+import { toggleSection } from './Viewport';
 
 const SKETCH_KEYS: Record<string, SketchTool> = {
   KeyL: 'line',
@@ -23,6 +24,7 @@ const SKETCH_KEYS: Record<string, SketchTool> = {
   KeyD: 'dimension',
   KeyU: 'use',
   KeyO: 'offset',
+  KeyX: 'extend',
 };
 const SKETCH_SHIFT_KEYS: Record<string, SketchTool> = {
   KeyA: 'arcTangent',
@@ -65,6 +67,31 @@ export function handleKey(e: KeyboardEvent) {
   const engine = getEngine();
   const ctrl = e.ctrlKey || e.metaKey;
   const inSketch = !!ed.sketch && ed.editing?.draft.type === 'sketch';
+
+  // Shift+/ (?): the list of shortcuts; Alt+C: the tool search field (Onshape)
+  if (e.shiftKey && !ctrl && e.code === 'Slash') {
+    e.preventDefault();
+    openHelp('keyboard-shortcuts');
+    return;
+  }
+  if (e.altKey && !ctrl && e.code === 'KeyC') {
+    const search = document.querySelector<HTMLInputElement>('.tool-search input:not([disabled])');
+    if (search) {
+      e.preventDefault();
+      search.focus();
+      search.select();
+    }
+    return;
+  }
+  // Ctrl+arrows: turn the view by 5°
+  if (ctrl && !e.shiftKey && e.code.startsWith('Arrow')) {
+    e.preventDefault();
+    if (e.code === 'ArrowLeft') ed.view({ kind: 'rotate', axis: 'h', deg: -5 });
+    if (e.code === 'ArrowRight') ed.view({ kind: 'rotate', axis: 'h', deg: 5 });
+    if (e.code === 'ArrowUp') ed.view({ kind: 'rotate', axis: 'v', deg: -5 });
+    if (e.code === 'ArrowDown') ed.view({ kind: 'rotate', axis: 'v', deg: 5 });
+    return;
+  }
 
   if (ctrl && e.code === 'KeyZ' && !e.shiftKey) {
     e.preventDefault();
@@ -113,6 +140,10 @@ export function handleKey(e: KeyboardEvent) {
   }
   if (e.shiftKey && e.code === 'KeyH') {
     useEditor.setState({ showSketches: !ed.showSketches });
+    return;
+  }
+  if (e.shiftKey && e.code === 'KeyX') {
+    toggleSection();
     return;
   }
   if (e.code.startsWith('Arrow')) {
@@ -166,7 +197,8 @@ export function handleKey(e: KeyboardEvent) {
       closeExploded();
       return;
     }
-    if (!e.shiftKey && e.code === 'KeyJ') {
+    // J (and M — Onshape's Fasten mate): a new mate
+    if (!e.shiftKey && (e.code === 'KeyJ' || e.code === 'KeyM')) {
       startMate();
       return;
     }

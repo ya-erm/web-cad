@@ -28,7 +28,7 @@ import { DrawingEditor } from '../drawing/DrawingEditor';
 import { Icon } from './icons';
 import { t } from '../i18n';
 import { AppSettingsItems } from './AppSettings';
-import { VersionBanner, VersionsButton } from './VersionsPanel';
+import { CompareBanner, VersionBanner, VersionsButton } from './VersionsPanel';
 
 import { APP_VERSION, appVersionTitle } from './version';
 import { contextHelpPage, openHelp } from '../help/context';
@@ -339,7 +339,11 @@ export function Editor({ onBack }: { onBack: () => void }) {
   return (
     <div className={'editor' + (tab.type === 'drawing' ? ' editor-drawing' : '') + (readOnly ? ' editor-viewing' : '')}>
       <TopBar onBack={back} />
-      <VersionBanner />
+      {/* banners under the top bar (a grid row of their own, empty without them) */}
+      <div className="editor-banners">
+        <VersionBanner />
+        <CompareBanner />
+      </div>
       {tab.type === 'partStudio' && <Toolbar />}
       {tab.type === 'assembly' && <AssemblyToolbar />}
       <div className="workspace">

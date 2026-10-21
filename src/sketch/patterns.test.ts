@@ -34,6 +34,34 @@ describe('sketch mirror', () => {
     expect(q[1]).toBeCloseTo(5, 5);
     void lineId;
   });
+
+  it('mirrors entities one at a time (the line first, then each pick) as all at once', () => {
+    const build = (oneByOne: boolean) =>
+      produce(empty(), (d) => {
+        const axis = addLine(d, [0, -10], [0, 10], true);
+        addConstraint(d, 'fix', [axis.id], { frozen: [0, -10, 0, 10] });
+        const l = addLine(d, [2, 0], [6, 3]);
+        const c = addCircle(d, [5, 6], 1.5);
+        if (oneByOne) for (const id of [l.id, c.id]) expect(mirrorEntities(d, [id], axis.id)).toBe(true);
+        else expect(mirrorEntities(d, [l.id, c.id], axis.id)).toBe(true);
+      });
+    const shape = (d: SketchData) => {
+      const res = solveSketch(d.entities, d.constraints, {});
+      expect(res.ok).toBe(true);
+      expect(res.redundant).toEqual([]);
+      const m = entityMap(res.entities);
+      // where every curve is: its points, sorted
+      return res.entities
+        .filter((e) => e.type !== 'point')
+        .map((e) => JSON.stringify(e.type === 'line' ? [e.type, pointOf(m, e.p1), pointOf(m, e.p2)] : e.type === 'circle' ? [e.type, pointOf(m, e.c), e.r] : [e.type]))
+        .sort();
+    };
+    const one = build(true);
+    expect(shape(one)).toEqual(shape(build(false)));
+    // the copies: across the axis
+    expect(shape(one)).toContain(JSON.stringify(['circle', [-5, 6], 1.5]));
+    expect(shape(one)).toContain(JSON.stringify(['line', [-2, 0], [-6, 3]]));
+  });
 });
 
 describe('sketch patterns', () => {

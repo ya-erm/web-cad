@@ -1140,6 +1140,24 @@ const ICONS = {
       <path d="M16 15 H8 M10 13 L8 15 L10 17" stroke={BLUE} strokeWidth={1.75} />
     </>
   ),
+  /** A workspace branched off (Onshape: Branch to create workspace): a line and a branch leaving it. */
+  branch: (
+    <>
+      <path d="M7 3.5 V20.5" />
+      <path d="M7 15 C7 10.5 17 12 17 7.5" stroke={BLUE} strokeWidth={1.75} />
+      <circle cx={7} cy={20} r={2} fill={WHITE} />
+      <circle cx={17} cy={6} r={2} fill={WHITE} stroke={BLUE} />
+    </>
+  ),
+  /** A merge into the open workspace: a branch coming back into the line. */
+  merge: (
+    <>
+      <path d="M7 3.5 V20.5" />
+      <path d="M17 4 C17 9.5 7 9 7 14" stroke={BLUE} strokeWidth={1.75} />
+      <path d="M5 11.5 L7 14 L9.5 12" stroke={BLUE} strokeWidth={1.75} />
+      <circle cx={17} cy={4.5} r={2} fill={WHITE} stroke={BLUE} />
+    </>
+  ),
   lock: (
     <>
       <path d="M8 10.5 V7.5 A4 4 0 0 1 16 7.5 V10.5" />

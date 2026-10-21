@@ -42,8 +42,11 @@ status | docs | open <id|name> | create <name> | state | feature <name>
 run <ops.json | - | '[…]'> [--keep-failed]
 query '<json>'            {"faces":…} / {"edges":…} / {"parts":…}
 measure '<json>'          те же запросы → панель измерений (см. ниже)
+animate '<json>'          движение сопряжения по кадрам (см. «Сборки»)
 undo | redo | cancel-edit
-shot <out.png> [view]     view: iso, top, front, right, back, left, bottom, dimetric, trimetric, fit
+shot <out.png> [view] [--exploded "<имя>"] [--amount 0…1]
+                          view: iso, top, front, right, back, left, bottom, dimetric, trimetric, fit;
+                          --exploded — разнесённый вид открытой сборки (--amount — насколько разнесён)
 export <stl|step|webcad> <out>
 call <method> [json args…]
 build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--step f] [--name n]
@@ -248,6 +251,27 @@ Part Studio. Всё по-прежнему применяется одним ша
 | `relation` | `type` (`gear` / `rackPinion` / `screw`), `a`, `b?` (имена сопряжений), `value` (передаточное число; делительный диаметр или шаг — длина), `reverse?`, `name?` |
 | `deleteInstance` | `instance` (с его сопряжениями и связями) |
 | `deleteMate` | `mate` |
+| `explodedView` | `name?` (по умолчанию «Exploded view N»; вид с этим именем заменяется), `steps` — шаги по порядку: `{instances, dir, distance?, angle?, pivot?}` — экземпляры (имена) сдвигаются на `distance` (единицы документа) по `dir` (`"+z"`, `"-x"`… или вектор `[x, y, z]`) и / или поворачиваются на `angle` градусов вокруг `dir` через `pivot` `[x, y, z]` (по умолчанию — центр их габарита там, где их оставили предыдущие шаги); `add?` — шаги добавляются к шагам вида. Разнесённый вид только показывает сборку разнесённой: положения экземпляров не меняются |
+| `deleteExplodedView` | `name` |
+
+Разнесённые виды попадают в отчёт: `"explodedViews":[{"name":"Apart","steps":2,"moved":[{"name":"Pin <1>","bboxMin":[…],"bboxMax":[…]}]}]`
+— габариты сдвинутых экземпляров в полностью разнесённом виде. Снимок разнесённого вида:
+`npm run agent -- shot apart.png iso --exploded "Apart"` (`--amount 0.5` — наполовину).
+
+**Анимация** сопряжения (Onshape Animate) — запрос, документ не меняется: `animate` проводит свободное движение
+сопряжения (`revolute`, `pinSlot` — поворот, `slider` — сдвиг, `cylindrical` — оба) от `from` до `to` и
+возвращает, где по кадрам стоят экземпляры, которые движутся:
+
+```jsonc
+// npm run agent -- animate '{"mate":"Slider 1","from":0,"to":30,"frames":4}'
+{"mate":"Slider 1","motion":"slide",
+ "frames":[{"value":0,"instances":[{"name":"Pin <2>","position":[…],"rotation":[…],"bboxMin":[…],"bboxMax":[…]}]}, …]}
+```
+
+Поля: `mate`, `motion?` (`turn` — градусы, `slide` — единицы документа вдоль оси Z сопряжения; по умолчанию
+первое движение сопряжения), `from?` / `to?` (по умолчанию — пределы сопряжения, иначе от текущего положения
+полный оборот / 20 мм), `frames?` (2…50, по умолчанию 5, концы включены), `assembly?` (имя сборки; по умолчанию
+открытая). Так удобно проверять, не задевают ли детали друг друга по ходу движения (`bboxMin` / `bboxMax`).
 
 `MateEnd` — где сопряжение крепится к экземпляру:
 
@@ -306,9 +330,10 @@ Part Studio. Всё по-прежнему применяется одним ша
 ## `window.webcad`
 
 Те же методы доступны на странице: `documents()`, `open(idOrName)`, `create(name)`, `state()`,
-`run(ops, {atomic})`, `query(q)`, `measure(q)`, `feature(name)`, `undo()`, `redo()`, `cancelEdit()`,
+`run(ops, {atomic})`, `query(q)`, `measure(q)`, `animate(q)`, `feature(name)`, `undo()`, `redo()`, `cancelEdit()`,
 `view(name)`, `section({plane, offset?, flip?} | null)` (сечение по top / front / right),
-`screenshot({view})` (PNG data URL), `export(format)` (`{fileName, mime, base64}`), `help()`.
+`screenshot({view, exploded?, amount?})` (PNG data URL; `exploded` — разнесённый вид открытой сборки по имени),
+`export(format)` (`{fileName, mime, base64}`), `help()`.
 Из CLI: `npm run agent -- call section '{"plane":"front","offset":5}'`.
 
 Если в приложении открыт диалог фичи или эскиз, изменения отклоняются: завершите правку или

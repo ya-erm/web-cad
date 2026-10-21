@@ -74,6 +74,11 @@ export interface PartMesh {
   bbox: [Vec3, Vec3];
   /** The feature that made each face (by face index): hovering a face highlights it in the feature list. */
   faceFeatures?: string[];
+  /**
+   * What its mesh is of: the same key — the same shape at the same quality (the part did not change), so the graphics
+   * keep what they made of it.
+   */
+  meshKey?: string;
 }
 
 export interface SketchResult {

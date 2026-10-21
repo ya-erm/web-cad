@@ -33,9 +33,11 @@ export interface PDFPage {
 export interface PdfFont {
   /** PostScript name (no spaces). */
   name: string;
-  /** The font file (sfnt), zlib-compressed, and its size before that. */
-  file: Uint8Array;
-  length: number;
+  /**
+   * The font file to embed for the glyphs `used` (glyph → its character): zlib-compressed, its size before that;
+   * `subset` — only those glyphs (the name then gets a subset tag).
+   */
+  embed(used: Map<number, number>): { file: Uint8Array; length: number; subset: boolean };
   /** Metrics in font units. */
   unitsPerEm: number;
   ascent: number;
@@ -268,6 +270,15 @@ function toUnicodeCMap(used: Map<number, number>): string {
   ].join('\n');
 }
 
+/** A font subset's tag: six capital letters of its glyphs (the same glyphs, the same tag). */
+function subsetTag(used: Map<number, number>): string {
+  let h = 2166136261;
+  for (const g of [...used.keys()].sort((a, b) => a - b)) h = Math.imul(h ^ g, 16777619) >>> 0;
+  let tag = '';
+  for (let i = 0; i < 6; i++, h = Math.floor(h / 26)) tag += String.fromCharCode(65 + (h % 26));
+  return tag;
+}
+
 export function writePDF(pages: PDFPage[], opts: PDFOptions = {}): Uint8Array<ArrayBuffer> {
   const pageList = pages.length ? pages : [{ width: 210, height: 297, prims: [] }];
   // the embedded font: for all the text, when some of it needs more than WinAnsi
@@ -301,14 +312,17 @@ export function writePDF(pages: PDFPage[], opts: PDFOptions = {}): Uint8Array<Ar
     const u = (v: number) => Math.round(v * k);
     const widths = [...embedded.used.keys()].sort((a, b) => a - b).map((g) => `${g} [${u(font.advance(g))}]`);
     const cmap = toUnicodeCMap(embedded.used);
-    objs[f2] = `<< /Type /Font /Subtype /Type0 /BaseFont /${font.name} /Encoding /Identity-H /DescendantFonts [${f2 + 1} 0 R] /ToUnicode ${f2 + 4} 0 R >>`;
+    // only the glyphs used: the name with a subset tag (six capitals, ISO 32000 9.6.4)
+    const file = font.embed(embedded.used);
+    const name = file.subset ? `${subsetTag(embedded.used)}+${font.name}` : font.name;
+    objs[f2] = `<< /Type /Font /Subtype /Type0 /BaseFont /${name} /Encoding /Identity-H /DescendantFonts [${f2 + 1} 0 R] /ToUnicode ${f2 + 4} 0 R >>`;
     objs[f2 + 1] =
-      `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${font.name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>` +
+      `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>` +
       ` /FontDescriptor ${f2 + 2} 0 R /CIDToGIDMap /Identity /DW 1000 /W [${widths.join(' ')}] >>`;
     objs[f2 + 2] =
-      `<< /Type /FontDescriptor /FontName /${font.name} /Flags 32 /FontBBox [${font.bbox.map(u).join(' ')}] /ItalicAngle 0` +
+      `<< /Type /FontDescriptor /FontName /${name} /Flags 32 /FontBBox [${font.bbox.map(u).join(' ')}] /ItalicAngle 0` +
       ` /Ascent ${u(font.ascent)} /Descent ${u(font.descent)} /CapHeight ${u(font.capHeight)} /StemV 80 /FontFile2 ${f2 + 3} 0 R >>`;
-    objs[f2 + 3] = `<< /Length ${font.file.length} /Length1 ${font.length} /Filter /FlateDecode >>\nstream\n${byteString(font.file)}\nendstream`;
+    objs[f2 + 3] = `<< /Length ${file.file.length} /Length1 ${file.length} /Filter /FlateDecode >>\nstream\n${byteString(file.file)}\nendstream`;
     objs[f2 + 4] = `<< /Length ${cmap.length} >>\nstream\n${cmap}\nendstream`;
   }
 

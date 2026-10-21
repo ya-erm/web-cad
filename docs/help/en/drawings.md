@@ -211,6 +211,6 @@ Mouse wheel: zoom; right or middle button: pan; **Zoom to fit** (`F`): the whole
 
 The **Export** button on the right of the drawing toolbar: **PDF**, **SVG**, or **DXF**; the whole sheet at 1:1 scale in millimeters.
 
-All three formats preserve the selected template and its dimensions. When the sheet has Cyrillic (or other characters beyond Latin), the PDF embeds the Inter font — the one of [sketch text](sketch-text) — and all the sheet's text is set in it: the service labels stay in the interface language, and the PDF text can be searched and copied. A sheet with Latin text only uses the standard Helvetica, and the file is smaller.
+All three formats preserve the selected template and its dimensions. When the sheet has Cyrillic (or other characters beyond Latin), the PDF embeds the Inter font — the one of [sketch text](sketch-text) — and all the sheet's text is set in it: the service labels stay in the interface language, and the PDF text can be searched and copied. Only the characters on the sheet are embedded (a font subset), so the file takes a few kilobytes, not hundreds. A sheet with Latin text only uses the standard Helvetica.
 
 > **Limitation.** Dimension points on the cut faces of sections and local sections (their edges exist only in the section) stay view points and do not follow the model. Tolerances and surface finish symbols are not supported yet.

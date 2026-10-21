@@ -22,9 +22,13 @@ Live (the app must be open in a browser tab served by \`npm run dev\` or \`npm r
                                   apply ops (one undo step); by default nothing changes if a feature fails
   query '<json>'                  e.g. '{"edges":{"dir":"z"}}' — matching faces / edges with geometry
   measure '<json>'                the same queries → the measure panel: distances (min / max / centres), angle, totals
+  animate '<json>'                e.g. '{"mate":"Revolute 1","from":0,"to":90,"frames":4}' — where the moving
+                                  instances are at each frame of a mate's motion (nothing changes)
   feature <name>                  raw feature JSON
   undo | redo | cancel-edit
-  shot <out.png> [view]           screenshot of the graphics area (view: iso, top, front, right, fit…)
+  shot <out.png> [view] [--exploded "<name>"] [--amount 0…1]
+                                  screenshot of the graphics area (view: iso, top, front, right, fit…); an
+                                  assembly's exploded view by name, exploded that far
   export <stl|step|webcad> <out>  export the open document
   call <method> [json args…]      any window.webcad method
 
@@ -156,6 +160,8 @@ async function main() {
       return out(await call('query', readJsonArg(args[0])));
     case 'measure':
       return out(await call('measure', readJsonArg(args[0])));
+    case 'animate':
+      return out(await call('animate', readJsonArg(args[0])));
     case 'feature':
       return out(await call('feature', args.join(' ')));
     case 'undo':
@@ -164,8 +170,18 @@ async function main() {
     case 'cancel-edit':
       return out(await call('cancelEdit'));
     case 'shot': {
-      if (!args[0]) throw new Error('shot <out.png> [view]');
-      const url = await call('screenshot', args[1] ? { view: args[1] } : {});
+      // shot <out.png> [view] [--exploded "<name>"] [--amount 0…1]
+      const flag = (name) => {
+        const i = args.indexOf(name);
+        if (i < 0) return undefined;
+        const v = args[i + 1];
+        args.splice(i, 2);
+        return v;
+      };
+      const exploded = flag('--exploded');
+      const amount = flag('--amount');
+      if (!args[0]) throw new Error('shot <out.png> [view] [--exploded "<name>"] [--amount 0…1]');
+      const url = await call('screenshot', { ...(args[1] ? { view: args[1] } : {}), ...(exploded !== undefined ? { exploded } : {}), ...(amount !== undefined ? { amount: Number(amount) } : {}) });
       writeFileSync(resolve(args[0]), Buffer.from(String(url).split(',')[1], 'base64'));
       return out(`saved ${resolve(args[0])}`);
     }

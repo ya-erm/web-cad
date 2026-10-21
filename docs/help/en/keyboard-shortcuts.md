@@ -14,6 +14,9 @@ Shortcuts are bound to physical keys, so they also work with the Russian keyboar
 | `Shift+Enter` | Accept the dialog and immediately start the same feature |
 | `Space` | Clear the selection |
 | `Del`, `Backspace` | Delete the features selected in the feature list |
+| `Shift+N` | Rename the feature selected in the feature list |
+| `Alt+C` (`Option+C`) | Go to the **Search tools** field |
+| `Shift+/` (`?`) | Open this list of shortcuts |
 
 ## Part Studio features {#features}
 
@@ -35,10 +38,12 @@ Start other features with the toolbar buttons or the **Search tools** field.
 | `Shift+1` … `Shift+6` | Front, Back, Left, Right, Top, Bottom views |
 | `Shift+7` | Isometric |
 | `←` `→` `↑` `↓` | Rotate the view 15° |
+| `Ctrl` + arrow | Rotate the view 5° |
 | `Shift` + arrow | Rotate the view 90° |
 | `Shift+Z` / `Z` | Zoom in / zoom out |
 | `P` | Show or hide planes |
 | `Shift+H` | Show or hide sketches |
+| `Shift+X` | Turn the [section view](section-view) on or off |
 
 ## Sketch: tools {#sketch-tools}
 
@@ -53,6 +58,7 @@ Start other features with the toolbar buttons or the **Search tools** field.
 | `Shift+S` | [Point](sketch-point) |
 | `Shift+F` | [Sketch fillet](sketch-fillet) |
 | `M` | [Trim](sketch-trim) |
+| `X` | [Extend](sketch-extend) |
 | `O` | [Offset](sketch-offset) |
 | `U` | [Use (project)](sketch-use) |
 | `D` | [Dimension](sketch-dimensions) |
@@ -86,6 +92,7 @@ Select the entities first, then press the key. For details, see [Constraints](sk
 | Keys | Action |
 |---|---|
 | `D` | Dimension |
+| `N` | Note |
 | `F` | Fit the whole sheet |
 | `Esc` | Select tool, clear the selection |
 | `Del`, `Backspace` | Delete the selected view, dimension, or note |
@@ -95,7 +102,7 @@ Select the entities first, then press the key. For details, see [Constraints](sk
 | Keys | Action |
 |---|---|
 | `I` | [Insert](assembly#create) parts from a Part Studio |
-| `J` | New [mate](assembly-mates#mates) |
+| `J`, `M` | New [mate](assembly-mates#mates) |
 | `Del` | Delete the selected instances |
 
 ## Help {#help}

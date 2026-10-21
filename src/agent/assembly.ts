@@ -2,23 +2,37 @@
 // them, mate them, group them, relate mates — the same operations as the assembly tab of the app. Faces and
 // edges for mates are found with the usual queries, in assembly coordinates, on the instance's placed part.
 
-import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
+import type { AssemblyInstance, AssemblyMate, AssemblyTab, CadDocument, ExplodeStep, ExplodedView, MateConnectorRef, MateEnd, MateLimits, PartStudioTab, Vec3 } from '../core/types';
 import { chosenLabel, configurationFromNames, inputName } from '../core/config';
 import { uid } from '../core/ids';
 import { LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { makeEvalContext } from '../core/features';
 import { composeAssembly, insertPosition, instanceName, sourceKey, variantStudio, type AssemblySources, type StudioData } from '../assembly/compose';
-import { addSubassemblies, applySolve, groupName, makeGroup, makeRelation, mateName, nearestFlip, relationName } from '../assembly/mates';
+import {
+  addSubassemblies,
+  animatableMotions,
+  animatedAssembly,
+  applySolve,
+  groupName,
+  makeGroup,
+  makeRelation,
+  mateName,
+  mateValues,
+  nearestFlip,
+  relationName,
+} from '../assembly/mates';
 import { containsAssembly, expandAssembly, findInstance, topInstance, usedTabs } from '../assembly/expand';
+import { explodedAssembly, explodedViewName } from '../assembly/explode';
+import type { BuildResult } from '../kernel/protocol';
 import { AgentError, matchOnPart } from './runner';
-import type { AssemblyOp, AssemblySummary, MateEndSpec, Num, Pt3, RunReport } from './types';
+import type { AnimateQuery, AnimateResult, AssemblyOp, AssemblySummary, ExplodeStepSpec, MateEndSpec, Num, Pt3, RunReport } from './types';
 
 /** How the host builds a Part Studio for assemblies (the app's kernel in the browser, a builder in Node). */
 export interface AssemblyHost {
   studio(doc: CadDocument, studio: PartStudioTab): Promise<StudioData>;
 }
 
-const OPS = new Set(['assembly', 'insert', 'place', 'mate', 'group', 'relation', 'deleteInstance', 'deleteMate']);
+const OPS = new Set(['assembly', 'insert', 'place', 'mate', 'group', 'relation', 'deleteInstance', 'deleteMate', 'explodedView', 'deleteExplodedView']);
 export const isAssemblyOp = (op: { op: string }) => OPS.has(op.op);
 
 const round = (v: number) => Math.round(v * 1e4) / 1e4 + 0;
@@ -51,18 +65,31 @@ function configurationNames(doc: CadDocument, inst: AssemblyInstance): Record<st
   return out;
 }
 
-/** The assembly in a report: placements and boxes in document units, mates and whether they hold. */
+/** The box of an instance (a part, or all the parts of a sub-assembly `X/…`) as placed in a build, mm. */
+function instanceBox(parts: BuildResult['parts'], id: string): [Vec3, Vec3] | null {
+  const boxes = parts.filter((p) => p.id === id || p.id.startsWith(`${id}/`)).map((p) => p.bbox);
+  if (!boxes.length) return null;
+  return [[0, 1, 2].map((c) => Math.min(...boxes.map((b) => b[0][c]))) as Vec3, [0, 1, 2].map((c) => Math.max(...boxes.map((b) => b[1][c]))) as Vec3];
+}
+
+/** An instance's box in document units, for a report. */
+const reportBox = (box: [Vec3, Vec3] | null, k: number) => (box ? { bboxMin: round3(box[0].map((v) => v / k)), bboxMax: round3(box[1].map((v) => v / k)) } : {});
+
+/** The assembly in a report: placements and boxes in document units, mates and whether they hold, exploded views. */
 export function summarizeAssembly(doc: CadDocument, asm: AssemblyTab, sources: AssemblySources, failed: string[]): AssemblySummary {
   const k = LENGTH_FACTOR[doc.units.length];
   const parts = composeAssembly(asm, sources).build.parts;
   const name = (id: string) => findInstance(asm, sources, id)?.name ?? id;
+  // each exploded view fully exploded: where the instances it moves are shown
+  const explodedViews = (asm.explodedViews ?? []).map((v) => {
+    const shown = composeAssembly(explodedAssembly(asm, v, 1), sources).build.parts;
+    const moved = [...new Set(v.steps.flatMap((s) => s.instances))];
+    return { name: v.name, steps: v.steps.length, moved: moved.flatMap((id) => (instanceBox(shown, id) ? [{ name: name(id), ...(reportBox(instanceBox(shown, id), k) as { bboxMin: Pt3; bboxMax: Pt3 }) }] : [])) };
+  });
   return {
     name: asm.name,
     instances: asm.instances.map((i) => {
-      const boxes = parts.filter((p) => p.id === i.id || p.id.startsWith(`${i.id}/`)).map((p) => p.bbox);
-      const box = boxes.length
-        ? { bboxMin: round3([0, 1, 2].map((c) => Math.min(...boxes.map((b) => b[0][c])) / k)), bboxMax: round3([0, 1, 2].map((c) => Math.max(...boxes.map((b) => b[1][c])) / k)) }
-        : {};
+      const box = reportBox(instanceBox(parts, i.id), k);
       return {
         name: i.name,
         source: doc.tabs.find((x) => x.id === i.studioId)?.name ?? '?',
@@ -78,8 +105,75 @@ export function summarizeAssembly(doc: CadDocument, asm: AssemblyTab, sources: A
     mates: (asm.mates ?? []).map((m) => ({ name: m.name, type: m.type, a: name(m.a.instance), b: name(m.b.instance), ok: m.suppressed || !failed.includes(m.id) })),
     groups: (asm.groups ?? []).map((g) => ({ name: g.name, instances: g.members.map((m) => name(m.instance)) })),
     relations: (asm.relations ?? []).map((r) => ({ name: r.name, type: r.type, ok: !failed.includes(r.id) })),
+    ...(explodedViews.length ? { explodedViews } : {}),
   };
 }
+
+/** A direction of an exploded step: by axis name ("+z", "-x", "y") or a vector, unit length. */
+function stepDirection(d: ExplodeStepSpec['dir']): Vec3 {
+  if (typeof d === 'string') {
+    const m = /^([+-]?)([xyz])$/i.exec(d.trim());
+    if (!m) throw new AgentError(`Invalid step direction "${d}": "+x", "-z"… or [x, y, z]`);
+    const v: Vec3 = [0, 0, 0];
+    v['xyz'.indexOf(m[2].toLowerCase())] = m[1] === '-' ? -1 : 1;
+    return v;
+  }
+  const l = Array.isArray(d) && d.length === 3 ? Math.hypot(d[0], d[1], d[2]) : 0;
+  if (!(l > 1e-9)) throw new AgentError(`Invalid step direction ${JSON.stringify(d)}: "+x", "-z"… or a non-zero [x, y, z]`);
+  return [d[0] / l, d[1] / l, d[2] / l];
+}
+
+/**
+ * Animate a mate as a query (Onshape Animate): its free motion from `from` to `to` in frames — where the instances
+ * that move are at each (placements and boxes in document units). The document does not change.
+ */
+export async function animateMate(doc: CadDocument, host: AssemblyHost, q: AnimateQuery): Promise<AnimateResult> {
+  const asm = (
+    q.assembly ? doc.tabs.find((t) => t.type === 'assembly' && (t.name === q.assembly || t.name.toLowerCase() === q.assembly!.toLowerCase())) : doc.tabs.find((t) => t.id === doc.activeTab && t.type === 'assembly')
+  ) as AssemblyTab | undefined;
+  if (!asm) throw new AgentError(q.assembly ? `No assembly "${q.assembly}"` : 'No assembly is open: open its tab, or give "assembly"');
+  const src = addSubassemblies(doc.tabs, asm, await studioSources(doc, host));
+  const base = structuredClone(asm) as AssemblyTab;
+  applySolve(base, src);
+  const m = (base.mates ?? []).find((x) => x.name === q.mate || x.id === q.mate) ?? (base.mates ?? []).find((x) => x.name.toLowerCase() === String(q.mate).toLowerCase());
+  if (!m) throw new AgentError(`No mate "${q.mate}". Mates: ${(base.mates ?? []).map((x) => x.name).join(', ') || '(none)'}`);
+  const motions = animatableMotions(m.type);
+  if (!motions.length) throw new AgentError(`A ${m.type} mate has no motion to animate (revolute, slider, cylindrical, pin slot)`);
+  const motion = q.motion ?? motions[0];
+  if (!motions.includes(motion)) throw new AgentError(`A ${m.type} mate can ${motions.join(' / ')}, not ${motion}`);
+  const k = LENGTH_FACTOR[doc.units.length];
+  // the range: given (degrees / document units), else the mate's limits, else a full turn / 20 mm from where it is
+  const cur = mateValues(src, base, m);
+  const turn = motion === 'turn';
+  const from = q.from !== undefined ? (turn ? q.from : q.from * k) : turn ? (m.limits?.aMin ?? cur?.angle ?? 0) : (m.limits?.zMin ?? cur?.z ?? 0);
+  const to = q.to !== undefined ? (turn ? q.to : q.to * k) : turn ? (m.limits?.aMax ?? from + 360) : (m.limits?.zMax ?? from + 20);
+  const n = Math.min(50, Math.max(2, Math.round(q.frames ?? 5)));
+  const states = Array.from({ length: n }, (_, i) => {
+    const value = from + ((to - from) * i) / (n - 1);
+    const tab = animatedAssembly(base, src, m.id, motion, value);
+    return { value, tab, parts: composeAssembly(tab, src).build.parts };
+  });
+  // the instances that move in some frame
+  const moved = base.instances.filter((b) =>
+    states.some((s) => {
+      const x = s.tab.instances.find((i) => i.id === b.id);
+      return !!x && (!same3(x.position, b.position, 1e-6) || !same3(x.rotation, b.rotation, 1e-6));
+    }),
+  );
+  return {
+    mate: m.name,
+    motion,
+    frames: states.map((s) => ({
+      value: round(turn ? s.value : s.value / k),
+      instances: moved.map((b) => {
+        const x = s.tab.instances.find((i) => i.id === b.id)!;
+        return { name: x.name, position: round3(x.position.map((v) => v / k)), rotation: round3(x.rotation), ...reportBox(instanceBox(s.parts, x.id), k) };
+      }),
+    })),
+  };
+}
+
+const same3 = (a: number[], b: number[], tol: number) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
 
 /**
  * Apply assembly ops to a copy of the document: the active assembly tab, or the one an `assembly` op opens or
@@ -337,6 +431,52 @@ export async function runAssemblyOps(doc: CadDocument, ops: AssemblyOp[], host: 
         a.mates = (a.mates ?? []).filter((x) => x.id !== m.id);
         a.relations = (a.relations ?? []).filter((r) => r.a !== m.id && r.b !== m.id);
         removed.push(m.name);
+        return;
+      }
+      case 'explodedView': {
+        const a = need();
+        if (!Array.isArray(op.steps)) throw new AgentError('"steps": a list of {"instances":[…], "dir":"+z", "distance":50} (or "angle")');
+        const name = op.name ?? explodedViewName(a);
+        const old = (a.explodedViews ?? []).find((v) => v.name === name) ?? (a.explodedViews ?? []).find((v) => v.name.toLowerCase() === name.toLowerCase());
+        const src = await sources();
+        const steps: ExplodeStep[] = op.add && old ? [...old.steps] : [];
+        for (const [n, s] of op.steps.entries()) {
+          if (!Array.isArray(s?.instances) || !s.instances.length) throw new AgentError(`Step ${n + 1}: "instances" — the names of the instances it moves`);
+          const ids = [...new Set(s.instances.map((x) => instance(x).id))];
+          const dir = stepDirection(s.dir);
+          const distance = s.distance === undefined ? 0 : len(s.distance, 'distance');
+          const angle = s.angle ?? 0;
+          if (typeof angle !== 'number' || !Number.isFinite(angle)) throw new AgentError(`Step ${n + 1}: invalid angle ${JSON.stringify(s.angle)}`);
+          if (Math.abs(distance) < 1e-9 && Math.abs(angle) < 1e-9) throw new AgentError(`Step ${n + 1} moves nothing: give "distance" and / or "angle"`);
+          // a turn: about the axis through the pivot — by default the centre of its instances where the steps before left them
+          let pivot: Vec3 | undefined;
+          if (angle) {
+            if (s.pivot) pivot = mm(s.pivot);
+            else {
+              const shown = composeAssembly(explodedAssembly(a, { id: '', name: '', steps }, 1), src).build.parts;
+              const boxes = ids.map((id) => instanceBox(shown, id)).filter((b): b is [Vec3, Vec3] => !!b);
+              if (!boxes.length) throw new AgentError(`Step ${n + 1}: the instances have no geometry to turn about: give "pivot"`);
+              pivot = [0, 1, 2].map((c) => (Math.min(...boxes.map((b) => b[0][c])) + Math.max(...boxes.map((b) => b[1][c]))) / 2) as Vec3;
+            }
+          }
+          steps.push({ id: uid('es'), instances: ids, dir, distance, ...(angle ? { angle, pivot } : {}) });
+        }
+        if (old) {
+          old.steps = steps;
+          changed.add(old.name);
+        } else {
+          const v: ExplodedView = { id: uid('ev'), name, steps };
+          a.explodedViews = [...(a.explodedViews ?? []), v];
+          added.push(name);
+        }
+        return;
+      }
+      case 'deleteExplodedView': {
+        const a = need();
+        const v = (a.explodedViews ?? []).find((x) => x.name === op.name) ?? (a.explodedViews ?? []).find((x) => x.name.toLowerCase() === String(op.name).toLowerCase());
+        if (!v) throw new AgentError(`No exploded view "${op.name}". Exploded views: ${(a.explodedViews ?? []).map((x) => x.name).join(', ') || '(none)'}`);
+        a.explodedViews = (a.explodedViews ?? []).filter((x) => x.id !== v.id);
+        removed.push(v.name);
         return;
       }
       default:

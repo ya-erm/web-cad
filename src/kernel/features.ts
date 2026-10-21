@@ -1395,16 +1395,21 @@ function buildHole(ctx: Ctx, f: FeatureOf<'hole'>): FeatureOutput {
     ...(dims.csink ? { csink: { diameter: dims.csink.R * 2, angle: (dims.csink.angle * 180) / Math.PI } } : {}),
     ...(dims.thread ? { thread: { designation: dims.thread.designation, ...(dims.through ? {} : { depth: dims.thread.depth }) } } : {}),
   };
+  // the parts the holes went into (just outside their walls), and their threads' material — all at once
+  const th = dims.thread;
+  const runs = materialRuns(ctx.st, [
+    ...at.map((a) => ({ p0: a.pt, dir: a.drill, r: dims.R0 * 1.05 + 0.05, start, end: dims.through ? big : Math.max(dims.depth, start + 1e-3) })),
+    ...(th ? at.map((a) => ({ p0: a.pt, dir: a.drill, r: (dims.R0 + th.major / 2) / 2, start, end: start + th.depth })) : []),
+  ]);
   at.forEach((a, i) => {
-    const run = materialRun(ctx.st, a.pt, a.drill, dims.R0 * 1.05 + 0.05, start, dims.through ? big : Math.max(dims.depth, start + 1e-3));
+    const run = runs[i];
     ctx.st.holes.set(`${ctx.fid}.${i}`, { featureId: ctx.fid, source: ctx.fid, origin: a.pt, dir: a.drill, callout, ...(run ? { owner: run.owner } : {}) });
   });
-  if (dims.thread) {
-    const th = dims.thread;
+  if (th) {
     // the thread starts below a counterbore / countersink, where the hole has its own diameter
     at.forEach((a, i) => {
       // as far as there is material around the hole (a through hole: to where it comes out)
-      const run = materialRun(ctx.st, a.pt, a.drill, (dims.R0 + th.major / 2) / 2, start, start + th.depth);
+      const run = runs[at.length + i];
       if (!run) return;
       ctx.st.threads.set(`${ctx.fid}.${i}`, {
         featureId: ctx.fid,
@@ -1445,41 +1450,74 @@ function materialAt(st: BuildState, p: Vec3, dir: Vec3, big: number): boolean {
   return false;
 }
 
+/** Where to look for material: along a line parallel to a hole's axis (`r` from it), `start` … `end` along `dir` from `p0`. */
+interface RunQuery {
+  p0: Vec3;
+  dir: Vec3;
+  r: number;
+  start: number;
+  end: number;
+}
+
 /**
- * Material along a line parallel to a hole's axis (`r` from it), from `start` to at most `end` along `dir` from `p0`:
- * the part there and how far it goes without a gap.
+ * Material along each query's line: the part where it starts and how far it goes without a gap (none — no part).
+ * All the lines at once (a hole feature's points, a pattern's copies: hundreds) — one boolean per part with all of
+ * them, each piece of the result given back to the line it lies on.
  */
-function materialRun(st: BuildState, p0: Vec3, dir: Vec3, r: number, start: number, end: number): { length: number; owner: string } | null {
+function materialRuns(st: BuildState, queries: RunQuery[]): ({ length: number; owner: string } | null)[] {
   const oc = R.getOC();
-  const side = v3.scale(frameFromNormal(p0, dir).xDir, r);
-  const a = v3.add(v3.add(p0, side), v3.scale(dir, start));
-  const line = R.makeLine(a, v3.add(a, v3.scale(dir, end - start)));
-  const tol = Math.max(1e-4, (end - start) * 1e-6);
+  const out: ({ length: number; owner: string } | null)[] = queries.map(() => null);
+  if (!queries.length) return out;
+  const lines = queries.map(({ p0, dir, r, start, end }) => {
+    const side = v3.scale(frameFromNormal(p0, dir).xDir, r);
+    const a = v3.add(v3.add(p0, side), v3.scale(dir, start));
+    return { a, dir, len: end - start, tol: Math.max(1e-4, (end - start) * 1e-6) };
+  });
+  const edges = lines.map((l) => R.makeLine(l.a, v3.add(l.a, v3.scale(l.dir, l.len))));
+  const tool = R.makeCompound(edges);
+  let open = lines.map((_, i) => i);
   for (const part of st.parts.values()) {
-    const common = new oc.BRepAlgoAPI_Common(part.shape.wrapped, line.wrapped);
+    if (!open.length) break;
+    const common = new oc.BRepAlgoAPI_Common(part.shape.wrapped, tool.wrapped);
     common.Build();
-    const res = common.Shape();
-    // the pieces of the line inside the part, as distances from its start
-    const spans: [number, number][] = [];
-    for (const e of R.iterTopo(res, 'edge')) {
+    // the pieces of each line inside the part, as distances from its start
+    const spans = new Map<number, [number, number][]>();
+    for (const e of R.iterTopo(common.Shape(), 'edge')) {
       const edge = R.cast(e) as R.Edge;
-      const t = [0, 1].map((u) => {
+      const ends = [0, 1].map((u): Vec3 => {
         const q = edge.pointAt(u);
-        const d = v3.dot(v3.sub([q.x, q.y, q.z], a), dir);
+        const v: Vec3 = [q.x, q.y, q.z];
         q.delete();
-        return d;
+        return v;
       });
-      spans.push([Math.min(t[0], t[1]), Math.max(t[0], t[1])]);
+      for (const i of open) {
+        const l = lines[i];
+        const t = ends.map((q) => v3.dot(v3.sub(q, l.a), l.dir));
+        // on this line (both ends on its axis), within it
+        if (ends.some((q, k) => v3.len(v3.sub(v3.sub(q, l.a), v3.scale(l.dir, t[k]))) > l.tol * 10)) continue;
+        const s0 = Math.max(0, Math.min(t[0], t[1]));
+        const s1 = Math.min(l.len, Math.max(t[0], t[1]));
+        if (s1 < s0) continue;
+        if (!spans.has(i)) spans.set(i, []);
+        spans.get(i)!.push([s0, s1]);
+      }
     }
     common.delete();
-    spans.sort((x, y) => x[0] - y[0]);
-    if (!spans.length || spans[0][0] > tol) continue;
-    let reach = spans[0][1];
-    for (const s of spans.slice(1)) if (s[0] <= reach + tol) reach = Math.max(reach, s[1]);
-    if (reach > tol) return { length: Math.min(reach, end - start), owner: part.id };
+    // a line whose material starts at its start in this part: as far as it goes without a gap
+    open = open.filter((i) => {
+      const s = (spans.get(i) ?? []).sort((x, y) => x[0] - y[0]);
+      const tol = lines[i].tol;
+      if (!s.length || s[0][0] > tol) return true;
+      let reach = s[0][1];
+      for (const x of s.slice(1)) if (x[0] <= reach + tol) reach = Math.max(reach, x[1]);
+      if (reach <= tol) return true;
+      out[i] = { length: Math.min(reach, lines[i].len), owner: part.id };
+      return false;
+    });
   }
-  return null;
+  return out;
 }
+
 
 /** A cosmetic thread carried along by a motion of shapes (patterns, mirror, Derived placement): its axis as an edge, moved. */
 function movedThread(t: Pick<ThreadState, 'origin' | 'dir' | 'length'>, x: Xform): Pick<ThreadState, 'origin' | 'dir' | 'length'> {
@@ -1555,20 +1593,22 @@ function patternInstances(
   const holes = [...st.holes].filter(([, h]) => features.includes(h.featureId));
   xforms.forEach((x, i) => {
     for (const rec of records) applyBodyOp(st, ctx.fid, x(rec.tool), rec.op, { mergeAll: true, parts: [] });
-    // the copied holes' threads: in whatever part each copy went into, as far as its material goes
-    for (const [k, t] of threads) {
-      const m = movedThread(t, x);
-      const run = materialRun(st, m.origin, m.dir, (t.minor + t.major) / 4, 0, m.length);
+    // the copied holes' threads: in whatever part each copy went into, as far as its material goes; and the holes:
+    // in the part the copy went into (just outside its wall, past a counterbore / countersink) — all at once
+    const movedT = threads.map(([k, t]) => ({ k, t, m: movedThread(t, x) }));
+    const movedH = holes.map(([k, h]) => ({ k, h, m: movedHole(h, x), from: h.callout.cbore?.depth ?? 0 }));
+    const runs = materialRuns(st, [
+      ...movedT.map(({ t, m }) => ({ p0: m.origin, dir: m.dir, r: (t.minor + t.major) / 4, start: 0, end: m.length })),
+      ...movedH.map(({ h, m, from }) => ({ p0: m.origin, dir: m.dir, r: (h.callout.diameter / 2) * 1.05 + 0.05, start: from, end: from + (h.callout.depth ?? sceneExtent(st)) })),
+    ]);
+    movedT.forEach(({ k, t, m }, j) => {
+      const run = runs[j];
       if (run) st.threads.set(`${k}@${ctx.fid}.${i + 1}`, { ...t, ...m, length: run.length, owner: run.owner, featureId: ctx.fid });
-    }
-    // and the holes: in the part the copy went into (just outside its wall, past a counterbore / countersink)
-    for (const [k, h] of holes) {
-      const m = movedHole(h, x);
-      const c = h.callout;
-      const from = c.cbore?.depth ?? 0;
-      const run = materialRun(st, m.origin, m.dir, (c.diameter / 2) * 1.05 + 0.05, from, from + (c.depth ?? sceneExtent(st)));
+    });
+    movedH.forEach(({ k, h, m }, j) => {
+      const run = runs[movedT.length + j];
       st.holes.set(`${k}@${ctx.fid}.${i + 1}`, { ...h, ...m, featureId: ctx.fid, ...(run ? { owner: run.owner } : { owner: undefined }) });
-    }
+    });
   });
 }
 

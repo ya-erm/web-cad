@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDoc } from '../store/docStore';
 import { addFolder, allowFolder, createInFolder, openFolderFile, readProject, refreshFolder, removeFolder, renameFolderDoc, saveToFolder, syncLinked, useFolder } from '../store/folderStore';
-import { copiedVersionIds, importVersions } from '../store/versions';
-import { renameVersionSources } from '../core/derived';
+import { copiedVersionIds, importVersions, withCopiedVersions } from '../store/versions';
 import { folderSupported } from '../store/localFolder';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
 import { Icon } from './icons';
@@ -451,7 +450,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 const { doc, versions } = readProject(JSON.parse(await f.text()), f.name.replace(/(\.webcad)?\.json$/i, ''));
                 // a copy: its versions come as copies too (its Derived features that use them — with them)
                 const copies = copiedVersionIds(versions);
-                const id = await importDocument({ ...doc, tabs: renameVersionSources(doc.tabs, copies) });
+                const id = await importDocument(withCopiedVersions(doc, copies));
                 await importVersions(id, versions, false, copies);
                 onOpen(id);
               } catch {

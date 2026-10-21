@@ -1790,6 +1790,8 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
       // Enter closes a local section's outline
       if (e.key === 'Enter' && breakRef.current) breakRef.current.finish();
       if (e.code === 'KeyD' && !e.ctrlKey && !e.metaKey) setTool('dimension');
+      // N: a note (Onshape)
+      if (e.code === 'KeyN' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) setTool('note');
       if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey) fitCam();
     };
     window.addEventListener('keydown', onKey);
@@ -2285,7 +2287,7 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
           >
             <Icon name="bom" />
           </button>
-          <button className={'icon-btn' + (tool === 'note' ? ' active' : '')} title={t('Note')} onClick={() => setTool('note')}>
+          <button className={'icon-btn' + (tool === 'note' ? ' active' : '')} title={t('Note') + ' (N)'} onClick={() => setTool('note')}>
             <Icon name="note" />
           </button>
           <button

@@ -405,6 +405,34 @@ textarea {
 .ver-keys {
   color: var(--text-3);
 }
+/* workspaces (branches) above the versions; a merge's tabs to take */
+.ver-section {
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 6px 12px 2px;
+}
+.ver-item.ver-current {
+  cursor: default;
+  background: var(--accent-bg, #eef4fc);
+}
+.ver-diff-line.ver-merge {
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.ver-conflict {
+  flex-basis: 100%;
+  padding-left: 46px;
+  color: #b25e09;
+  font-size: 12px;
+}
+.ver-branch {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #e3ecf8;
+  color: var(--accent);
+  font-size: 11px;
+}
 .version-banner {
   display: flex;
   align-items: center;
@@ -417,6 +445,27 @@ textarea {
 }
 .version-banner .spacer {
   flex: 1;
+}
+.compare-banner {
+  background: #eef6ff;
+  border-bottom-color: #b9d6f5;
+  color: #1d4a7a;
+}
+.cmp-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+.cmp-key i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.ver-diff-line .ver-on-model {
+  margin-left: auto;
+  padding: 0 6px;
+  font-weight: normal;
 }
 .save-state.folder-file {
   display: inline-flex;
@@ -606,7 +655,8 @@ textarea {
 
 .editor {
   display: grid;
-  grid-template-rows: 40px 42px 1fr 30px;
+  /* top bar, banners (version viewed, compared), toolbar, workspace, status bar */
+  grid-template-rows: 40px auto 42px 1fr 30px;
   height: 100%;
 }
 .topbar {
@@ -960,6 +1010,26 @@ textarea {
 }
 .status-dot.under {
   background: #1565c0;
+}
+/* the feature list's search field, under its header */
+.tree-search {
+  padding: 4px 8px 6px;
+}
+.tree-search input {
+  width: 100%;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 0 10px;
+  background: #fff;
+  outline: none;
+}
+.tree-search input:focus {
+  border-color: var(--accent);
+}
+.tree-empty {
+  color: var(--text-3);
+  padding: 8px 12px;
 }
 .tree-group {
   color: var(--text-3);
@@ -2012,10 +2082,7 @@ textarea {
 
 /* ---------------------------------------------------------------- drawing */
 
-.editor-drawing { grid-template-rows: 40px 1fr 30px; }
-/* a version being viewed: its banner under the top bar */
-.editor.editor-viewing { grid-template-rows: 40px auto 42px 1fr 30px; }
-.editor-drawing.editor-viewing { grid-template-rows: 40px auto 1fr 30px; }
+.editor-drawing { grid-template-rows: 40px auto 1fr 30px; }
 
 .drawing-area {
   position: absolute;

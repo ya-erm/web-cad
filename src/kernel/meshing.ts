@@ -303,6 +303,10 @@ function ensureMesh(shape: Shape3D, quality: number): MeshData {
 }
 
 /** Mesh for display; arrays are copied so that they can be transferred to the UI thread. */
+/** Shapes' numbers for their meshes' keys (a shape is not changed in place: the same number, the same mesh). */
+const shapeNumbers = new WeakMap<object, number>();
+let lastShapeNumber = 0;
+
 export function meshPart(
   id: string,
   shape: Shape3D,
@@ -313,8 +317,11 @@ export function meshPart(
   const m = ensureMesh(shape, quality);
   const verts = new Float32Array(topo.vertices.length * 3);
   topo.vertices.forEach((p, i) => verts.set(p, i * 3));
+  let n = shapeNumbers.get(shape);
+  if (n === undefined) shapeNumbers.set(shape, (n = ++lastShapeNumber));
   return {
     id,
+    meshKey: `${n}@${quality}`,
     name: meta.name,
     color: meta.color,
     hidden: meta.hidden,

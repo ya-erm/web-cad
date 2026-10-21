@@ -3,6 +3,7 @@ import type { Draft } from 'immer';
 import type { Feature, FeatureFolder, PartStudioTab, SelRef, SketchData } from '../core/types';
 import { getEngine } from '../viewport/engineRef';
 import { FIELD_SPECS } from '../core/fieldSpecs';
+import { FEATURE_LABELS } from '../core/features';
 import { configuredFeatures, pruneConfiguration, setConfigured } from '../core/config';
 import { ConfigChooser } from './ConfigPanel';
 import { computeRegions } from '../sketch/regions';
@@ -71,6 +72,17 @@ function folderOf(studio: PartStudioTab, featureId: string): FeatureFolder | und
   return studio.folders?.find((f) => f.featureIds.includes(featureId));
 }
 
+/**
+ * Whether the feature list's search finds a feature: by its name (as shown, or as stored), its type (in the interface
+ * language or in English) or, a variable, by `#name`.
+ */
+export function featureMatches(f: Feature, q: string): boolean {
+  const s = q.trim().toLowerCase();
+  if (!s) return true;
+  const label = FEATURE_LABELS[f.type] ?? f.type;
+  return [tName(f.name), f.name, t(label), label, f.type === 'variable' ? `#${f.params.name}` : ''].some((x) => x.toLowerCase().includes(s));
+}
+
 export function FeatureTree() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
@@ -98,12 +110,23 @@ export function FeatureTree() {
   const listRef = useRef<HTMLDivElement>(null);
   const dragIds = useRef<string[]>([]);
   const deleteSelectedRef = useRef<() => void>(() => {});
+  /** The one feature selected in the list (Shift+N renames it). */
+  const selRef = useRef<string[]>([]);
+  selRef.current = sel;
+  /** The list filtered by a name or a type of feature (the search field open: a string). */
+  const [filter, setFilter] = useState<string | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
       if (useEditor.getState().editing) return;
+      // Shift+N: rename the feature selected (Onshape)
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyN' && selRef.current.length === 1) {
+        e.preventDefault();
+        setRenaming(selRef.current[0]);
+        return;
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       deleteSelectedRef.current();
     };
     // clicking in the graphics area ends the feature-list selection
@@ -589,18 +612,28 @@ export function FeatureTree() {
 
   const rows: React.ReactNode[] = [];
   let prevFolder: string | null = null;
+  // the search: the features whose name or type has the text (their folders open), no rollback bar
+  const q = filter?.trim().toLowerCase() ?? '';
+  const found = q ? new Set(features.filter((f) => featureMatches(f, q)).map((f) => f.id)) : null;
   features.forEach((f, i) => {
+    if (found && !found.has(f.id)) return;
     const fo = folderOf(studio, f.id);
     if (fo && fo.id !== prevFolder) rows.push(folderRow(fo, i));
     prevFolder = fo?.id ?? null;
-    if (i === shownRollback && !barShown) {
+    if (i === shownRollback && !barShown && !found) {
       // inside a collapsed folder the bar is drawn after the folder header
       rows.push(bar());
     }
-    if (fo?.collapsed) return;
+    if (fo?.collapsed && !found) return;
     rows.push(featureRow(f, i, !!fo));
   });
-  if (!barShown) rows.push(bar());
+  if (!barShown && !found) rows.push(bar());
+  if (found && !found.size)
+    rows.push(
+      <div key="none" className="tree-empty">
+        {t('No features found')}
+      </div>,
+    );
   if (editing?.isNew) {
     const at = rows.findIndex((r) => (r as { key?: string })?.key === 'rollback');
     rows.splice(
@@ -618,14 +651,37 @@ export function FeatureTree() {
   return (
     <div className="panel-section features">
       <div className="panel-header">
-        {t('Features')} <span className="count">({features.length})</span>
+        {t('Features')} <span className="count">({found ? `${found.size} / ${features.length}` : features.length})</span>
         <span className="spacer" />
         {sel.length > 1 && (
           <button className="icon-btn" style={{ width: 22, height: 22 }} data-tip={t('Add to new folder')} onClick={() => addToNewFolder(sel)}>
             <Icon name="folder" size={14} />
           </button>
         )}
+        <button
+          className={'icon-btn' + (filter !== null ? ' active' : '')}
+          style={{ width: 22, height: 22 }}
+          data-tip={t('Search features')}
+          onClick={() => setFilter(filter === null ? '' : null)}
+        >
+          <Icon name="search" size={14} />
+        </button>
       </div>
+      {filter !== null && (
+        <div className="tree-search">
+          <input
+            autoFocus
+            value={filter}
+            placeholder={t('Feature name or type')}
+            aria-label={t('Search features')}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Escape') setFilter(null);
+            }}
+          />
+        </div>
+      )}
       <ConfigChooser studio={studio} />
       <div
         className="panel-body"

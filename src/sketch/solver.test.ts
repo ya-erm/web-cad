@@ -702,6 +702,20 @@ describe('helpers', () => {
 describe('performance', () => {
   /** Time budget in ms: strict locally, looser on shared CI runners (CI=true on GitHub Actions). */
   const budget = (ms: number) => (process.env.CI ? ms * 5 : ms);
+  /**
+   * How long `fn` takes at best of a few runs, with its last result: the other test files run alongside (the kernel's
+   * booleans), and one unlucky run says nothing of the solver.
+   */
+  function bestOf<T>(fn: () => T, runs = 3): { t: number; res: T } {
+    let t = Infinity;
+    let res!: T;
+    for (let i = 0; i < runs; i++) {
+      const t0 = performance.now();
+      res = fn();
+      t = Math.min(t, performance.now() - t0);
+    }
+    return { t, res };
+  }
 
   /** nx × ny rectangles, each dimensioned and positioned relative to its neighbour. */
   function grid(nx: number, ny: number, separatePoints: boolean) {
@@ -820,9 +834,7 @@ describe('performance', () => {
     for (const fixed of [true, false]) {
       const { entities, constraints, dims } = chain(fixed);
       solveSketch(entities, constraints, dims);
-      const t0 = performance.now();
-      const res = solveSketch(entities, constraints, dims);
-      const t = performance.now() - t0;
+      const { t, res } = bestOf(() => solveSketch(entities, constraints, dims));
       expect(res.ok).toBe(true);
       expect(res.conflicting).toEqual([]);
       // the 'equal' ring is redundant with the radius dimensions: 40 radius + 40 equal constraints on 40 radii
@@ -831,9 +843,8 @@ describe('performance', () => {
       expect(t).toBeLessThan(budget(30));
       // dragging the end of the free chain
       if (!fixed) {
-        const t1 = performance.now();
-        const dr = solveSketch(res.entities, constraints, dims, { drag: { points: { p60: [500, 300] } }, analyze: false });
-        expect(performance.now() - t1).toBeLessThan(budget(30));
+        const { t: td, res: dr } = bestOf(() => solveSketch(res.entities, constraints, dims, { drag: { points: { p60: [500, 300] } }, analyze: false }));
+        expect(td).toBeLessThan(budget(30));
         expect(dr.ok).toBe(true);
         expect(P(dr.entities, 'p60')[0]).toBeCloseTo(500, 9);
       }

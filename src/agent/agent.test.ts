@@ -289,4 +289,68 @@ describe('agent API', () => {
     expect(bad.error).toMatch(/op #0 \(place\): No instance "Nope <1>"/);
     expect(bad.applied).toBe(false);
   }, 120000);
+
+  it('makes exploded views of an assembly and animates its mates as a query', async () => {
+    const s = await session();
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'sketch', plane: 'top', shapes: [{ type: 'circle', c: [60, 0], r: 5 }] },
+      { op: 'extrude', depth: 20, boolean: 'new' },
+      { op: 'part', part: 'Part 1', name: 'Plate' },
+      { op: 'part', part: 'Part 2', name: 'Pin' },
+      { op: 'assembly', name: 'Rig' },
+      { op: 'insert', part: 'Plate', fixed: true },
+      { op: 'insert', part: 'Pin' },
+      { op: 'insert', part: 'Pin', position: [0, 40, 0] },
+      { op: 'mate', type: 'revolute', a: { instance: 'Plate <1>', face: { normal: 'z', pick: '+z' } }, b: { instance: 'Pin <1>', edge: { type: 'circle', pick: '-z' } } },
+      { op: 'mate', type: 'slider', a: { instance: 'Plate <1>', face: { normal: 'z', pick: '+z' } }, b: { instance: 'Pin <2>', edge: { type: 'circle', pick: '-z' } }, limits: { zMin: 0, zMax: 30 } },
+      // the first pin up by 50; the second 30 along X and laid down (a quarter turn about X through its centre)
+      {
+        op: 'explodedView',
+        name: 'Apart',
+        steps: [
+          { instances: ['Pin <1>'], dir: '+z', distance: 50 },
+          { instances: ['Pin <2>'], dir: [1, 0, 0], distance: 30, angle: 90 },
+        ],
+      },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.added).toContain('Apart');
+    const ev = r.assembly!.explodedViews![0];
+    expect([ev.name, ev.steps]).toEqual(['Apart', 2]);
+    const box = (name: string) => ev.moved.find((m) => m.name === name)!;
+    expect(box('Pin <1>').bboxMin[2]).toBeCloseTo(60, 1);
+    expect(box('Pin <1>').bboxMax[2]).toBeCloseTo(80, 1);
+    const pin2 = r.assembly!.instances.find((i) => i.name === 'Pin <2>')!;
+    // laid down: 20 long along Y, 10 high, 30 further along X
+    expect(box('Pin <2>').bboxMax[1] - box('Pin <2>').bboxMin[1]).toBeCloseTo(20, 1);
+    expect(box('Pin <2>').bboxMax[2] - box('Pin <2>').bboxMin[2]).toBeCloseTo(10, 1);
+    expect(box('Pin <2>').bboxMin[0]).toBeCloseTo(pin2.bboxMin![0] + 30, 1);
+    // shown only: the pins stand where the mates put them
+    expect(r.assembly!.instances.find((i) => i.name === 'Pin <1>')!.bboxMin![2]).toBeCloseTo(10, 1);
+    // more steps after its own; mistakes
+    const more = await s.run([{ op: 'explodedView', name: 'apart', add: true, steps: [{ instances: ['Plate <1>'], dir: '-z', distance: 10 }] }]);
+    expect(more.changed).toContain('Apart');
+    expect(more.assembly!.explodedViews![0].steps).toBe(3);
+    expect((await s.run([{ op: 'explodedView', steps: [{ instances: ['Pin <1>'], dir: '+q' as never, distance: 5 }] }])).error).toMatch(/Invalid step direction "\+q"/);
+    expect((await s.run([{ op: 'explodedView', steps: [{ instances: ['Pin <1>'], dir: 'z' }] }])).error).toMatch(/moves nothing/);
+    // the slider's pin through its range, in frames: up from the plate's face
+    const slide = await s.animate({ mate: 'Slider 1', from: 0, to: 30, frames: 4 });
+    expect([slide.mate, slide.motion, slide.frames.map((f) => f.value)]).toEqual(['Slider 1', 'slide', [0, 10, 20, 30]]);
+    expect(slide.frames.map((f) => f.instances.map((i) => i.name))).toEqual([['Pin <2>'], ['Pin <2>'], ['Pin <2>'], ['Pin <2>']]);
+    const lows = slide.frames.map((f) => f.instances[0].bboxMin![2]);
+    lows.forEach((z, i) => expect(z - lows[0]).toBeCloseTo(10 * i, 3));
+    // the revolute's pin turns a quarter about Z
+    const turn = await s.animate({ mate: 'Revolute 1', from: 0, to: 90, frames: 2 });
+    expect(turn.motion).toBe('turn');
+    const [a0, a1] = turn.frames.map((f) => f.instances[0].rotation[2]);
+    expect((((a1 - a0) % 360) + 360) % 360).toBeCloseTo(90, 3);
+    await expect(s.animate({ mate: 'Nope' })).rejects.toThrow(/No mate "Nope"/);
+    // nothing changed by animating; the view deleted
+    const gone = await s.run([{ op: 'deleteExplodedView', name: 'Apart' }]);
+    expect(gone.removed).toEqual(['Apart']);
+    expect(gone.assembly!.explodedViews).toBeUndefined();
+    expect(gone.assembly!.instances.find((i) => i.name === 'Pin <2>')!.position).toEqual(pin2.position);
+  }, 120000);
 });

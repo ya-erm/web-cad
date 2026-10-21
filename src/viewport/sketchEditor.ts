@@ -153,6 +153,10 @@ const GLYPH: Partial<Record<ConstraintType, string>> = {
 /** How many picks a constraint tool takes at most before it starts again (the tool first, then the picks). */
 const constraintPicks = (t: ConstraintType) => (t === 'symmetric' ? 3 : t === 'fix' ? 1 : 2);
 
+/** The Mirror tool's hints: what to pick. */
+const MIRROR_LINE = 'Mirror: select the mirror line (a line or a construction line).';
+const MIRROR_ENTITIES = 'Mirror: select entities to mirror about the line. Esc — done.';
+
 const SNAP_PX = 9;
 const USE_ACCEPTS: SelToken[] = ['edge', 'vertex', 'face', 'sketchCurve', 'sketchPoint', 'origin'];
 const PLANE_ACCEPTS: SelToken[] = ['plane', 'planarFace'];
@@ -391,8 +395,8 @@ export class SketchEditor {
       dimension: 'Click entities, then click to place the dimension. A circle with Shift: to the circle itself; three points: an angle.',
       select: 'Select entities, drag to move. Use the constraint tools to constrain.',
     };
-    // a constraint tool waiting for picks keeps its own hint (what to pick)
-    useEditor.setState({ sketch: { ...s, hint: text ?? (s.constraint ? s.hint : hints[this.toolName]) } });
+    // a constraint or mirror tool waiting for picks keeps its own hint (what to pick)
+    useEditor.setState({ sketch: { ...s, hint: text ?? (s.constraint || s.mirror ? s.hint : hints[this.toolName]) } });
   }
 
   // -------------------------------------------------------------------------
@@ -998,8 +1002,8 @@ export class SketchEditor {
       const s = useEditor.getState().sketch;
       if (this.tool.k !== 'idle') this.endTool();
       // a constraint tool waiting for picks: off (with what was picked for it)
-      else if (s?.constraint) {
-        useEditor.setState({ sketch: { ...s, constraint: undefined, selection: [] } });
+      else if (s?.constraint || s?.mirror) {
+        useEditor.setState({ sketch: { ...s, constraint: undefined, mirror: undefined, selection: [] } });
         this.setHint();
       } else if ((s?.selection.length ?? 0) > 0) useEditor.getState().setSketchSelection([]);
       else if (useEditor.getState().sketch?.planePending) useEditor.getState().cancelEditing();
@@ -1113,13 +1117,19 @@ export class SketchEditor {
           return;
         }
         if (!hit) {
-          if (!e.shiftKey) ed.setSketchSelection([]);
+          // (the Mirror tool keeps its line selected)
+          if (!e.shiftKey && !ed.sketch?.mirror) ed.setSketchSelection([]);
           return;
         }
         if (hit.type === 'ghostHandle') {
           // clicking a ghost tangent handle creates it (selected: ready for a constraint / dimension)
           const id = this.activateHandle(hit.id);
           if (id) ed.setSketchSelection([id]);
+          return;
+        }
+        // the Mirror tool waiting for its line or entities: this one
+        if (ed.sketch?.mirror) {
+          this.mirrorPick(hit.id);
           return;
         }
         ed.setSketchSelection(sel.includes(hit.id) ? sel.filter((s) => s !== hit.id) : [...sel, hit.id]);
@@ -2097,22 +2107,75 @@ export class SketchEditor {
   // Mirror & patterns
   // -------------------------------------------------------------------------
 
-  /** Mirror the selection about the last selected line. */
+  /**
+   * Mirror: entities and the mirror line selected (the line last) — mirrored at once. Otherwise the tool waits for its
+   * picks (Onshape): the mirror line first (the one selected, if a line alone is), then each entity picked is mirrored
+   * about it until Esc; entities selected without a line are mirrored as soon as the line is picked.
+   */
   applyMirror() {
     const ed = useEditor.getState();
-    const sel = ed.sketch?.selection ?? [];
+    const s = ed.sketch;
+    if (!s) return;
+    // the tool on: its button turns it off
+    if (s.mirror) {
+      useEditor.setState({ sketch: { ...s, mirror: undefined, selection: [] } });
+      return this.setHint();
+    }
+    const sel = s.selection;
     const map = this.map();
     const axis = [...sel].reverse().find((id) => map.get(id)?.type === 'line');
     const ids = sel.filter((id) => id !== axis && map.has(id));
-    if (!axis || !ids.length) {
-      ed.showToast('Select entities and the mirror line (select the line last)', 'error');
+    if (axis && ids.length) {
+      let ok = false;
+      this.change((d) => {
+        ok = mirrorEntities(d, ids, axis);
+      });
+      if (ok) ed.setSketchSelection([]);
       return;
     }
+    if (this.tool.k !== 'idle') this.endTool();
+    useEditor.setState({
+      sketch: {
+        ...s,
+        tool: 'select',
+        constraint: undefined,
+        mirror: { ...(axis ? { axis } : {}), pending: axis ? [] : ids, done: [] },
+        selection: axis ? [axis] : ids,
+        hint: axis ? MIRROR_ENTITIES : MIRROR_LINE,
+      },
+    });
+  }
+
+  /** A pick of the Mirror tool: its line, then an entity to mirror about it. */
+  private mirrorPick(id: string) {
+    const ed = useEditor.getState();
+    const m = ed.sketch?.mirror;
+    if (!m) return;
+    const map = this.map();
+    if (!m.axis) {
+      if (map.get(id)?.type !== 'line') return ed.showToast(MIRROR_LINE, 'info');
+      // the entities selected before it: mirrored now
+      const pending = m.pending.filter((x) => x !== id && map.has(x));
+      let ok = false;
+      if (pending.length)
+        this.change((d) => {
+          ok = mirrorEntities(d, pending, id);
+        });
+      const s = useEditor.getState().sketch;
+      if (s) useEditor.setState({ sketch: { ...s, mirror: { axis: id, pending: [], done: ok ? pending : [] }, selection: [id], hint: MIRROR_ENTITIES } });
+      return;
+    }
+    // the line itself, or one already mirrored about it (or a mirror image): nothing
+    const e = map.get(id);
+    const own = !e ? [] : e.type === 'point' ? [e.id] : 'pts' in e ? e.pts : ['p1' in e ? e.p1 : '', 'p2' in e ? e.p2 : '', 'c' in e ? e.c : ''].filter(Boolean);
+    const imaged = this.data()?.constraints.some((c) => c.type === 'symmetric' && c.refs[2] === m.axis && own.some((p) => c.refs[0] === p || c.refs[1] === p));
+    if (id === m.axis || m.done.includes(id) || imaged) return;
     let ok = false;
     this.change((d) => {
-      ok = mirrorEntities(d, ids, axis);
+      ok = mirrorEntities(d, [id], m.axis!);
     });
-    if (ok) ed.setSketchSelection([]);
+    const s = useEditor.getState().sketch;
+    if (s) useEditor.setState({ sketch: { ...s, mirror: { ...m, done: ok ? [...m.done, id] : m.done }, selection: [m.axis] } });
   }
 
   /** Create an associative pattern from the selection and open its editor (Onshape flow). */
