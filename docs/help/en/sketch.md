@@ -21,7 +21,7 @@ alt: Sketch mode: sketch toolbar, sketch dialog, geometry with constraints and d
 ```
 
 1. **Finish sketch** (`Enter`).
-2. Drawing tools: [line](sketch-line), [rectangles](sketch-rectangle), [circles](sketch-circle), [arcs](sketch-arc), [spline](sketch-spline), [point](sketch-point), [slot](sketch-slot), [polygon](sketch-polygon), [ellipse](sketch-ellipse), [text](sketch-text).
+2. Drawing tools: [line](sketch-line), [rectangles](sketch-rectangle), [circles](sketch-circle), [arcs](sketch-arc), [spline](sketch-spline), [point](sketch-point), [slot](sketch-slot), [polygon](sketch-polygon), [ellipse](sketch-ellipse), [text](sketch-text), [spur gear](sketch-gear).
 3. Editing tools: [fillet](sketch-fillet), [trim](sketch-trim), [extend](sketch-extend), [offset](sketch-offset), [projection (Use)](sketch-use).
 4. [Dimension](sketch-dimensions), [mirror](sketch-mirror), [linear and circular pattern](sketch-pattern).
 5. [Construction geometry](#construction) (`Q`).

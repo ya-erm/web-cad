@@ -44,6 +44,7 @@
         { "id": "sketch-polygon", "icon": "polygon", "title": { "ru": "Многоугольник", "en": "Polygon" } },
         { "id": "sketch-ellipse", "icon": "ellipse", "title": { "ru": "Эллипс", "en": "Ellipse" } },
         { "id": "sketch-text", "icon": "sketchText", "title": { "ru": "Текст", "en": "Text" } },
+        { "id": "sketch-gear", "icon": "sketchGear", "title": { "ru": "Шестерня", "en": "Spur gear" } },
         { "id": "sketch-fillet", "icon": "sketchFillet", "title": { "ru": "Скругление в эскизе", "en": "Sketch fillet" } },
         { "id": "sketch-trim", "icon": "trim", "title": { "ru": "Обрезка", "en": "Trim" } },
         { "id": "sketch-extend", "icon": "extend", "title": { "ru": "Удлинение", "en": "Extend" } },

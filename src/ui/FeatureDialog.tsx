@@ -157,7 +157,7 @@ function SelField({ fkey, type, refs }: { fkey: string; type: FeatureType; refs:
   );
 }
 
-function ExprInput({ value, unit, onChange }: { value: string; unit: 'length' | 'angle' | 'number'; onChange: (v: string) => void }) {
+export function ExprInput({ value, unit, onChange }: { value: string; unit: 'length' | 'angle' | 'number'; onChange: (v: string) => void }) {
   const [text, setText] = useState(value);
   const doc = useDoc((s) => s.doc);
   const index = useEditor((s) => s.editing?.index ?? 0);

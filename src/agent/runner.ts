@@ -29,8 +29,9 @@ import { ANSI_SIZE_NAMES, ansiDefaultDepths, ansiHole, ansiThreads, ISO_SIZES, I
 import { findMaterial, massKg, MATERIALS, partDensity } from '../core/materials';
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
-import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
+import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addGear, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
 import { expandTexts, FONT_FILES } from '../sketch/text';
+import { expandGears, gearSizeOf } from '../sketch/gear';
 import type {
   AgentOp,
   AxisName,
@@ -204,8 +205,8 @@ class Runner {
       return { id: s.featureId, name: `${d.name} / ${s.name}`, entities: s.entities };
     }
     const sk = this.sketchFeature(name);
-    // texts: with their letters (their regions)
-    return { id: sk.id, name: sk.name, entities: expandTexts(sk.params.entities) };
+    // texts: with their letters, gears: with their teeth (their regions)
+    return { id: sk.id, name: sk.name, entities: expandGears(expandTexts(sk.params.entities), this.ctx()) };
   }
 
   // ----- values -------------------------------------------------------------
@@ -655,6 +656,25 @@ class Runner {
           const a = (((sh.rotation ?? 0) + 90) * Math.PI) / 180;
           const t = addText(d, o, [o[0] + h * Math.cos(a), o[1] + h * Math.sin(a)], sh.text, font, cons);
           if (typeof sh.height === 'string') addConstraint(d, 'distance', [t.p1, t.p2], { value: sh.height });
+          return;
+        }
+        case 'gear': {
+          // its parameters stay expressions: numbers in document units (degrees), strings as given (`#z`, `"12 mm"`)
+          const sizes = (['module', 'outerDiameter', 'pitchDiameter'] as const).filter((k) => sh[k] !== undefined);
+          if (sizes.length > 1) throw new AgentError(`${where}: give one of module, outerDiameter, pitchDiameter`);
+          const sizeBy = sizes[0] ?? 'module';
+          const len = (v: Num) => (typeof v === 'number' ? `${v} ${this.units.length}` : v);
+          const angle = (v: Num | undefined, dflt: string) => (v === undefined ? dflt : typeof v === 'number' ? `${v} deg` : v);
+          const params = {
+            teeth: String(sh.teeth),
+            sizeBy,
+            size: len(sh[sizeBy] ?? 1),
+            pressureAngle: angle(sh.pressureAngle, '20 deg'),
+            rotation: angle(sh.rotation, '0 deg'),
+          };
+          const probe = gearSizeOf({ id: 'g', type: 'gear', c: 'c', ...params }, this.ctx());
+          if ('error' in probe) throw new AgentError(`${where}: ${probe.error}`);
+          addGear(d, sh.c ? P(sh.c) : [0, 0], params, !!sh.construction);
           return;
         }
         default:

@@ -44,6 +44,9 @@ import {
   splitEntity,
   addBezier,
   addText,
+  addGear,
+  DEFAULT_GEAR,
+  type GearParamsOf,
   conicControls,
   conicRho,
   isQuadrantId,
@@ -51,6 +54,8 @@ import {
   type Snap,
 } from '../sketch/sketchOps';
 import { expandTexts, loadFonts, onFontLoaded, textOfPart, textOutline } from '../sketch/text';
+import { expandGears, gearOfPart, gearOutline, gearSizeOf } from '../sketch/gear';
+import { gearCircles } from '../core/gear';
 import { arrowTriangle, dimensionGeometry } from '../sketch/dimensions';
 import { CONSTRAINT_GLYPH_SVG } from '../ui/constraintGlyphs';
 import { attachVariableSuggest, varChoices } from '../ui/varSuggest';
@@ -582,8 +587,8 @@ export class SketchEditor {
     this.dirSnap = null;
     const map = this.map();
     const rawHit = this.hitEntity(x, y, exclude);
-    // nothing snaps onto the letters of a text (only to its points)
-    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' && rawHit.type !== 'text' ? rawHit : null;
+    // nothing snaps onto the letters of a text or the teeth of a gear (only to their points)
+    const hit = rawHit && !isCopyId(rawHit.id) && rawHit.type !== 'ghostHandle' && rawHit.type !== 'text' && rawHit.type !== 'gear' ? rawHit : null;
     if (hit && hit.type === 'point') {
       const e = map.get(hit.id);
       if (e && e.type === 'point') return { kind: 'point', id: e.id, pos: [e.x, e.y] };
@@ -1143,6 +1148,20 @@ export class SketchEditor {
           const id = addPoint(d, pos, undefined, cons);
           applySnap(d, id, snap);
         });
+        return;
+      }
+      case 'gear': {
+        // Onshape Spur gear, here in the sketch: a click places its centre; its teeth and size — in the sketch dialog
+        let id = '';
+        const params = this.gearParams();
+        this.change((d) => {
+          const g = addGear(d, pos, params, cons);
+          id = g.id;
+          applySnap(d, g.c, snap);
+        });
+        this.endTool();
+        ed.setSketchTool('select');
+        if (id) ed.setSketchSelection([id]);
         return;
       }
       case 'line': {
@@ -1842,6 +1861,8 @@ export class SketchEditor {
           return [...ent.pts, ...[ent.h0, ent.h1].filter((h): h is string => !!h && map.has(h))];
         case 'text':
           return [ent.p1, ent.p2];
+        case 'gear':
+          return [ent.c];
       }
     };
     if (e.type === 'circle') {
@@ -2575,7 +2596,7 @@ export class SketchEditor {
     this.clear(this.pickRoot);
     this.clearLabels();
     const ctx = this.evalCtx();
-    const all = expandTexts(expandPatterns(d.entities, d.patterns, ctx));
+    const all = expandGears(expandTexts(expandPatterns(d.entities, d.patterns, ctx)), ctx);
     const map = entityMap(all);
     const reg = this.engine.registry;
     // highlight the geometry of a hovered constraint / dimension
@@ -2607,8 +2628,9 @@ export class SketchEditor {
     const ptIds: number[] = [];
     const ptByColor = new Map<number, Vec2[]>();
     for (const e of all) {
-      // the letters and box of a text: drawn in its colour and picked as the text itself
-      const text = textOfPart(e.id);
+      // the letters and box of a text, the teeth of a gear: drawn in its colour and picked as the text (gear) itself
+      const gear = gearOfPart(e.id);
+      const text = textOfPart(e.id) ?? gear;
       if (text) {
         if (e.type === 'point') continue;
         const color = this.statusColor(text, !!e.construction);
@@ -2618,7 +2640,7 @@ export class SketchEditor {
         const segs = polylineSegments(entityPolyline(e, map));
         g.segs.push(...segs);
         groups.set(key, g);
-        const id = reg.alloc({ t: 'edit', id: text, entType: 'text', priority: 38, radius: 6 });
+        const id = reg.alloc({ t: 'edit', id: text, entType: gear ? 'gear' : 'text', priority: 38, radius: 6 });
         pickSegs.push(...segs);
         for (let i = 0; i < segs.length / 3; i++) pickIds.push(id);
         continue;
@@ -2846,6 +2868,99 @@ export class SketchEditor {
       o.position.set(g.label[0], g.label[1], 0);
       this.labels.add(o);
     }
+    this.renderGearSizes(d, map, px);
+  }
+
+  /**
+   * The size of each gear as a diameter dimension: its outer or pitch diameter when that sets it (`fx` — an
+   * expression, `#d`), else its pitch diameter in parentheses (grey: the module sets it). A click selects the gear,
+   * a double-click puts the cursor in its size field of the sketch dialog.
+   */
+  private renderGearSizes(d: SketchData, map: EntityMap, px: number) {
+    const s = useEditor.getState().sketch!;
+    const units = useDoc.getState().doc!.units;
+    const ctx = this.evalCtx();
+    for (const gear of d.entities) {
+      if (gear.type !== 'gear') continue;
+      const size = gearSizeOf(gear, ctx);
+      if ('error' in size) continue;
+      const { r, ra } = gearCircles(size.size);
+      const driving = gear.sizeBy !== 'module';
+      // the module: the pitch diameter it gives (m · z), as a driven dimension
+      const pitch = gear.sizeBy !== 'outerDiameter';
+      const radius = pitch ? r : ra;
+      // the circle it measures (not in the sketch): a stand-in about the gear's centre
+      const circle = { id: `${gear.id}~size`, type: 'circle' as const, c: gear.c, r: radius };
+      // its arrow where that circle is plain to see: on the tip of the tooth nearest to the upper right (the outer
+      // diameter), in the middle of the gap next to it (the pitch circle, dash-dotted there)
+      const step = (2 * Math.PI) / size.size.z;
+      const toward = size.rotation + Math.round((Math.PI / 4 - size.rotation) / step) * step + (pitch ? step / 2 : 0);
+      const c = pointOf(map, gear.c);
+      const labelPos: Vec2 = [c[0] + (radius + 30 * px) * Math.cos(toward), c[1] + (radius + 30 * px) * Math.sin(toward)];
+      const g = dimensionGeometry({ id: circle.id, type: 'diameter', refs: [circle.id], labelPos }, new Map(map).set(circle.id, circle), px);
+      if (!g) continue;
+      const sel = s.selection.includes(gear.id);
+      const hov = s.hover === gear.id;
+      const color = sel ? COLORS.selected : hov ? COLORS.hover : driving ? 0x1b1f23 : 0x9aa0a6;
+      const value = `Ø${formatNumber((2 * radius) / LENGTH_FACTOR[units.length], 3)}`;
+      const isExpr = driving && gear.size.includes('#');
+      let text = driving ? value : `(${value})`;
+      const el = document.createElement('div');
+      el.className = 'dim-label' + (sel ? ' selected' : '') + (hov ? ' hover' : '') + (driving ? '' : ' driven');
+      el.title = driving ? t(pitch ? 'Pitch diameter' : 'Outer diameter') : t('Pitch diameter: the module sets it');
+      if (isExpr) {
+        const fx = document.createElement('span');
+        fx.className = 'fx';
+        fx.textContent = 'fx';
+        el.appendChild(fx);
+        if (useEditor.getState().showExpressions) {
+          el.title = text;
+          text = `Ø${gear.size}`;
+        } else el.title = gear.size;
+      }
+      el.appendChild(document.createTextNode(text));
+      const gap = this.labelGap(g.label, labelWidthPx(text, isExpr) + 8, 17, px);
+      const segs: number[] = [];
+      for (let i = 0; i + 3 < g.segs.length + 1; i += 4) {
+        const a: Vec2 = [g.segs[i], g.segs[i + 1]];
+        const b: Vec2 = [g.segs[i + 2], g.segs[i + 3]];
+        for (const [p, q] of gap ? clipOutside(a, b, gap) : [[a, b]]) segs.push(p[0], p[1], 0, q[0], q[1], 0);
+      }
+      if (segs.length) {
+        const l = fatSegments(segs, lineMaterial(color, 1, { depthTest: false }));
+        l.renderOrder = 32;
+        this.labels.add(l);
+      }
+      const tri: number[] = [];
+      for (const a of g.arrows) tri.push(...arrowTriangle(a.tip, a.dir, 11 * px));
+      if (tri.length) {
+        const tm = new THREE.Mesh(
+          new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(tri, 3)),
+          new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false }),
+        );
+        tm.renderOrder = 32;
+        this.labels.add(tm);
+      }
+      el.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        ev.stopPropagation();
+        useEditor.getState().setSketchSelection([gear.id]);
+        // a double-click: its size, typed in the dialog
+        if (this.isDoublePress(circle.id, ev)) {
+          ev.preventDefault();
+          setTimeout(() => {
+            const input = document.querySelector<HTMLInputElement>('.gear-props .gear-size input');
+            input?.focus();
+            input?.select();
+          }, 0);
+        }
+      });
+      el.addEventListener('pointerenter', () => useEditor.getState().setSketchHover(gear.id));
+      el.addEventListener('pointerleave', () => useEditor.getState().setSketchHover(null));
+      const o = new CSS2DObject(el);
+      o.position.set(g.label[0], g.label[1], 0);
+      this.labels.add(o);
+    }
   }
 
   /** White constraint boxes with icons next to the geometry, linked by thin leaders. */
@@ -2986,6 +3101,8 @@ export class SketchEditor {
           const b = pointOf(map, e.p2);
           return { p: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n: [-1, 0] };
         }
+        case 'gear':
+          return { p: pointOf(map, e.c), n: [0, 1] };
       }
     } catch {
       return null;
@@ -3342,6 +3459,12 @@ export class SketchEditor {
     return [];
   }
 
+  /** The parameters of a new gear: as the sketch's last gear has them (a second one meshes with the first), else the defaults. */
+  private gearParams(): GearParamsOf {
+    const last = [...(this.data()?.entities ?? [])].reverse().find((e) => e.type === 'gear');
+    return last && last.type === 'gear' ? { teeth: last.teeth, sizeBy: last.sizeBy, size: last.size, pressureAngle: last.pressureAngle, rotation: last.rotation } : DEFAULT_GEAR;
+  }
+
   private updatePreview() {
     this.clear(this.preview);
     this.showLive(this.active && this.tool.k !== 'idle' ? this.liveLabels(this.snap?.pos ?? this.cursor) : []);
@@ -3362,6 +3485,8 @@ export class SketchEditor {
       return out;
     };
     const st = this.tool;
+    // the gear tool: the gear as it will be placed, at the cursor
+    if (this.toolName === 'gear') for (const pl of gearOutline(this.gearParams(), c, this.evalCtx())) poly(pl);
     switch (st.k) {
       case 'line':
         seg(st.start.pos, c);

@@ -87,7 +87,25 @@ export interface SkText extends SkEntityBase {
   p2: string;
 }
 
-export type SkEntity = SkPoint | SkLine | SkCircle | SkArc | SkEllipse | SkSpline | SkText;
+/**
+ * A spur gear (Onshape: Spur gear) drawn in a sketch, like a text: its centre is a point of the sketch, its teeth —
+ * involute, one tooth arrayed around the centre — are derived geometry made at build time from the expressions
+ * (so `#z` teeth follow the variable). Extrude its region for the gear.
+ */
+export interface SkGear extends SkEntityBase {
+  type: 'gear';
+  c: string;
+  /** Number of teeth (an expression). */
+  teeth: string;
+  /** What `size` is: the module, the outer (tip) diameter or the pitch diameter. */
+  sizeBy: 'module' | 'outerDiameter' | 'pitchDiameter';
+  size: string;
+  pressureAngle: string;
+  /** The first tooth's direction from the sketch's X axis. */
+  rotation: string;
+}
+
+export type SkEntity = SkPoint | SkLine | SkCircle | SkArc | SkEllipse | SkSpline | SkText | SkGear;
 export type SkCurve = SkLine | SkCircle | SkArc | SkEllipse | SkSpline;
 
 export type ConstraintType =

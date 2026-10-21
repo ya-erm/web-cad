@@ -95,7 +95,24 @@ export type Shape =
    * turned by `rotation` degrees; fonts: `sans` (Inter, default), `sansBold` (Inter SemiBold), `mono` (JetBrains Mono).
    * Its letters are regions: `regions: "auto"` takes the letters without their counters (the inside of "O").
    */
-  | { type: 'text'; text: string; at?: Pt2; height: Num; rotation?: number; font?: SkFont; construction?: boolean };
+  | { type: 'text'; text: string; at?: Pt2; height: Num; rotation?: number; font?: SkFont; construction?: boolean }
+  /**
+   * A spur gear (Onshape Spur gear) about `c` (default the origin): involute teeth — one tooth arrayed around the
+   * centre — from expressions that stay live (`"teeth":"#z"`): `teeth`, and its size by `module`, `outerDiameter` or
+   * `pitchDiameter` (one of them; default module 1 mm), `pressureAngle` (degrees or an expression, default 20),
+   * `rotation` (degrees or an expression: the first tooth's direction). Its region is the gear: extrude it.
+   */
+  | {
+      type: 'gear';
+      c?: Pt2;
+      teeth: Num;
+      module?: Num;
+      outerDiameter?: Num;
+      pitchDiameter?: Num;
+      pressureAngle?: Num;
+      rotation?: Num;
+      construction?: boolean;
+    };
 
 /** Which closed regions of a sketch to use: 'auto' skips islands inside holes. */
 export type Regions = 'auto' | 'all' | Pt2[];

@@ -247,6 +247,9 @@ function entityVars(m: Model, e: SkEntity): number[] {
       pushPt(e.p1);
       pushPt(e.p2);
       break;
+    case 'gear':
+      pushPt(e.c);
+      break;
   }
   return out;
 }

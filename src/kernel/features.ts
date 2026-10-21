@@ -21,6 +21,7 @@ import { projectGeometry, updateUsedEntity } from '../sketch/useGeometry';
 import { computeRegions } from '../sketch/regions';
 import { expandPatterns } from '../sketch/patterns';
 import { expandTexts } from '../sketch/text';
+import { expandGears, gearSizeOf } from '../sketch/gear';
 import {
   bboxOf,
   compoundOf,
@@ -242,10 +243,16 @@ function buildSketch(ctx: Ctx, f: FeatureOf<'sketch'>): FeatureOutput {
     entities = res.entities;
     ok = res.ok;
   }
-  // pattern copies are derived from the solved seed geometry, the letters of texts — from their solved points
-  entities = expandTexts(expandPatterns(entities, f.params.patterns, ctx.ec));
+  // pattern copies are derived from the solved seed geometry, the letters of texts and the teeth of gears — from
+  // their solved points (the gears' teeth from their expressions: `#z` teeth follow the variable)
+  entities = expandGears(expandTexts(expandPatterns(entities, f.params.patterns, ctx.ec)), ctx.ec);
   const regions = computeRegions(entities);
   ctx.st.sketches.set(f.id, { featureId: f.id, frame, entities, regions, ok, name: f.name });
+  // a gear that cannot be made (too few teeth, a pointed tooth…): why
+  for (const e of f.params.entities) {
+    const g = e.type === 'gear' ? gearSizeOf(e, ctx.ec) : null;
+    if (g && 'error' in g) return { warning: g.error };
+  }
   if (lostUse) return { warning: 'Some projected (Use) geometry could not be found' };
   if (errors.length) return { warning: 'Some dimensions have invalid expressions' };
   if (!ok) return { warning: 'Sketch constraints could not be fully solved' };

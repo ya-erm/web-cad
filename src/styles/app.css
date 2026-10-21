@@ -699,6 +699,18 @@ textarea {
 .save-state-fixed > span.off {
   visibility: hidden;
 }
+/* the selected gear's parameters in the sketch dialog: spaced as the dialog's own rows */
+.gear-props {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fd-section.gear-props-title {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
 /* error boundaries: a panel's card in its place, the whole page's message */
 .error-card {
   margin: 8px;

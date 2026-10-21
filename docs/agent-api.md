@@ -139,7 +139,15 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 {"type":"polygon", "c":[0,0], "r":"6.5 mm", "sides":6, "inscribed":true}   // окружность касается сторон: «под ключ» 13 мм
 {"type":"text", "text":"WebCAD", "at":[0,0], "height":10, "font":"sansBold", "rotation":0}   // строка от начала базовой линии, height — высота прописных; шрифты sans (Inter), sansBold, mono (JetBrains Mono); буквы — области (regions "auto" — без внутренних просветов «О»)
 {"type":"point", "at":[15,15]}          // для отверстий
+{"type":"gear", "c":[0,0], "teeth":"#z", "outerDiameter":"#d"}   // шестерня: эвольвентные зубья — один зуб в круговом массиве;
+                                        // размер — module / outerDiameter / pitchDiameter (одно), pressureAngle (20°), rotation;
+                                        // выражения остаются живыми: смена #z перестраивает зубья. Её область — шестерня
 ```
+
+Шестерня целиком параметрическая: `[{"op":"variable","name":"z","value":12,"type":"number"},`
+`{"op":"variable","name":"w","value":6},{"op":"sketch","name":"Gear","shapes":[{"type":"gear","teeth":"#z","outerDiameter":12}]},`
+`{"op":"extrude","sketch":"Gear","depth":"#w"}]` — затем `{"op":"setVariable","name":"z","value":20}` даёт 20 зубьев того же
+диаметра. Шестерня, которую нельзя построить (меньше 6 зубьев, заострённые зубья), — ошибка с причиной.
 
 Любая фигура (кроме точки) принимает `"construction": true`. Координаты — числа или выражения.
 

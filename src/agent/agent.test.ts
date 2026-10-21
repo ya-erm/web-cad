@@ -290,6 +290,33 @@ describe('agent API', () => {
     expect(bad.applied).toBe(false);
   }, 120000);
 
+  it('draws a spur gear in a sketch whose teeth follow a variable, and extrudes it', async () => {
+    const s = await session();
+    const r = await s.run([
+      { op: 'variable', name: 'z', value: 12, type: 'number' },
+      { op: 'variable', name: 'w', value: 6 },
+      { op: 'sketch', name: 'Gear', shapes: [{ type: 'gear', teeth: '#z', outerDiameter: 12 }] },
+      { op: 'extrude', sketch: 'Gear', depth: '#w' },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.ok).toBe(true);
+    const p12 = r.model!.parts[0];
+    // Ø12 (tip to tip across the centre: the box at a tooth tip is the tip circle), 6 wide
+    p12.size.slice(0, 2).forEach((v) => expect(v).toBeGreaterThan(11.6));
+    p12.size.slice(0, 2).forEach((v) => expect(v).toBeLessThanOrEqual(12 + 1e-6));
+    expect(p12.size[2]).toBeCloseTo(6, 6);
+    // 20 teeth: the same outer diameter, other teeth (faces: per tooth flanks, tip, root…)
+    const r20 = await s.run([{ op: 'setVariable', name: 'z', value: 20 }]);
+    expect(r20.ok).toBe(true);
+    const p20 = r20.model!.parts[0];
+    expect(p20.size[0]).toBeGreaterThan(11.6);
+    expect(p20.faces).toBeGreaterThan(p12.faces);
+    expect(p20.volume).not.toBeCloseTo(p12.volume!, 1);
+    // an impossible gear says why
+    const bad = await s.run([{ op: 'sketch', shapes: [{ type: 'gear', teeth: 4, module: 1 }] }]);
+    expect(bad.error).toMatch(/6 to 400 teeth/);
+  }, 120000);
+
   it('makes exploded views of an assembly and animates its mates as a query', async () => {
     const s = await session();
     const r = await s.run([

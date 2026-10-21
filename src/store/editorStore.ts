@@ -35,6 +35,8 @@ export type SketchTool =
   | 'ellipse'
   /** a line of text (Onshape Text): the start of its baseline, then the height of its capitals */
   | 'text'
+  /** a spur gear (Onshape Spur gear): its centre; teeth and size in the sketch dialog */
+  | 'gear'
   | 'fillet'
   | 'trim'
   /** split a line / an arc at a point (Onshape Split) */

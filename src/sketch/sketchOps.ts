@@ -1,6 +1,6 @@
 // Pure editing operations on sketch data (used with immer drafts).
 
-import type { ConstraintType, SkArc, SkConstraint, SkEntity, SkFont, SkLine, SkPoint, SkSpline, SkText, SketchData, Vec2 } from '../core/types';
+import type { ConstraintType, SkArc, SkConstraint, SkEntity, SkFont, SkGear, SkLine, SkPoint, SkSpline, SkText, SketchData, Vec2 } from '../core/types';
 import { uid } from '../core/ids';
 import { arcAngles, entityMap, intersectEntities, naturalHandles, pointOf, type EntityMap } from './curves';
 import { cleanPatterns, copyId, isCopyId, parseCopyId } from './patterns';
@@ -147,6 +147,20 @@ export function addBezier(d: SketchData, p0: Vec2, c1: Vec2, c2: Vec2, p3: Vec2,
  * A line of text (Onshape Text) from the start of its baseline `p1`; `p2` is the top of its box's left side —
  * |p2 − p1| is the height of its capital letters, and the text runs square to p1 → p2, to its right.
  */
+/** The parameters of a gear (expressions) and their defaults: 20 teeth of module 1 mm, 20° pressure angle. */
+export type GearParamsOf = Pick<SkGear, 'teeth' | 'sizeBy' | 'size' | 'pressureAngle' | 'rotation'>;
+export const DEFAULT_GEAR: GearParamsOf = { teeth: '20', sizeBy: 'module', size: '1 mm', pressureAngle: '20 deg', rotation: '0 deg' };
+
+/** A spur gear about `c` (its centre point is its own). */
+export function addGear(d: SketchData, c: Vec2, params: GearParamsOf = DEFAULT_GEAR, construction = false) {
+  const id = uid('g');
+  const cp = addPoint(d, c, id);
+  const e: SkGear = { id, type: 'gear', c: cp, ...params };
+  if (construction) e.construction = true;
+  d.entities.push(e);
+  return { id, c: cp };
+}
+
 export function addText(d: SketchData, p1: Vec2, p2: Vec2, text: string, font: SkFont = 'sans', construction = false) {
   const id = uid('t');
   const a = addPoint(d, p1, id);
@@ -785,6 +799,11 @@ export function copyEntities(
       case 'text': {
         const t = addText(d, xf(P(e.p1)), xf(P(e.p2)), e.text, e.font, cons);
         map.set(e.id, t.id).set(e.p1, t.p1).set(e.p2, t.p2);
+        break;
+      }
+      case 'gear': {
+        const g = addGear(d, xf(P(e.c)), { teeth: e.teeth, sizeBy: e.sizeBy, size: e.size, pressureAngle: e.pressureAngle, rotation: e.rotation }, cons);
+        map.set(e.id, g.id).set(e.c, g.c);
         break;
       }
     }

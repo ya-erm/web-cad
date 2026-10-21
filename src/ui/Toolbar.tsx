@@ -83,6 +83,7 @@ export const SKETCH_TOOLS: (SketchToolDef | '|')[] = [
   { id: 'polygon', icon: 'polygon', label: 'Circumscribed polygon' },
   { id: 'ellipse', icon: 'ellipse', label: 'Ellipse' },
   { id: 'text', icon: 'sketchText', label: 'Text' },
+  { id: 'gear', icon: 'sketchGear', label: 'Spur gear' },
   '|',
   { id: 'fillet', icon: 'sketchFillet', label: 'Sketch fillet', shortcut: 'Shift+F' },
   { id: 'trim', icon: 'trim', label: 'Trim', shortcut: 'M' },

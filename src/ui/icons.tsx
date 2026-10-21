@@ -121,6 +121,19 @@ function pt(x: number, y: number): JSX.Element {
   return <circle cx={x} cy={y} r={1.6} fill={WHITE} strokeWidth={1.25} />;
 }
 
+/** A gear's outline about (12, 12): 9 teeth, tapered, between radii 6.6 and 9.6. */
+const GEAR_PATH = (() => {
+  const n = 9;
+  const P = (r: number, a: number) => `${(12 + r * Math.cos(a)).toFixed(2)},${(12 + r * Math.sin(a)).toFixed(2)}`;
+  const step = (2 * Math.PI) / n;
+  let d = '';
+  for (let k = 0; k < n; k++) {
+    const a = k * step - Math.PI / 2;
+    d += `${k ? 'L' : 'M'}${P(6.6, a - step * 0.3)} L${P(9.6, a - step * 0.14)} L${P(9.6, a + step * 0.14)} L${P(6.6, a + step * 0.3)} `;
+  }
+  return `${d}Z`;
+})();
+
 /** Solid dot. */
 function dot(x: number, y: number, color: string = ORANGE, r = 2.4): JSX.Element {
   return <circle cx={x} cy={y} r={r} fill={color} stroke="none" />;
@@ -771,6 +784,14 @@ const ICONS = {
       <path d="M7.5 17.5 L12 6.5 L16.5 17.5 M9.25 13.5 H14.75" stroke={ORANGE} strokeWidth={2} />
       {pt(3.5, 20.5)}
       {pt(20.5, 3.5)}
+    </>
+  ),
+  // A spur gear in the sketch: its teeth about its centre point.
+  sketchGear: (
+    <>
+      <path d={GEAR_PATH} stroke={ORANGE} strokeWidth={1.4} strokeLinejoin="round" />
+      <circle cx={12} cy={12} r={3.4} {...THIN} {...DASH} />
+      {pt(12, 12)}
     </>
   ),
   // 2x2 grid: the seed (dark) and its copies.

@@ -61,6 +61,7 @@ export const SKETCH_TOOL_HELP: Record<SketchTool, string> = {
   polygonInscribed: 'sketch-polygon',
   ellipse: 'sketch-ellipse',
   text: 'sketch-text',
+  gear: 'sketch-gear',
   fillet: 'sketch-fillet',
   trim: 'sketch-trim',
   split: 'sketch-split',
