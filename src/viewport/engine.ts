@@ -414,6 +414,7 @@ export class Engine {
         if (
           s.selection !== p.selection ||
           s.hover !== p.hover ||
+          s.hoverList !== p.hoverList ||
           s.hoverFeatures !== p.hoverFeatures ||
           s.editing?.draft !== p.editing?.draft ||
           s.build !== p.build ||
@@ -1164,13 +1165,18 @@ export class Engine {
     this.clearGroup(this.highlightGroup);
     const ed = useEditor.getState();
     const seen = new Set<string>();
+    // a row of a list under the pointer (a dialog's field, the instances…): its items stand out, the other selected fade
+    const list = ed.hoverList?.length ? ed.hoverList : null;
+    const focus = list ? new Set(list.map(refKey)) : null;
     for (const r of this.selectedRefs()) {
       const k = refKey(r);
       if (seen.has(k)) continue;
       seen.add(k);
-      this.addHighlight(r, COLORS.selected);
+      if (focus?.has(k)) continue;
+      this.addHighlight(r, COLORS.selected, focus ? 'faint' : undefined);
     }
-    if (ed.hover && !seen.has(refKey(ed.hover))) this.addHighlight(ed.hover, COLORS.hover);
+    if (list) for (const r of list) this.addHighlight(r, COLORS.hover, 'strong');
+    else if (ed.hover && !seen.has(refKey(ed.hover))) this.addHighlight(ed.hover, COLORS.hover);
     if (ed.hoverFeatures?.length && !ed.editing) {
       this.addFeatureHighlight(new Set(ed.hoverFeatures), COLORS.hover);
       this.addSketchHover(new Set(ed.hoverFeatures));
@@ -1511,8 +1517,16 @@ export class Engine {
     }
   }
 
-  private addHighlight(r: SelRef, color: number) {
+  /**
+   * Light `r` up in `color`. `strong` — the row under the pointer in a list (a dialog's field, the instances…): brighter
+   * and thicker; `faint` — the other selected items meanwhile.
+   */
+  private addHighlight(r: SelRef, color: number, style?: 'strong' | 'faint') {
     const g = this.highlightGroup;
+    /** An opacity, a line width or a point size as the style has it. */
+    const op = (v: number) => (style === 'strong' ? Math.min(0.9, v * 1.6) : style === 'faint' ? v * 0.4 : v);
+    const wd = (v: number) => (style === 'strong' ? v * 1.7 : style === 'faint' ? v * 0.6 : v);
+    const line = (w: number) => lineMaterial(color, wd(w), { depthTest: false, ...(style === 'faint' ? { opacity: 0.5 } : {}) });
     switch (r.kind) {
       case 'face': {
         const po = this.parts.get(r.partId);
@@ -1524,9 +1538,10 @@ export class Engine {
         geo.setIndex(new THREE.BufferAttribute(po.data.indices.slice(s, s + c), 1));
         const m = new THREE.Mesh(
           geo,
-          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op(0.55), side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
         );
         m.userData.sharedGeometry = true;
+        if (style === 'strong') m.renderOrder = 1;
         g.add(m);
         return;
       }
@@ -1537,8 +1552,8 @@ export class Engine {
         const c = po.data.edgeRanges[r.index * 2 + 1];
         const segs: number[] = [];
         for (let k = s; k + 1 < s + c; k++) segs.push(...po.data.edgePositions.subarray(k * 3, k * 3 + 6));
-        const l = fatSegments(segs, lineMaterial(color, 3.5, { depthTest: false }));
-        l.renderOrder = 20;
+        const l = fatSegments(segs, line(3.5));
+        l.renderOrder = style === 'strong' ? 22 : 20;
         g.add(l);
         return;
       }
@@ -1547,9 +1562,9 @@ export class Engine {
         const p = po ? Array.from(po.data.vertices.subarray(r.index * 3, r.index * 3 + 3)) : r.sig.center;
         const pts = new THREE.Points(
           new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(p, 3)),
-          new THREE.PointsMaterial({ color, size: 9, sizeAttenuation: false, depthTest: false }),
+          new THREE.PointsMaterial({ color, size: wd(9), sizeAttenuation: false, depthTest: false }),
         );
-        pts.renderOrder = 21;
+        pts.renderOrder = style === 'strong' ? 23 : 21;
         g.add(pts);
         return;
       }
@@ -1559,7 +1574,7 @@ export class Engine {
         for (const po of pos) {
           const m = new THREE.Mesh(
             po.mesh.geometry,
-            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+            new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op(0.4), depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
           );
           m.userData.sharedGeometry = true;
           g.add(m);
@@ -1575,20 +1590,20 @@ export class Engine {
         if (!reg) return;
         const m = new THREE.Mesh(
           regionGeometry(reg),
-          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, depthTest: false }),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op(0.55), side: THREE.DoubleSide, depthWrite: false, depthTest: false }),
         );
         m.matrixAutoUpdate = false;
         m.matrix.copy(frameMatrix(fr));
         m.matrixWorldNeedsUpdate = true;
-        m.renderOrder = 15;
+        m.renderOrder = style === 'strong' ? 16 : 15;
         g.add(m);
         return;
       }
       case 'sketchEntity': {
         const curve = this.curveSegs.get(r.sketchId);
         if (curve) {
-          const obj = fatSegments(curve, lineMaterial(color, 3.5, { depthTest: false }));
-          obj.renderOrder = 20;
+          const obj = fatSegments(curve, line(3.5));
+          obj.renderOrder = style === 'strong' ? 22 : 20;
           g.add(obj);
           return;
         }
@@ -1597,12 +1612,12 @@ export class Engine {
           const e = sk.map.get(r.entityId);
           if (!e) return;
           let obj: THREE.Object3D;
-          if (e.type === 'point') obj = pointsObject([[e.x, e.y]], color, 10, false);
-          else obj = fatSegments(polylineSegments(entityPolyline(e, sk.map)), lineMaterial(color, 3.5, { depthTest: false }));
+          if (e.type === 'point') obj = pointsObject([[e.x, e.y]], color, wd(10), false);
+          else obj = fatSegments(polylineSegments(entityPolyline(e, sk.map)), line(3.5));
           obj.matrixAutoUpdate = false;
           obj.matrix.copy(frameMatrix(sk.res.frame));
           obj.matrixWorldNeedsUpdate = true;
-          obj.renderOrder = 20;
+          obj.renderOrder = style === 'strong' ? 22 : 20;
           g.add(obj);
         }
         return;
@@ -1618,7 +1633,7 @@ export class Engine {
         const size = f.size;
         const m = new THREE.Mesh(
           new THREE.PlaneGeometry(size, size),
-          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op(0.22), side: THREE.DoubleSide, depthWrite: false }),
         );
         m.matrixAutoUpdate = false;
         m.matrix.copy(frameMatrix(f.frame));
@@ -1629,7 +1644,7 @@ export class Engine {
       case 'origin': {
         const pts = new THREE.Points(
           new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)),
-          new THREE.PointsMaterial({ color, size: 11, sizeAttenuation: false, depthTest: false }),
+          new THREE.PointsMaterial({ color, size: wd(11), sizeAttenuation: false, depthTest: false }),
         );
         pts.renderOrder = 21;
         g.add(pts);

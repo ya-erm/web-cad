@@ -129,7 +129,7 @@ function SelField({ fkey, type, refs }: { fkey: string; type: FeatureType; refs:
   const active = useEditor((s) => s.activeField === fkey);
   const setActive = useEditor((s) => s.setActiveField);
   const update = useEditor((s) => s.updateDraft);
-  const setHover = useEditor((s) => s.setHover);
+  const setListHover = useEditor((s) => s.setListHover);
   const label = useRefLabel();
   const spec = FIELD_SPECS[type]?.[fkey];
   return (
@@ -137,13 +137,14 @@ function SelField({ fkey, type, refs }: { fkey: string; type: FeatureType; refs:
       <div className="sel-label">{t(spec?.label ?? fkey)}</div>
       {refs.length === 0 && <div className="sel-empty">{active ? t('Select in the graphics area') : t('Click to select')}</div>}
       {groupRefs(refs, label).map(({ ref: r, text, all }) => (
-        <div key={refKey(r)} className="sel-chip" onMouseEnter={() => setHover(r)} onMouseLeave={() => setHover(null)}>
+        // the row under the pointer: its items (all of a group) stand out in the graphics area
+        <div key={refKey(r)} className="sel-chip" onMouseEnter={() => setListHover(all)} onMouseLeave={() => setListHover(null)}>
           <span>{text}</span>
           <span
             className="x"
             onClick={(e) => {
               e.stopPropagation();
-              setHover(null);
+              setListHover(null);
               const drop = new Set(all.map(refKey));
               update((f) => keepRefs(f.params as unknown as Record<string, unknown>, fkey, (x) => !drop.has(refKey(x)), spec));
             }}
@@ -677,7 +678,7 @@ function HoleStandardField() {
 function VertexRadiiField() {
   const update = useEditor((s) => s.updateDraft);
   const draft = useEditor((s) => s.editing?.draft);
-  const setHover = useEditor((s) => s.setHover);
+  const setListHover = useEditor((s) => s.setListHover);
   if (draft?.type !== 'fillet') return null;
   const p = draft.params;
   const vertices = p.vertices ?? [];
@@ -685,7 +686,7 @@ function VertexRadiiField() {
   return (
     <>
       {vertices.map((v, i) => (
-        <div key={refKey(v)} className="fd-row" onMouseEnter={() => setHover(v)} onMouseLeave={() => setHover(null)}>
+        <div key={refKey(v)} className="fd-row" onMouseEnter={() => setListHover([v])} onMouseLeave={() => setListHover(null)}>
           <label>{`${t('Vertex')} ${i + 1}`}</label>
           <div className="fd-control">
             <ExprInput
@@ -711,7 +712,7 @@ function VertexRadiiField() {
 function EdgePointsField() {
   const update = useEditor((s) => s.updateDraft);
   const draft = useEditor((s) => s.editing?.draft);
-  const setHover = useEditor((s) => s.setHover);
+  const setListHover = useEditor((s) => s.setListHover);
   if (draft?.type !== 'fillet') return null;
   const p = draft.params;
   const edges = p.pointEdges ?? [];
@@ -726,7 +727,7 @@ function EdgePointsField() {
   return (
     <>
       {edges.map((e, i) => (
-        <div key={refKey(e)} onMouseEnter={() => setHover(e)} onMouseLeave={() => setHover(null)}>
+        <div key={refKey(e)} onMouseEnter={() => setListHover([e])} onMouseLeave={() => setListHover(null)}>
           <div className="fd-row">
             <label>{`${t('Point')} ${i + 1}: ${t('position')}`}</label>
             <div className="fd-control">
@@ -792,6 +793,9 @@ export function FeatureDialog() {
   const cancel = useEditor((s) => s.cancelEditing);
   const update = useEditor((s) => s.updateDraft);
   const studio = useDoc((s) => activeStudio(s.doc));
+  // the dialog closed (or another one opened) with the pointer over one of its rows: that row no longer lights up
+  const openId = editing?.featureId;
+  useEffect(() => () => void (useEditor.getState().hoverList && useEditor.getState().setListHover(null)), [openId]);
   if (!editing || editing.draft.type === 'sketch') return null;
   const draft = editing.draft;
   // parameters set by the configuration: what is typed goes to the chosen configuration's cell

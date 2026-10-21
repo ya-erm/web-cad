@@ -161,6 +161,11 @@ export interface EditorState {
   /** Features under the pointer in the feature list (a folder: its features): the faces they made light up. */
   hoverFeatures: string[] | null;
   /**
+   * The items of a row under the pointer in a list (a dialog's selection field, its vertices, the instances…): they
+   * stand out in the graphics area, the other selected items fade — which of them the row is shows.
+   */
+  hoverList: SelRef[] | null;
+  /**
    * The model compared with a version on it (Onshape: Compare): its faces new or changed since the version (part id
    * → face indices) light up; the version's faces that are gone are drawn as a ghost (their triangles). Pending while
    * the version is being built.
@@ -215,6 +220,8 @@ export interface EditorState {
   setSelection(refs: SelRef[]): void;
   clearSelection(): void;
   setHover(ref: SelRef | null): void;
+  /** A row of a list under the pointer (`hoverList`), or none. */
+  setListHover(refs: SelRef[] | null): void;
 
   view(cmd: ViewCommand): void;
   showToast(text: string, kind?: 'info' | 'error'): void;
@@ -361,6 +368,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   selection: [],
   hover: null,
   hoverFeatures: null,
+  hoverList: null,
   compare: null,
   sketch: null,
   sketchPattern: null,
@@ -635,6 +643,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const h = get().hover;
     if (h === ref || (h && ref && sameRef(h, ref))) return;
     set({ hover: ref });
+  },
+
+  setListHover(refs) {
+    set({ hoverList: refs?.length ? refs : null, hover: refs?.[0] ?? null });
   },
 
   view(cmd) {

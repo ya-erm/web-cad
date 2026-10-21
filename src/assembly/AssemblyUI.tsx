@@ -203,8 +203,8 @@ function SubRows({ sub, path, depth, acting, open, toggle }: { sub: AssemblyTab;
               className={'tree-item' + (picked.has(id) ? ' selected' : '')}
               style={pad}
               onClick={(e) => (e.shiftKey || e.ctrlKey || e.metaKey ? ed().select(ref) : ed().setSelection([ref]))}
-              onMouseEnter={() => ed().setHover(ref)}
-              onMouseLeave={() => ed().setHover(null)}
+              onMouseEnter={() => ed().setListHover([ref])}
+              onMouseLeave={() => ed().setListHover(null)}
             >
               <span
                 className="tree-toggle"
@@ -342,8 +342,8 @@ export function InstanceList() {
                 className={'tree-item' + (selected.has(inst.id) ? ' selected' : '')}
                 title={`${inst.name} — ${studioName(inst.studioId)}${broken ? ` (${t('the source part no longer exists')})` : ''}`}
                 onClick={(e) => (e.shiftKey || e.ctrlKey || e.metaKey ? ed().select(ref) : ed().setSelection([ref]))}
-                onMouseEnter={() => ed().setHover(ref)}
-                onMouseLeave={() => ed().setHover(null)}
+                onMouseEnter={() => ed().setListHover([ref])}
+                onMouseLeave={() => ed().setListHover(null)}
                 onDoubleClick={() => {
                   setRenaming(inst.id);
                   setName(inst.name);
@@ -794,11 +794,21 @@ function endLabel(doc: CadDocument, asm: AssemblyTab, e: MateEnd | undefined): s
   return `${what} — ${inst?.name ?? '?'}`;
 }
 
+/** A mate end's face, edge or vertex as a selection of the graphics area (on its instance's part): to light it up. */
+function endRef(e: MateEnd | undefined): SelRef | null {
+  const c = e?.connector;
+  if (!e || !c || c.kind === 'connector') return null;
+  return { kind: c.kind, partId: e.instance, index: c.index, sig: { type: '', center: [0, 0, 0], size: 0 } };
+}
+
 export function MateDialog() {
   const draft = useMate((s) => s.draft);
   const doc = useDoc((s) => s.doc);
   const asm = activeAssembly(doc);
   const sources = useAssembly((s) => s.sources);
+  // closed with the pointer over one of its fields: that field's end no longer lights up
+  const open = !!draft;
+  useEffect(() => () => void (useEditor.getState().hoverList && useEditor.getState().setListHover(null)), [open]);
   // picks in the graphics area fill the first, then the second connector
   useEffect(() => {
     if (!draft) return;
@@ -910,7 +920,17 @@ export function MateDialog() {
         </div>
         <div className="fd-section">{faceMate ? t('Faces') : t('Mate connectors')}</div>
         {fields.map(([k, label]) => (
-          <div key={k} className={'sel-field' + (k === activeField ? ' active' : '')} onClick={() => set({ [k]: undefined, flipSet: false })}>
+          <div
+            key={k}
+            className={'sel-field' + (k === activeField ? ' active' : '')}
+            onClick={() => set({ [k]: undefined, flipSet: false })}
+            // its face / edge / vertex stands out in the graphics area
+            onMouseEnter={() => {
+              const r = endRef(draft[k]);
+              useEditor.getState().setListHover(r ? [r] : null);
+            }}
+            onMouseLeave={() => useEditor.getState().setListHover(null)}
+          >
             <div className="sel-label">{label}</div>
             {draft[k] ? (
               endLabel(doc, asm, draft[k])

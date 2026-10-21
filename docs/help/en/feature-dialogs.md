@@ -48,7 +48,7 @@ A selection field collects geometry: sketch regions, faces, edges, vertices, par
 - The active field is highlighted. An empty field reads **Click to select** or **Select in the graphics area**. Click another field to make it active.
 - Clicking a suitable entity in the graphics area adds it to the active field; clicking it again removes it. Unsuitable entities are not highlighted and cannot be selected.
 - Single-entity fields (axis, plane, direction) replace the selection with each new click.
-- Selected entities are shown as "chips". Hover over a chip to highlight the entity; the ✕ on a chip removes it. Many regions of the same sketch are collected into one "… × N" chip.
+- Selected entities are shown as "chips". Hover over a chip and its entity stands out in the graphics area, brighter and thicker, while the other selected entities fade — so you can tell which edge or face it is even when the chips read the same ("Edge — Part 5"). The ✕ on a chip removes it. Three or more identical chips are collected into one "… × N" chip; hovering it highlights all of its entities. The vertex and edge lists of a [variable fillet](fillet), the ends in [mate](assembly-mates) fields and the rows of an assembly's instance list highlight the same way.
 - If the field needs a part rather than a face, click any face or edge of that part — or the part's row in the [**Parts** list](parts). Planes and the origin can likewise be selected by clicking their rows in the [feature list](feature-list).
 - When a choice opens a new empty field (**End type: Up to face**, the **Merge with all** checkbox cleared), that field becomes active right away — just click a face or a part.
 
