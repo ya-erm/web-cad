@@ -177,9 +177,13 @@ function instanceEntities(p: SkPattern, map: EntityMap, inst: PatternInstance, s
       case 'text':
         out.push(pt(e.p1, owner), pt(e.p2, owner), { id: owner, type: 'text', text: e.text, font: e.font, p1: cid(e.p1), p2: cid(e.p2), ...cons });
         break;
-      case 'gear':
-        out.push(pt(e.c, owner), { id: owner, type: 'gear', teeth: e.teeth, sizeBy: e.sizeBy, size: e.size, pressureAngle: e.pressureAngle, rotation: e.rotation, c: cid(e.c), ...cons });
+      case 'gear': {
+        // meshing with a gear of the seed: with its copy in this instance (planets about a sun: with the sun itself)
+        const mesh = e.meshWith ? { meshWith: p.seed.includes(e.meshWith) ? cid(e.meshWith) : e.meshWith } : {};
+        const backlash = e.backlash ? { backlash: e.backlash } : {};
+        out.push(pt(e.c, owner), { id: owner, type: 'gear', teeth: e.teeth, sizeBy: e.sizeBy, size: e.size, pressureAngle: e.pressureAngle, rotation: e.rotation, c: cid(e.c), ...backlash, ...mesh, ...cons });
         break;
+      }
     }
   }
   return out;

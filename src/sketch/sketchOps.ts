@@ -5,6 +5,7 @@ import { uid } from '../core/ids';
 import { arcAngles, entityMap, intersectEntities, naturalHandles, pointOf, type EntityMap } from './curves';
 import { cleanPatterns, copyId, isCopyId, parseCopyId } from './patterns';
 import { frozenValues } from './solver';
+import { hasTextBox, isTextBox, TEXT_SIDES, textAspect, textBoxCorners, textBoxLines, textSideEnds, type TextSide } from './text';
 
 export type Snap =
   | { kind: 'point'; id: string; pos: Vec2 }
@@ -143,12 +144,8 @@ export function addBezier(d: SketchData, p0: Vec2, c1: Vec2, c2: Vec2, p3: Vec2,
   return { ...s, h0, h1 };
 }
 
-/**
- * A line of text (Onshape Text) from the start of its baseline `p1`; `p2` is the top of its box's left side —
- * |p2 − p1| is the height of its capital letters, and the text runs square to p1 → p2, to its right.
- */
-/** The parameters of a gear (expressions) and their defaults: 20 teeth of module 1 mm, 20° pressure angle. */
-export type GearParamsOf = Pick<SkGear, 'teeth' | 'sizeBy' | 'size' | 'pressureAngle' | 'rotation'>;
+/** The parameters of a gear (expressions) and their defaults: 20 teeth of module 1 mm, 20° pressure angle, no backlash. */
+export type GearParamsOf = Pick<SkGear, 'teeth' | 'sizeBy' | 'size' | 'pressureAngle' | 'rotation' | 'backlash' | 'meshWith'>;
 export const DEFAULT_GEAR: GearParamsOf = { teeth: '20', sizeBy: 'module', size: '1 mm', pressureAngle: '20 deg', rotation: '0 deg' };
 
 /** A spur gear about `c` (its centre point is its own). */
@@ -156,11 +153,18 @@ export function addGear(d: SketchData, c: Vec2, params: GearParamsOf = DEFAULT_G
   const id = uid('g');
   const cp = addPoint(d, c, id);
   const e: SkGear = { id, type: 'gear', c: cp, ...params };
+  if (!e.backlash) delete e.backlash;
+  if (!e.meshWith) delete e.meshWith;
   if (construction) e.construction = true;
   d.entities.push(e);
   return { id, c: cp };
 }
 
+/**
+ * A line of text (Onshape Text) from the start of its baseline `p1`; `p2` is the top of its box's left side —
+ * |p2 − p1| is the height of its capital letters, and the text runs square to p1 → p2, to its right. Its box: the
+ * other two corners and the four sides (construction lines it owns: bottom, right, top, left).
+ */
 export function addText(d: SketchData, p1: Vec2, p2: Vec2, text: string, font: SkFont = 'sans', construction = false) {
   const id = uid('t');
   const a = addPoint(d, p1, id);
@@ -168,7 +172,46 @@ export function addText(d: SketchData, p1: Vec2, p2: Vec2, text: string, font: S
   const e: SkText = { id, type: 'text', text, font, p1: a, p2: b };
   if (construction) e.construction = true;
   d.entities.push(e);
-  return { id, p1: a, p2: b };
+  return { id, p1: a, p2: b, ...addTextBox(d, e) };
+}
+
+/** The box of a text that has none (made before boxes were real): its corners and sides where the derived box was. */
+function addTextBox(d: SketchData, t: SkText): { p3: string; p4: string; lines: Record<TextSide, string> } {
+  const map = entityMap(d.entities);
+  const { p3, p4 } = textBoxCorners(pointOf(map, t.p1), pointOf(map, t.p2), textAspect(t.text, t.font));
+  t.p3 = addPoint(d, p3, t.id);
+  t.p4 = addPoint(d, p4, t.id);
+  const lines = {} as Record<TextSide, string>;
+  for (const side of TEXT_SIDES) {
+    const [a, b] = textSideEnds(t as SkText & { p3: string; p4: string }, side);
+    lines[side] = uid('l');
+    d.entities.push({ id: lines[side], type: 'line', p1: a, p2: b, construction: true, owner: t.id });
+  }
+  return { p3: t.p3, p4: t.p4, lines };
+}
+
+/**
+ * The driving dimensions that size a text: its height — a side of its box (left / right) or that side's two points,
+ * its width — the baseline or the top, or their two points.
+ */
+export function textSizeDims(d: SketchData, t: SkText): { height?: SkConstraint; width?: SkConstraint } {
+  const out: { height?: SkConstraint; width?: SkConstraint } = {};
+  const lines = textBoxLines(d.entities, t);
+  const pair = (c: SkConstraint, a?: string, b?: string) => !!a && !!b && c.refs.length === 2 && c.refs.includes(a) && c.refs.includes(b);
+  for (const c of d.constraints) {
+    if (c.type !== 'distance' || c.driven) continue;
+    const one = c.refs.length === 1 ? c.refs[0] : undefined;
+    if ((one && (one === lines.left || one === lines.right)) || pair(c, t.p1, t.p2) || pair(c, t.p3, t.p4)) out.height ??= c;
+    else if ((one && (one === lines.bottom || one === lines.top)) || pair(c, t.p1, t.p3) || pair(c, t.p2, t.p4)) out.width ??= c;
+  }
+  return out;
+}
+
+/** Texts of a sketch made before their boxes were real get theirs (constraints to their own points stay). */
+export function upgradeTexts(d: SketchData): number {
+  const old = d.entities.filter((e): e is SkText => e.type === 'text' && !hasTextBox(e));
+  for (const t of old) addTextBox(d, t);
+  return old.length;
 }
 
 /**
@@ -313,16 +356,22 @@ export function onCcwArc(c: Vec2, a: Vec2, b: Vec2, m: Vec2) {
 // Deletion
 // ---------------------------------------------------------------------------
 
-/** Ids of entities that will be removed together with `ids` (owned points). */
+/** The entity that owns another (a curve its points, a text its points and box), if any. */
+const ownerOf = (e: SkEntity | undefined): string | undefined => (e && (e.type === 'point' || e.type === 'line') ? e.owner : undefined);
+
+/** Ids of entities that will be removed together with `ids` (owned points, the box of a text). */
 export function withOwned(d: SketchData, ids: string[]): Set<string> {
   const set = new Set(ids);
-  for (const e of d.entities) if (e.type === 'point' && e.owner && set.has(e.owner)) set.add(e.id);
-  // deleting an owned point alone deletes its owner
+  for (const e of d.entities) {
+    const o = ownerOf(e);
+    if (o && set.has(o)) set.add(e.id);
+  }
+  // deleting an owned point (a side of a text's box) alone deletes its owner
   for (const id of [...set]) {
-    const e = d.entities.find((x) => x.id === id);
-    if (e && e.type === 'point' && e.owner && !set.has(e.owner)) {
-      set.add(e.owner);
-      for (const x of d.entities) if (x.type === 'point' && x.owner === e.owner) set.add(x.id);
+    const o = ownerOf(d.entities.find((x) => x.id === id));
+    if (o && !set.has(o)) {
+      set.add(o);
+      for (const x of d.entities) if (ownerOf(x) === o) set.add(x.id);
     }
   }
   return set;
@@ -378,7 +427,8 @@ export function deleteItems(d: SketchData, ids: string[]) {
 
 export function toggleConstruction(d: SketchData, ids: string[]) {
   const set = new Set(ids);
-  const targets = d.entities.filter((e) => set.has(e.id) && e.type !== 'point');
+  // the box of a text stays construction
+  const targets = d.entities.filter((e) => set.has(e.id) && e.type !== 'point' && !isTextBox(e));
   const make = targets.some((e) => !e.construction);
   for (const e of targets) {
     if (make) e.construction = true;
@@ -414,7 +464,8 @@ function linesAtPoint(d: SketchData, map: EntityMap, pid: string): { line: SkLin
 export function filletCorner(d: SketchData, pid: string, r: number): string | null {
   const map = entityMap(d.entities);
   const ls = linesAtPoint(d, map, pid);
-  if (ls.length !== 2) return null;
+  // the corners of a text's box stay square
+  if (ls.length !== 2 || ls.some((l) => isTextBox(l.line))) return null;
   const [A, B] = ls;
   const V = pointOf(map, A.line[A.end]);
   const otherA = pointOf(map, A.line[A.end === 'p1' ? 'p2' : 'p1']);
@@ -465,7 +516,7 @@ function norm2(v: Vec2): Vec2 {
 export function trimEntity(d: SketchData, id: string, at: Vec2): boolean {
   const map = entityMap(d.entities);
   const ent = map.get(id);
-  if (!ent || ent.type === 'point') return false;
+  if (!ent || ent.type === 'point' || isTextBox(ent)) return false;
   const others = d.entities.filter((e) => e.id !== id && e.type !== 'point');
   const hits: Vec2[] = [];
   for (const o of others) {
@@ -605,7 +656,8 @@ export function splitEntity(d: SketchData, id: string, at: Vec2): string | null 
   const moveEnd = (from: string, to: string) => {
     for (const c of d.constraints) c.refs = c.refs.map((r) => (r === from ? to : r));
   };
-  if (ent?.type === 'line') {
+  // (not a side of a text's box)
+  if (ent?.type === 'line' && !ent.owner) {
     const a = pointOf(map, ent.p1);
     const b = pointOf(map, ent.p2);
     const L2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
@@ -720,11 +772,12 @@ export function constraintAnchors(c: SkConstraint, map: EntityMap): SkEntity[] {
 // Copy / mirror / patterns
 // ---------------------------------------------------------------------------
 
-/** Curve entities and standalone points among `ids` (owned points are implied). */
+/** Curve entities and standalone points among `ids` (owned points are implied; a side of a text's box stands for it). */
 export function patternableIds(d: SketchData, ids: string[]): string[] {
   const set = new Set(ids);
+  for (const e of d.entities) if (set.has(e.id) && e.type === 'line' && e.owner) set.add(e.owner);
   return d.entities
-    .filter((e) => set.has(e.id) && (e.type !== 'point' || !e.owner))
+    .filter((e) => set.has(e.id) && (e.type !== 'point' || !e.owner) && !isTextBox(e))
     .map((e) => e.id);
 }
 
@@ -797,17 +850,31 @@ export function copyEntities(
         break;
       }
       case 'text': {
-        const t = addText(d, xf(P(e.p1)), xf(P(e.p2)), e.text, e.font, cons);
-        map.set(e.id, t.id).set(e.p1, t.p1).set(e.p2, t.p2);
+        // a mirror image still reads the same way: in the image of its box, its left side the image of the right one
+        const swap = !!opts.mirror && hasTextBox(e);
+        const t = swap ? addText(d, xf(P(e.p3!)), xf(P(e.p4!)), e.text, e.font, cons) : addText(d, xf(P(e.p1)), xf(P(e.p2)), e.text, e.font, cons);
+        map.set(e.id, t.id);
+        if (swap) map.set(e.p1, t.p3).set(e.p2, t.p4).set(e.p3!, t.p1).set(e.p4!, t.p2);
+        else {
+          map.set(e.p1, t.p1).set(e.p2, t.p2);
+          if (hasTextBox(e)) map.set(e.p3, t.p3).set(e.p4, t.p4);
+        }
+        const sides = textBoxLines(d.entities, e);
+        const image = (s: TextSide): TextSide => (!swap ? s : s === 'left' ? 'right' : s === 'right' ? 'left' : s);
+        for (const side of TEXT_SIDES) if (sides[side]) map.set(sides[side]!, t.lines[image(side)]);
         break;
       }
       case 'gear': {
-        const g = addGear(d, xf(P(e.c)), { teeth: e.teeth, sizeBy: e.sizeBy, size: e.size, pressureAngle: e.pressureAngle, rotation: e.rotation }, cons);
+        // meshing with a gear copied along: with its copy (see below)
+        const { teeth, sizeBy, size, pressureAngle, rotation, backlash, meshWith } = e;
+        const g = addGear(d, xf(P(e.c)), { teeth, sizeBy, size, pressureAngle, rotation, backlash, meshWith }, cons);
         map.set(e.id, g.id).set(e.c, g.c);
         break;
       }
     }
   }
+  // a pair of gears copied stays a pair: the copy meshes with the copy
+  for (const e of d.entities) if (e.type === 'gear' && e.meshWith && !byId.has(e.id) && map.has(e.meshWith)) e.meshWith = map.get(e.meshWith);
   if (opts.copyConstraints) {
     const snapshot = [...d.constraints];
     // rotated copies can't keep orientation-dependent constraints (H/V, horizontal/vertical dimensions)
@@ -850,10 +917,18 @@ export function mirrorEntities(d: SketchData, ids: string[], axisId: string): bo
   const roots = patternableIds(d, ids).filter((id) => id !== axisId);
   if (!roots.length) return false;
   const map = copyEntities(d, roots, reflectAcross([pa.x, pa.y], [pb.x, pb.y]), { mirror: true });
+  // a text's box: its left side held symmetric to the image's right one, each as wide as its own string — all four
+  // corners held would make the boxes the same, and a string (font) of another width would leave them no size at all
+  const free = new Set(
+    roots.flatMap((id) => {
+      const e = byId.get(id);
+      return e?.type === 'text' && hasTextBox(e) ? [e.p3!, e.p4!] : [];
+    }),
+  );
   for (const [oldId, newId] of map) {
     const e = byId.get(oldId);
     if (!e) continue;
-    if (e.type === 'point') addConstraint(d, 'symmetric', [oldId, newId, axisId]);
+    if (e.type === 'point' && !free.has(oldId)) addConstraint(d, 'symmetric', [oldId, newId, axisId]);
     else if (e.type === 'circle') addConstraint(d, 'equal', [oldId, newId]);
   }
   return true;

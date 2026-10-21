@@ -171,15 +171,62 @@ export function textFrame(t: SkText, map: EntityMap): { o: Vec2; right: Vec2; up
   return { o, right: [up[1], -up[0]], up, h };
 }
 
+/**
+ * Width of a text's box to its height (the capital letters): its advance in the font. Before the font is there —
+ * about 0.6 per letter; an empty text keeps the box of one letter.
+ */
+export function textAspect(text: string, font: SkFont): number {
+  if (!text) return 0.6;
+  const lay = layoutText(font, text);
+  return Math.max(lay ? lay.width / lay.cap : 0.6 * text.length, 1e-3);
+}
+
 /** Width of the text's box (its advance), in sketch units; a fallback before the font is there. */
 export function textWidth(t: SkText, map: EntityMap): number {
   const fr = textFrame(t, map);
-  if (!fr) return 0;
-  const lay = layoutText(t.font, t.text);
-  return lay ? (lay.width * fr.h) / lay.cap : fr.h * 0.6 * t.text.length;
+  return fr ? fr.h * textAspect(t.text, t.font) : 0;
 }
 
-/** The letters of a text and its box (construction): derived sketch entities. */
+/** The other corners of a text's box from its own two (`p1` — the start of the baseline, `p2` — the top left). */
+export function textBoxCorners(p1: Vec2, p2: Vec2, aspect: number): { p3: Vec2; p4: Vec2 } {
+  // the baseline runs square to p1 → p2, to its right: (dx, dy) turned a quarter clockwise
+  const p3: Vec2 = [p1[0] + aspect * (p2[1] - p1[1]), p1[1] - aspect * (p2[0] - p1[0])];
+  return { p3, p4: [p2[0] + p3[0] - p1[0], p2[1] + p3[1] - p1[1]] };
+}
+
+/** The sides of a text's box: its baseline, right side, top and left side (as point ids, from — to). */
+export type TextSide = 'bottom' | 'right' | 'top' | 'left';
+export const TEXT_SIDES: TextSide[] = ['bottom', 'right', 'top', 'left'];
+
+export function textSideEnds(t: SkText & { p3: string; p4: string }, side: TextSide): [string, string] {
+  return side === 'bottom' ? [t.p1, t.p3] : side === 'right' ? [t.p3, t.p4] : side === 'top' ? [t.p4, t.p2] : [t.p2, t.p1];
+}
+
+/** Whether a text has its own box (`p3`, `p4` and the sides), not a derived one. */
+export function hasTextBox(t: SkText): t is SkText & { p3: string; p4: string } {
+  return !!t.p3 && !!t.p4;
+}
+
+/** A side of a text's box: a construction line the text owns. */
+export function isTextBox(e: SkEntity): boolean {
+  return e.type === 'line' && !!e.owner;
+}
+
+/** The lines of a text's box by side (those that are there). */
+export function textBoxLines(entities: Iterable<SkEntity>, t: SkText): Partial<Record<TextSide, string>> {
+  const out: Partial<Record<TextSide, string>> = {};
+  if (!hasTextBox(t)) return out;
+  for (const e of entities) {
+    if (e.type !== 'line' || e.owner !== t.id) continue;
+    for (const side of TEXT_SIDES) {
+      const [a, b] = textSideEnds(t, side);
+      if ((e.p1 === a && e.p2 === b) || (e.p1 === b && e.p2 === a)) out[side] ??= e.id;
+    }
+  }
+  return out;
+}
+
+/** The letters of a text and, when it has no box of its own, its box (construction): derived sketch entities. */
 export function textGeometry(t: SkText, map: EntityMap): SkEntity[] {
   const fr = textFrame(t, map);
   if (!fr) return [];
@@ -192,17 +239,19 @@ export function textGeometry(t: SkText, map: EntityMap): SkEntity[] {
     out.push({ id, type: 'point', x: p[0], y: p[1], owner: t.id });
     return id;
   };
-  // the box: baseline, right side, top (the left side runs between the text's own points)
-  const w = textWidth(t, map);
-  const br = point('b1', [fr.o[0] + fr.right[0] * w, fr.o[1] + fr.right[1] * w]);
-  const tr = point('b2', [fr.o[0] + (fr.right[0] * w + fr.up[0] * fr.h), fr.o[1] + (fr.right[1] * w + fr.up[1] * fr.h)]);
-  const sides: [string, string, string][] = [
-    ['box0', t.p1, br],
-    ['box1', br, tr],
-    ['box2', tr, t.p2],
-    ['box3', t.p2, t.p1],
-  ];
-  for (const [k, a, b] of sides) out.push({ id: textPartId(t.id, k), type: 'line', p1: a, p2: b, construction: true });
+  // the box (an old text, a pattern copy): baseline, right side, top (the left side runs between its own points)
+  if (!(hasTextBox(t) && map.has(t.p3) && map.has(t.p4))) {
+    const { p3, p4 } = textBoxCorners(fr.o, pointOf(map, t.p2), textAspect(t.text, t.font));
+    const br = point('b1', p3);
+    const tr = point('b2', p4);
+    const sides: [string, string, string][] = [
+      ['box0', t.p1, br],
+      ['box1', br, tr],
+      ['box2', tr, t.p2],
+      ['box3', t.p2, t.p1],
+    ];
+    for (const [k, a, b] of sides) out.push({ id: textPartId(t.id, k), type: 'line', p1: a, p2: b, construction: true });
+  }
   if (!lay) return out;
   const cons = t.construction ? { construction: true as const } : {};
   lay.glyphs.forEach((contours, gi) =>

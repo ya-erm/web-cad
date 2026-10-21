@@ -317,6 +317,30 @@ describe('agent API', () => {
     expect(bad.error).toMatch(/6 to 400 teeth/);
   }, 120000);
 
+  it('draws a pair of meshing gears with backlash: two parts that do not touch', async () => {
+    const s = await session();
+    const r = await s.run([
+      {
+        op: 'sketch',
+        name: 'Pair',
+        shapes: [
+          { type: 'gear', teeth: 12, module: 1, backlash: 0.2 },
+          { type: 'gear', teeth: 20, module: 1, backlash: 0.2, c: [16, 0], mesh: true },
+        ],
+      },
+      { op: 'extrude', sketch: 'Pair', depth: 5 },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.model!.parts.length).toBe(2);
+    // the second gear meshes with the first
+    const tab = s.doc.tabs.find((t) => 'features' in t) as { features: { name: string; params: unknown }[] };
+    const sketch = tab.features.find((f) => f.name === 'Pair')!.params as { entities: { type: string; id: string; meshWith?: string }[] };
+    const [g1, g2] = sketch.entities.filter((e) => e.type === 'gear');
+    expect(g2.meshWith).toBe(g1.id);
+    const bad = await s.run([{ op: 'sketch', shapes: [{ type: 'gear', teeth: 20, module: 1, mesh: true }] }]);
+    expect(bad.error).toMatch(/"mesh" needs a gear/);
+  }, 120000);
+
   it('makes exploded views of an assembly and animates its mates as a query', async () => {
     const s = await session();
     const r = await s.run([

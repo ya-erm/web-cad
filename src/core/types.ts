@@ -31,6 +31,8 @@ export interface SkLine extends SkEntityBase {
   type: 'line';
   p1: string;
   p2: string;
+  /** A side of a text's box (construction): the text it belongs to — it goes with the text. */
+  owner?: string;
 }
 
 export interface SkCircle extends SkEntityBase {
@@ -77,7 +79,12 @@ export type SkFont = 'sans' | 'sansBold' | 'mono';
 /**
  * Onshape Text: a line of text laid out from `p1` (the start of its baseline) along the direction square to
  * p1 → p2 (to its right); |p2 − p1| is the height of its capital letters. The glyph outlines are derived
- * geometry (lines and Bézier spans, like pattern copies) — they make regions; the solver sees only the two points.
+ * geometry (lines and Bézier spans, like pattern copies) — they make regions; the solver never sees them.
+ *
+ * Its box is real geometry: `p3` ends the baseline, `p4` is the top right corner, and its sides are construction
+ * lines owned by the text (`owner`) — they take constraints and dimensions like any line. The solver keeps the box
+ * a rectangle as wide as the text in its font (the width follows the height and the other way round). Texts made
+ * before that (and pattern copies) have only p1 and p2: their box is derived.
  */
 export interface SkText extends SkEntityBase {
   type: 'text';
@@ -85,6 +92,8 @@ export interface SkText extends SkEntityBase {
   font: SkFont;
   p1: string;
   p2: string;
+  p3?: string;
+  p4?: string;
 }
 
 /**
@@ -101,8 +110,12 @@ export interface SkGear extends SkEntityBase {
   sizeBy: 'module' | 'outerDiameter' | 'pitchDiameter';
   size: string;
   pressureAngle: string;
-  /** The first tooth's direction from the sketch's X axis. */
+  /** The first tooth's direction from the sketch's X axis (unless it meshes with another gear). */
   rotation: string;
+  /** The backlash of a pair of gears with it (a length; none — 0): each tooth is thinner by half of it. */
+  backlash?: string;
+  /** The gear of the sketch it meshes with: its rotation then puts its teeth in that gear's gaps (and follows it). */
+  meshWith?: string;
 }
 
 export type SkEntity = SkPoint | SkLine | SkCircle | SkArc | SkEllipse | SkSpline | SkText | SkGear;
@@ -110,7 +123,7 @@ export type SkCurve = SkLine | SkCircle | SkArc | SkEllipse | SkSpline;
 
 export type ConstraintType =
   // geometric
-  | 'coincident' // [point, point] or [point, curve] (point on curve)
+  | 'coincident' // [point, point] or [point, curve] (point on curve) or [line, line] (collinear)
   | 'horizontal' // [line] or [point, point]
   | 'vertical' // [line] or [point, point]
   | 'parallel' // [line, line]

@@ -138,11 +138,19 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 {"type":"polygon", "c":[0,0], "r":10, "sides":6, "rotation":90}   // r — окружность через вершины, 3…50 сторон
 {"type":"polygon", "c":[0,0], "r":"6.5 mm", "sides":6, "inscribed":true}   // окружность касается сторон: «под ключ» 13 мм
 {"type":"text", "text":"WebCAD", "at":[0,0], "height":10, "font":"sansBold", "rotation":0}   // строка от начала базовой линии, height — высота прописных; шрифты sans (Inter), sansBold, mono (JetBrains Mono); буквы — области (regions "auto" — без внутренних просветов «О»)
+{"type":"text", "text":"WebCAD", "at":[0,5], "width":"60 mm", "align":"center"}   // вместо height — ширина рамки (высота по шрифту; строка → размер нижней стороны рамки);
+                                        // align: где at на базовой линии — left (начало, по умолчанию), center, right
 {"type":"point", "at":[15,15]}          // для отверстий
 {"type":"gear", "c":[0,0], "teeth":"#z", "outerDiameter":"#d"}   // шестерня: эвольвентные зубья — один зуб в круговом массиве;
-                                        // размер — module / outerDiameter / pitchDiameter (одно), pressureAngle (20°), rotation;
+                                        // размер — module / outerDiameter / pitchDiameter (одно), pressureAngle (20°), rotation,
+                                        // backlash — люфт пары (каждый зуб тоньше на половину); "mesh":true — зацепление с
+                                        // предыдущей шестернёй эскиза (поворот считается сам и следует за ней);
                                         // выражения остаются живыми: смена #z перестраивает зубья. Её область — шестерня
 ```
+
+Пара шестерён для печати: `{"op":"sketch","name":"Pair","shapes":[{"type":"gear","teeth":12,"module":1,"backlash":0.2},`
+`{"type":"gear","teeth":20,"module":1,"backlash":0.2,"c":[16,0],"mesh":true}]}` — межосевое (z₁ + z₂)·m / 2 = 16 мм,
+зубья второй во впадинах первой; выдавливание даёт две детали с зазором 0,2 мм.
 
 Шестерня целиком параметрическая: `[{"op":"variable","name":"z","value":12,"type":"number"},`
 `{"op":"variable","name":"w","value":6},{"op":"sketch","name":"Gear","shapes":[{"type":"gear","teeth":"#z","outerDiameter":12}]},`

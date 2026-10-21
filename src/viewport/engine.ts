@@ -9,7 +9,7 @@ import { STD_PLANES, frameFromNormal, toWorld, v3 } from '../core/math';
 import { adaptRef, FIELD_SPECS, type SelToken } from '../core/fieldSpecs';
 import { computeRegions, type SketchRegion } from '../sketch/regions';
 import { arcAngles, entityMap, pointOf } from '../sketch/curves';
-import { isTextPart } from '../sketch/text';
+import { isTextBox, isTextPart } from '../sketch/text';
 import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
 import type { BuildResult, PartMesh, SketchResult, ThreadResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
@@ -985,7 +985,7 @@ export class Engine {
         continue;
       }
       // a text's box is for editing the sketch only
-      if (e.construction && isTextPart(e.id)) continue;
+      if ((e.construction && isTextPart(e.id)) || isTextBox(e)) continue;
       const poly = entityPolyline(e, map);
       const segs = polylineSegments(poly);
       (e.construction ? constr : normal).push(...segs);
@@ -1452,7 +1452,7 @@ export class Engine {
           if (!e.owner) pts.push([e.x, e.y]);
           continue;
         }
-        if (e.construction && isTextPart(e.id)) continue;
+        if ((e.construction && isTextPart(e.id)) || isTextBox(e)) continue;
         (e.construction ? constr : lines).push(...polylineSegments(entityPolyline(e, map)));
       }
       const g = new THREE.Group();

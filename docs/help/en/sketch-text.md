@@ -16,7 +16,7 @@ width: 600
 1. In a sketch, click **Text**.
 2. Click the start of the baseline — the lower left corner of the text box.
 3. Click a second time above (or below) it: the vertical distance is the **height of the capital letters**. While you move the cursor, the box and the letters are shown.
-4. The sketch dialog shows the **Text** field (the cursor is already in it) and **Font**. Type the line and press `Enter`.
+4. The sketch dialog shows a **Text** section: the line's field (the cursor is already in it), **Font**, **Height** and **Width**. Type the line and press `Enter`.
 
 ## Fonts {#fonts}
 
@@ -30,13 +30,16 @@ All three have Latin, Cyrillic, digits and signs. The fonts come with the app an
 
 ## Position, size and rotation {#placement}
 
-A text has two points of its own: the start of its baseline and the top of its box's left side. The distance between them is the height of the capitals, and the line runs square to that side, to its right.
+A text sits in a box (dash-dotted). Its corners are the text's points: the lower left is the start of the baseline, the upper left the top of the capitals, the right ones the end of the line. The sides of the box are construction lines of the sketch: [constraints](sketch-constraints) and [dimensions](sketch-dimensions) work on them as on any line. The box is always a rectangle exactly as wide as the line in its font, so its height and width go together: set one and the other follows from the font.
 
-- Drag the text by its letters to move it whole. Drag the top point to turn and scale it.
-- A **Distance** [dimension](sketch-dimensions) between the two points sets the letter height; [coincident and vertical constraints](sketch-constraints) pin the text down and straighten it.
-- To change the line or the font, select the text (click any letter): **Text** and **Font** appear in the sketch dialog.
+- **Size.** Select the text (click any letter or a side of its box): the sketch dialog shows **Height** and **Width**. A grey value follows from the font; a value you type becomes a sketch dimension (on the left side of the box or on its bottom) that sizes the text, and a dimension of the other side is removed. The [Dimension](dimension-distance) tool dimensions the sides too: the bottom side is the width of the text, the left side its height. A dimension of the other side made with it while one sizes the text becomes a reference dimension (grey, in parentheses): only one of them sizes the text.
+- **Lining up with a line.** Select the bottom side of the box and a line, and click [Coincident](constraint-coincident) (`I`): the text stands on the line. [Parallel](constraint-parallel) turns the text along a line, [Horizontal](constraint-horizontal) and [Vertical](constraint-vertical) straighten it, a corner coincident with a point pins it down, and [Midpoint](constraint-midpoint) of a point and the bottom side puts the point under the middle of the line.
+- **Dragging.** By its letters, the text moves whole. By a corner of its box, it turns and scales about the start of its baseline (by that corner itself, about the upper left one); when its constraints keep it from turning or scaling, it moves instead. By a side, it moves.
+- **A new line or font** changes the width of the box from the start of the line, the height stays. When a dimension holds the width, the height changes instead: a longer line gets smaller, and its start stays where it is.
 
-The text box (dashed) is shown only while the sketch is edited.
+At the bottom of the **Text** section, a summary: the size of the box, the number of characters, whether the text is fully defined and what sets its size.
+
+The box is shown only while the sketch is edited. Deleting a side of the box deletes the whole text; the sides are always construction lines — they cannot be trimmed, split, extended or filleted at a corner.
 
 ## Extruding the letters {#extrude}
 
@@ -48,7 +51,8 @@ The text box (dashed) is shown only while the sketch is edited.
 
 - A text is one line; line breaks are not supported.
 - The letters are derived geometry: a single curve of a letter cannot be changed, trimmed or dimensioned. It can be picked in 3D by features that take curves (paths, say).
-- Sketch [patterns](sketch-pattern) and [transforms](sketch-transform) work on texts too.
+- Sketch [patterns](sketch-pattern) and [transforms](sketch-transform) work on texts too. A mirror copy reads the same way as the text and stands in the mirror image of its box.
+- A text made in an earlier version (with two points) builds as before and gets its box the first time the sketch is opened.
 
 ## See also {#see-also}
 

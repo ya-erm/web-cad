@@ -699,17 +699,34 @@ textarea {
 .save-state-fixed > span.off {
   visibility: hidden;
 }
-/* the selected gear's parameters in the sketch dialog: spaced as the dialog's own rows */
-.gear-props {
+/* the selected gear's (text's) parameters in the sketch dialog: spaced as the dialog's own rows */
+.gear-props,
+.text-props {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.fd-section.gear-props-title {
+.fd-section.gear-props-title,
+.fd-section.text-props-title {
   flex-direction: row;
   align-items: center;
   gap: 6px;
   font-weight: 600;
+}
+/* a gear's pair: the centre distance, a button that sets it */
+.gear-pair {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.gear-pair .btn {
+  flex-shrink: 0;
+}
+/* a size of the text that follows from the font (no dimension sets it) */
+.text-size-free .expr-field input[type='text'] {
+  color: var(--text-3);
 }
 /* error boundaries: a panel's card in its place, the whole page's message */
 .error-card {

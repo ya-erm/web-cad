@@ -24,7 +24,7 @@ width: 600
 
 | Constraint | Shortcut | What to select |
 |---|---|---|
-| [Coincident](constraint-coincident) | `I` | Two or more points; or a point and a curve |
+| [Coincident](constraint-coincident) | `I` | Two or more points; or a point and a curve; or lines (onto one line) |
 | [Concentric](constraint-concentric) | `Shift+O` | Two circles, arcs or ellipses; or a point and a circle |
 | [Parallel](constraint-parallel) | `B` | Two or more lines |
 | [Tangent](constraint-tangent) | `T` | A line and a circle/arc, or two circles/arcs |

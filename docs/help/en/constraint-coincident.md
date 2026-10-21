@@ -1,6 +1,6 @@
 # Coincident
 
-Makes points coincide or places a point on a curve.
+Makes points coincide, places a point on a curve, or puts lines on one line.
 
 **Sketch toolbar:** **Coincident** · **Shortcut:** `I`
 
@@ -17,14 +17,16 @@ width: 600
 |---|---|
 | Two or more points (line endpoints, centers, standalone points) | All points coincide with the first one selected. |
 | Exactly one point and one curve (line, circle, arc, ellipse) | The point lies on the curve. |
+| Two or more lines | All the lines lie on the line of the first one selected (collinear). This is how a [text](sketch-text) is set on a line, say — by the bottom side of its box. |
 
-Any other combination shows the message "Select points (and optionally one curve)".
+Any other combination shows the message "Select points (and optionally one curve), or lines".
 
 ## How it works {#how}
 
 - **Point to point:** the points merge into one and share the same coordinates. Both points move, roughly toward each other; if one of them is fixed or fully defined, the other moves to it.
 - **Point on a line:** the point lies on the infinite line through the segment, including its extension beyond the segment's endpoints.
 - **Point on a circle or arc:** the point is at a radius distance from the center, that is, on the full circle (for an arc, possibly beyond its endpoints).
+- **Line on a line:** both ends of the second line lie on the infinite line through the first; the segments need not overlap — drag them or add other constraints to slide them along it.
 
 ## Created automatically {#auto}
 

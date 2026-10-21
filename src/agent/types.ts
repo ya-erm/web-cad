@@ -91,16 +91,32 @@ export type Shape =
   | { type: 'polygon'; c?: Pt2; r: Num; sides: number; rotation?: number; inscribed?: boolean; construction?: boolean }
   | { type: 'point'; at: Pt2 }
   /**
-   * A line of text (Onshape Text): its baseline from `at` (default the origin), capital letters `height` tall,
-   * turned by `rotation` degrees; fonts: `sans` (Inter, default), `sansBold` (Inter SemiBold), `mono` (JetBrains Mono).
-   * Its letters are regions: `regions: "auto"` takes the letters without their counters (the inside of "O").
+   * A line of text (Onshape Text): its baseline from `at` (default the origin), capital letters `height` tall — or
+   * `width` wide (its box: the height follows from the font; one of the two, a string becomes a driving dimension
+   * of that side of its box), turned by `rotation` degrees; `align`: where `at` is on the baseline — its start
+   * (`left`, default), middle (`center`) or end (`right`). Fonts: `sans` (Inter, default), `sansBold` (Inter
+   * SemiBold), `mono` (JetBrains Mono). Its letters are regions: `regions: "auto"` takes the letters without their
+   * counters (the inside of "O").
    */
-  | { type: 'text'; text: string; at?: Pt2; height: Num; rotation?: number; font?: SkFont; construction?: boolean }
+  | {
+      type: 'text';
+      text: string;
+      at?: Pt2;
+      height?: Num;
+      width?: Num;
+      align?: 'left' | 'center' | 'right';
+      rotation?: number;
+      font?: SkFont;
+      construction?: boolean;
+    }
   /**
    * A spur gear (Onshape Spur gear) about `c` (default the origin): involute teeth — one tooth arrayed around the
    * centre — from expressions that stay live (`"teeth":"#z"`): `teeth`, and its size by `module`, `outerDiameter` or
    * `pitchDiameter` (one of them; default module 1 mm), `pressureAngle` (degrees or an expression, default 20),
-   * `rotation` (degrees or an expression: the first tooth's direction). Its region is the gear: extrude it.
+   * `rotation` (degrees or an expression: the first tooth's direction), `backlash` (a length: of a pair of gears with
+   * it — each tooth thinner by half of it). `mesh: true` — it meshes with the gear drawn before it in the sketch: its
+   * rotation puts its teeth in that gear's gaps and follows it (place it at the centre distance (z₁ + z₂)·m / 2).
+   * Its region is the gear: extrude it.
    */
   | {
       type: 'gear';
@@ -111,6 +127,8 @@ export type Shape =
       pitchDiameter?: Num;
       pressureAngle?: Num;
       rotation?: Num;
+      backlash?: Num;
+      mesh?: boolean;
       construction?: boolean;
     };
 

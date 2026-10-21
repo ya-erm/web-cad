@@ -123,6 +123,7 @@ Construction curves are drawn dash-dotted, do not form regions and are not used 
 
 - With nothing selected, `Q` (or the **Construction** button) turns on construction mode: new curves are created as construction geometry, and their preview is dash-dotted too. Press it again to turn the mode off.
 - With curves selected, `Q` toggles them between regular and construction.
+- A drawing tool (line, circle, gear and the others) starts with nothing selected, so `Q` while drawing switches the mode, not the curves selected before.
 
 ## Colors and status {#status}
 

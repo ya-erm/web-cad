@@ -6,7 +6,7 @@
 
 import type { SkEntity, SkGear, Vec2 } from '../core/types';
 import { evaluate, type EvalContext } from '../core/expr';
-import { gearCircles, gearModule, gearProblem, toothHalfAngle, type GearSize } from '../core/gear';
+import { gearCircles, gearModule, gearProblem, meshRotation, toothHalfAngle, type GearSize } from '../core/gear';
 import { pointOf, type EntityMap } from './curves';
 import { COPY_SEP } from './patterns';
 
@@ -33,12 +33,37 @@ export function gearSizeOf(g: SkGear, ec: EvalContext = PLAIN): { size: GearSize
     const value = evaluate(g.size, 'length', ec);
     const alpha = evaluate(g.pressureAngle || '20 deg', 'angle', ec);
     const rotation = evaluate(g.rotation || '0 deg', 'angle', ec);
-    const size: GearSize = { z, m: gearModule(g.sizeBy, z, value), alpha };
+    const backlash = g.backlash ? evaluate(g.backlash, 'length', ec) : 0;
+    const size: GearSize = { z, m: gearModule(g.sizeBy, z, value), alpha, backlash };
     const problem = gearProblem(size);
     return problem ? { error: problem } : { size, rotation };
   } catch (e) {
     return { error: (e as Error).message };
   }
+}
+
+/** The gear `g` meshes with (`meshWith`) when it is in `map` and can be made; `seen` — the gears already on the way. */
+export function meshPartner(g: SkGear, map: EntityMap, seen: string[] = []): SkGear | null {
+  const p = g.meshWith ? map.get(g.meshWith) : undefined;
+  return p && p.type === 'gear' && p.id !== g.id && !seen.includes(p.id) ? p : null;
+}
+
+/**
+ * A gear's rotation (radians): its own — or, meshing with another gear, the one that puts its teeth in the other's
+ * gaps, from where their centres are and how the other is turned (meshing with a third one in turn). Null — it cannot
+ * be made.
+ */
+export function gearRotation(g: SkGear, map: EntityMap, ec: EvalContext = PLAIN, seen: string[] = []): number | null {
+  const own = gearSizeOf(g, ec);
+  if ('error' in own) return null;
+  const p = meshPartner(g, map, seen);
+  const ps = p && gearSizeOf(p, ec);
+  const pr = p && gearRotation(p, map, ec, [...seen, g.id]);
+  if (!p || !ps || 'error' in ps || pr === null) return own.rotation;
+  const a = pointOf(map, p.c);
+  const b = pointOf(map, g.c);
+  if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-9) return own.rotation;
+  return meshRotation(own.size.z, Math.atan2(b[1] - a[1], b[0] - a[0]), ps.size.z, pr);
 }
 
 /** Points on each involute flank (from the base or root circle to the tip): the curve through them is smooth. */
@@ -48,7 +73,8 @@ const FLANK_POINTS = 6;
 export function gearGeometry(g: SkGear, map: EntityMap, ec?: EvalContext): SkEntity[] {
   const s = gearSizeOf(g, ec);
   if ('error' in s) return [];
-  const { size, rotation } = s;
+  const { size } = s;
+  const rotation = gearRotation(g, map, ec) ?? s.rotation;
   const c = pointOf(map, g.c);
   const { r, ra, rf, rb } = gearCircles(size);
   const start = Math.max(rb, rf);
@@ -101,11 +127,19 @@ export function expandGears(entities: SkEntity[], ec?: EvalContext): SkEntity[] 
   return out;
 }
 
-/** Polylines of a gear that is not in the sketch yet (the tool's preview), about `c`. */
-export function gearOutline(g: Pick<SkGear, 'teeth' | 'sizeBy' | 'size' | 'pressureAngle' | 'rotation'>, c: Vec2, ec?: EvalContext): Vec2[][] {
-  const pts: SkEntity[] = [{ id: 'c', type: 'point', x: c[0], y: c[1] }];
-  const gear: SkGear = { ...g, id: 'g', type: 'gear', c: 'c' };
-  const all = [...pts, gear, ...gearGeometry(gear, new Map([...pts, gear].map((e) => [e.id, e])), ec)];
+/**
+ * Polylines of a gear that is not in the sketch yet (the tool's preview), about `c`; `sketch` — the sketch's
+ * entities, with the gear it meshes with.
+ */
+export function gearOutline(
+  g: Pick<SkGear, 'teeth' | 'sizeBy' | 'size' | 'pressureAngle' | 'rotation' | 'backlash' | 'meshWith'>,
+  c: Vec2,
+  ec?: EvalContext,
+  sketch: SkEntity[] = [],
+): Vec2[][] {
+  const pts: SkEntity[] = [{ id: '~c', type: 'point', x: c[0], y: c[1] }];
+  const gear: SkGear = { ...g, id: '~g', type: 'gear', c: '~c' };
+  const all = [...pts, gear, ...gearGeometry(gear, new Map([...sketch, ...pts, gear].map((e) => [e.id, e])), ec)];
   const map = new Map(all.map((e) => [e.id, e]));
   const P = (id: string): Vec2 => pointOf(map, id);
   const lines: Vec2[][] = [];

@@ -8,7 +8,7 @@ import type { DocumentOp } from './document';
 import type { SketchData } from '../core/types';
 import { addRectangle, addText } from '../sketch/sketchOps';
 import { computeRegions } from '../sketch/regions';
-import { expandTexts, isTextCounter } from '../sketch/text';
+import { expandTexts, isTextCounter, textAspect } from '../sketch/text';
 
 const wasm = fileURLToPath(new URL('../../node_modules/replicad-opencascadejs/dist/replicad_single.wasm', import.meta.url));
 
@@ -141,6 +141,21 @@ describe('Sketch text', () => {
     expect(regions).toHaveLength(4);
     expect(counters).toHaveLength(1);
     expect(counters[0].holes).toHaveLength(0);
+  }, 60000);
+
+  it('sizes the text by the width of its box, centred on `at`', async () => {
+    const model = await build([
+      { op: 'sketch', name: 'W', shapes: [{ type: 'text', text: 'HI', at: [0, 0], width: '40 mm', align: 'center' }] },
+      { op: 'extrude', sketch: 'W', depth: 1 },
+    ]);
+    // capitals as tall as the width gives them, the letters inside the box from −20 to 20
+    const top = Math.max(...model.parts.map((p) => p.bboxMin[1] + p.size[1]));
+    expect(top).toBeCloseTo(40 / textAspect('HI', 'sans'), 3);
+    const lo = Math.min(...model.parts.map((p) => p.bboxMin[0]));
+    const hi = Math.max(...model.parts.map((p) => p.bboxMin[0] + p.size[0]));
+    expect(lo).toBeGreaterThan(-20);
+    expect(hi).toBeLessThan(20);
+    expect(Math.abs(lo + hi)).toBeLessThan(2);
   }, 60000);
 
   it('turns the text with its rotation', async () => {

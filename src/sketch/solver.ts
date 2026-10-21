@@ -17,6 +17,7 @@
 //     a conflicting substitution constraint is left out and the whole sketch re-solved.
 
 import type { SkConstraint, SkEntity, Vec2 } from '../core/types';
+import { textAspect, textBoxCorners } from './text';
 
 export interface DragTargets {
   /** Desired positions of points being dragged by the user. */
@@ -244,12 +245,48 @@ function entityVars(m: Model, e: SkEntity): number[] {
       if (e.h1) pushPt(e.h1);
       break;
     case 'text':
+      // the other corners of its box follow these two (fixing them keeps it fixed when its string changes)
       pushPt(e.p1);
       pushPt(e.p2);
       break;
     case 'gear':
       pushPt(e.c);
       break;
+  }
+  return out;
+}
+
+/**
+ * The texts with a box of their own: the variables of its corners (p1…p4) and its aspect `k` (width to height in its
+ * font). A box not as wide as its text (its string or font changed, the font arrived) first gets its right side where
+ * the left side puts it — or, its width held by a dimension, its top where the baseline puts it: the solve starts
+ * there, so the text keeps its start and the size that is held unless something else holds it.
+ */
+function textBoxes(m: Model, X: Float64Array, tol: number, constraints: SkConstraint[]): { k: number; p: [number, number, number, number] }[] {
+  const out: { k: number; p: [number, number, number, number] }[] = [];
+  const pair = (a: string, b: string, x: string, y: string) => (a === x && b === y) || (a === y && b === x);
+  for (const e of m.byId.values()) {
+    if (e.type !== 'text' || !e.p3 || !e.p4) continue;
+    const p = [e.p1, e.p2, e.p3, e.p4].map((id) => ptVar(m, id)) as [number, number, number, number];
+    if (p.some((v) => v < 0) || new Set(p).size < 4) continue;
+    const k = textAspect(e.text, e.font);
+    const at = (v: number): Vec2 => [X[v], X[v + 1]];
+    const { p3, p4 } = textBoxCorners(at(p[0]), at(p[1]), k);
+    const off = Math.max(Math.abs(X[p[2]] - p3[0]), Math.abs(X[p[2] + 1] - p3[1]), Math.abs(X[p[3]] - p4[0]), Math.abs(X[p[3] + 1] - p4[1]));
+    out.push({ k, p });
+    if (!(off > tol)) continue;
+    const widthHeld = constraints.some((c) => {
+      if (c.type !== 'distance' || c.driven || !c.refs) return false;
+      const l = c.refs.length === 1 ? m.byId.get(c.refs[0]) : undefined;
+      const [a, b] = l?.type === 'line' ? [l.p1, l.p2] : c.refs.length === 2 ? c.refs : ['', ''];
+      return pair(a, b, e.p1, e.p3!) || pair(a, b, e.p2, e.p4!);
+    });
+    if (widthHeld) {
+      // the top from the baseline: (p3 − p1) turned a quarter counter-clockwise, k times shorter
+      const [a, c] = [at(p[0]), at(p[2])];
+      const top: Vec2 = [a[0] - (c[1] - a[1]) / k, a[1] + (c[0] - a[0]) / k];
+      [X[p[1]], X[p[1] + 1], X[p[3]], X[p[3] + 1]] = [...top, top[0] + c[0] - a[0], top[1] + c[1] - a[1]];
+    } else [X[p[2]], X[p[2] + 1], X[p[3]], X[p[3] + 1]] = [...p3, ...p4];
   }
   return out;
 }
@@ -1167,6 +1204,7 @@ function solveOnce(
   const N = model.nVars;
   const X = model.x0.slice();
   const S = model.scale;
+  const texts = textBoxes(model, X, tol, constraints);
 
   // --- union-find over full variables (substitution of equality constraints) ---
   const parent = new Int32Array(N);
@@ -1251,6 +1289,19 @@ function solveOnce(
     addT(d, T_DIST, -1, [b, b + 1, c, c + 1]);
     drafts.push(d);
   }
+  // the box of a text: p3 = p1 + k·(p2 − p1) turned a quarter clockwise, p4 = p2 + p3 − p1 — a rectangle k times as
+  // wide as it is high (linear: so a width dimension sets the height, a parallel side turns the text)
+  const lin = (terms: [number, number][]) => {
+    const d = draft(-1);
+    for (const [coef, v] of terms) addT(d, T_VAR, coef, [v]);
+    drafts.push(d);
+  };
+  for (const { k, p: [p1, p2, p3, p4] } of texts) {
+    lin([[1, p3], [-1, p1], [-k, p2 + 1], [k, p1 + 1]]);
+    lin([[1, p3 + 1], [-1, p1 + 1], [k, p2], [-k, p1]]);
+    lin([[1, p4], [-1, p2], [-1, p3], [1, p1]]);
+    lin([[1, p4 + 1], [-1, p2 + 1], [-1, p3 + 1], [1, p1 + 1]]);
+  }
 
   const dimOf = (c: SkConstraint): number | undefined => {
     const v = dims[c.id];
@@ -1308,6 +1359,13 @@ function solveOnce(
     switch (c.type) {
       case 'coincident': {
         if (refs.length < 2) return 0;
+        // two lines: the ends of the second on the first (collinear, Onshape)
+        const l1 = lineVars(model, refs[0]);
+        const l2 = lineVars(model, refs[1]);
+        if (l1 && l2) {
+          for (const q of l2) if (!samePt(q, l1[0]) && !samePt(q, l1[1])) push(addT(draft(ci), T_SD, 1, [...pv(q), ...pv(l1[0]), ...pv(l1[1])]));
+          return 0;
+        }
         const pi = E(0)?.type === 'point' ? 0 : 1;
         const p = ptVar(model, refs[pi]);
         const other = E(1 - pi);

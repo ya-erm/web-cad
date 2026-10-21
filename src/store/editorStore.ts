@@ -48,6 +48,30 @@ export type SketchTool =
   | 'plane'
   | 'dimension';
 
+/** The tools that draw new geometry (Onshape): they start with nothing selected, and Q makes what they draw construction. */
+const DRAW_TOOLS = new Set<SketchTool>([
+  'line',
+  'rectCorner',
+  'rectCenter',
+  'circleCenter',
+  'circle3pt',
+  'arc3pt',
+  'arcTangent',
+  'arcCenter',
+  'spline',
+  'bezier',
+  'conic',
+  'point',
+  'slot',
+  'polygon',
+  'polygonInscribed',
+  'ellipse',
+  'text',
+  'gear',
+]);
+
+export const isDrawTool = (tool: SketchTool) => DRAW_TOOLS.has(tool);
+
 export interface SolveInfo {
   ok: boolean;
   dof: number;
@@ -558,7 +582,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       get().showToast('Select a plane or a planar face for the sketch.', 'error');
       return;
     }
-    set({ sketch: { ...s, tool, hint: undefined, constraint: undefined, mirror: undefined } });
+    // a drawing tool starts with nothing selected (Q then makes the new geometry construction, not what was selected)
+    set({ sketch: { ...s, tool, hint: undefined, constraint: undefined, mirror: undefined, ...(isDrawTool(tool) && s.selection.length ? { selection: [] } : {}) } });
   },
 
   updateSketch(fn, undoable = true) {

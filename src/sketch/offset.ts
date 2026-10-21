@@ -368,7 +368,8 @@ export function extendTarget(d: SketchData, id: string, at: Vec2): ExtendTarget 
 export function extendEntity(d: SketchData, id: string, at: Vec2): boolean | 'connected' {
   const map = entityMap(d.entities);
   const e = map.get(id);
-  if (!e || (e.type !== 'line' && e.type !== 'arc')) return false;
+  // (a side of a text's box goes with the text)
+  if (!e || (e.type !== 'line' && e.type !== 'arc') || (e.type === 'line' && e.owner)) return false;
   const pid = dist(at, pointOf(map, e.p2)) < dist(at, pointOf(map, e.p1)) ? e.p2 : e.p1;
   const joined = d.constraints.some(
     (c) => c.type === 'coincident' && c.refs.includes(pid) && c.refs.some((r) => r !== pid && map.get(r)?.type === 'point'),

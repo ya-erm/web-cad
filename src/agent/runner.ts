@@ -30,7 +30,7 @@ import { findMaterial, massKg, MATERIALS, partDensity } from '../core/materials'
 import type { Draft } from 'immer';
 import { addUsedGeometry, edgeGeometry, projectGeometry } from '../sketch/useGeometry';
 import { addArc, addCenterRectangle, addCircle, addConstraint, addEllipse, addGear, addLine, addPoint, addPolygon, addRectangle, addSlot, addText } from '../sketch/sketchOps';
-import { expandTexts, FONT_FILES } from '../sketch/text';
+import { expandTexts, FONT_FILES, textAspect } from '../sketch/text';
 import { expandGears, gearSizeOf } from '../sketch/gear';
 import type {
   AgentOp,
@@ -648,14 +648,22 @@ class Runner {
           return;
         case 'text': {
           if (typeof sh.text !== 'string' || !sh.text.trim()) throw new AgentError(`${where}: give the text`);
-          const h = this.mm(sh.height, `${where} height`);
-          if (!(h > 0)) throw new AgentError(`${where}: height must be positive`);
+          if ((sh.height === undefined) === (sh.width === undefined)) throw new AgentError(`${where}: give its height or its width`);
           const font = sh.font ?? 'sans';
           if (!(font in FONT_FILES)) throw new AgentError(`${where}: font is one of ${Object.keys(FONT_FILES).join(', ')}`);
-          const o = P(sh.at);
-          const a = (((sh.rotation ?? 0) + 90) * Math.PI) / 180;
-          const t = addText(d, o, [o[0] + h * Math.cos(a), o[1] + h * Math.sin(a)], sh.text, font, cons);
+          if (sh.align !== undefined && !['left', 'center', 'right'].includes(sh.align)) throw new AgentError(`${where}: align is left, center or right`);
+          // the width sets the height by the font (the box is as wide as the text)
+          const k = textAspect(sh.text, font);
+          const h = sh.height !== undefined ? this.mm(sh.height, `${where} height`) : this.mm(sh.width!, `${where} width`) / k;
+          if (!(h > 0)) throw new AgentError(`${where}: ${sh.height !== undefined ? 'height' : 'width'} must be positive`);
+          const r = ((sh.rotation ?? 0) * Math.PI) / 180;
+          // `at` on the baseline: its start (left), its middle or its end
+          const back = (sh.align === 'center' ? 0.5 : sh.align === 'right' ? 1 : 0) * k * h;
+          const at = P(sh.at);
+          const o: Vec2 = [at[0] - back * Math.cos(r), at[1] - back * Math.sin(r)];
+          const t = addText(d, o, [o[0] - h * Math.sin(r), o[1] + h * Math.cos(r)], sh.text, font, cons);
           if (typeof sh.height === 'string') addConstraint(d, 'distance', [t.p1, t.p2], { value: sh.height });
+          if (typeof sh.width === 'string') addConstraint(d, 'distance', [t.lines.bottom], { value: sh.width });
           return;
         }
         case 'gear': {
@@ -671,10 +679,14 @@ class Runner {
             size: len(sh[sizeBy] ?? 1),
             pressureAngle: angle(sh.pressureAngle, '20 deg'),
             rotation: angle(sh.rotation, '0 deg'),
+            ...(sh.backlash !== undefined ? { backlash: len(sh.backlash) } : {}),
           };
           const probe = gearSizeOf({ id: 'g', type: 'gear', c: 'c', ...params }, this.ctx());
           if ('error' in probe) throw new AgentError(`${where}: ${probe.error}`);
-          addGear(d, sh.c ? P(sh.c) : [0, 0], params, !!sh.construction);
+          // meshing: with the gear drawn before it
+          const before = sh.mesh ? [...d.entities].reverse().find((e) => e.type === 'gear') : undefined;
+          if (sh.mesh && !before) throw new AgentError(`${where}: "mesh" needs a gear drawn before it in the sketch`);
+          addGear(d, sh.c ? P(sh.c) : [0, 0], { ...params, meshWith: before?.id }, !!sh.construction);
           return;
         }
         default:

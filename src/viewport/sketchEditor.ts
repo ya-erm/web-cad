@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { produce, type Draft } from 'immer';
-import type { ConstraintType, PlaneFrame, SkConstraint, SkEntity, SkPattern, SketchData, Vec2 } from '../core/types';
+import type { ConstraintType, PlaneFrame, SkConstraint, SkEntity, SkFont, SkPattern, SketchData, Vec2 } from '../core/types';
 import { uid } from '../core/ids';
 import { expandPatterns, isCopyId, parseCopyId, patternCenter, patternInstances, patternParams, seedCenter } from '../sketch/patterns';
 import { STD_PLANES, toLocal } from '../core/math';
@@ -44,6 +44,8 @@ import {
   splitEntity,
   addBezier,
   addText,
+  textSizeDims,
+  upgradeTexts,
   addGear,
   DEFAULT_GEAR,
   type GearParamsOf,
@@ -53,13 +55,13 @@ import {
   quadrantId,
   type Snap,
 } from '../sketch/sketchOps';
-import { expandTexts, loadFonts, onFontLoaded, textOfPart, textOutline } from '../sketch/text';
-import { expandGears, gearOfPart, gearOutline, gearSizeOf } from '../sketch/gear';
+import { expandTexts, hasTextBox, loadFonts, onFontLoaded, textBoxLines, textFrame, textOfPart, textOutline } from '../sketch/text';
+import { expandGears, gearOfPart, gearOutline, gearRotation, gearSizeOf } from '../sketch/gear';
 import { gearCircles } from '../core/gear';
 import { arrowTriangle, dimensionGeometry } from '../sketch/dimensions';
 import { CONSTRAINT_GLYPH_SVG } from '../ui/constraintGlyphs';
 import { attachVariableSuggest, varChoices } from '../ui/varSuggest';
-import { refKey, useEditor, type SketchTool, type SketchTransformState } from '../store/editorStore';
+import { isDrawTool, refKey, useEditor, type SketchTool, type SketchTransformState } from '../store/editorStore';
 import { addUsedGeometry, projectGeometry } from '../sketch/useGeometry';
 import { applyOffset, chainIdsOf, chainPolylines, computeOffset, extendEntity, extendTarget, offsetChains, offsetDistanceAt } from '../sketch/offset';
 import type { SelToken } from '../core/fieldSpecs';
@@ -137,7 +139,8 @@ type QuickDim = { spec: QuickSpec; input: HTMLInputElement; edited: boolean };
 
 type DragState =
   /** `snap`: inference while dragging a single point (applied as a constraint on release). */
-  | { kind: 'points'; ids: string[]; start: Vec2; orig: Map<string, Vec2>; base: SketchData; snap?: Snap | null; exclude?: Set<string> }
+  /** `pin`: points held where they are (a corner of a text's box turns and scales it about another corner). */
+  | { kind: 'points'; ids: string[]; start: Vec2; orig: Map<string, Vec2>; base: SketchData; snap?: Snap | null; exclude?: Set<string>; pin?: Map<string, Vec2> }
   | { kind: 'radius'; id: string; base: SketchData }
   | { kind: 'label'; id: string; base: SketchData };
 
@@ -226,8 +229,11 @@ export class SketchEditor {
     this.sidesLabel.className = 'infer-label poly-sides';
     this.sidesLabel.style.display = 'none';
     engine.container.appendChild(this.sidesLabel);
-    // the letters of texts are drawn once their font is there
-    this.offFonts = onFontLoaded(() => this.renderSketch(true));
+    // the letters of texts are drawn once their font is there, their boxes as wide as the letters
+    this.offFonts = onFontLoaded(() => {
+      this.refitTexts();
+      this.renderSketch(true);
+    });
     loadFonts().catch(() => useEditor.getState().showToast(t('The fonts of sketch text could not be loaded'), 'error'));
   }
 
@@ -315,13 +321,86 @@ export class SketchEditor {
     this.engine.pickEdit.add(this.pickRoot);
     this.toolName = useEditor.getState().sketch?.tool ?? 'select';
     this.tool = { k: 'idle' };
-    // initial analysis
+    // initial analysis; texts made before their boxes were real get theirs (with the sketch, not an undo step)
     const d = this.data();
     if (d) {
-      const res = this.solve(d, { analyze: true });
-      useEditor.getState().setSolve(res.info);
+      if (d.entities.some((e) => e.type === 'text' && !hasTextBox(e))) useEditor.getState().updateSketch((s) => void upgradeTexts(s), false);
+      this.refitTexts(true);
     }
     this.setHint();
+  }
+
+  /**
+   * Solve again and keep the result without an undo step: the boxes of texts made or edited before their font was
+   * there (the solver makes each as wide as its letters). With `always`, the solve's state is shown in any case.
+   */
+  private refitTexts(always = false) {
+    const d = this.data();
+    const texts = new Set(d?.entities.filter((e) => e.type === 'text').map((e) => e.id));
+    if (!this.active || !d || (!always && !texts.size)) return;
+    const res = this.solve(d, { analyze: true });
+    const ed = useEditor.getState();
+    // kept when the points of a text moved (the solver hands back the entities it did not move as they were): a
+    // sketch that only does not solve stays as it is until it is edited
+    if (res.entities.some((e, i) => e !== d.entities[i] && e.type === 'point' && !!e.owner && texts.has(e.owner)))
+      ed.updateSketch((s) => {
+        s.entities = res.entities as Draft<SkEntity>[];
+      }, false);
+    ed.setSolve(res.info);
+  }
+
+  /**
+   * The string or font of a text (the sketch dialog): its box follows. `undoable` — the first change of a field (the
+   * next ones are typed on).
+   */
+  editText(id: string, patch: { text?: string; font?: SkFont }, undoable: boolean): boolean {
+    return this.change(
+      (d) => {
+        const e = d.entities.find((x) => x.id === id);
+        if (e && e.type === 'text') Object.assign(e, patch);
+      },
+      { undoable, typing: !undoable },
+    );
+  }
+
+  /**
+   * The height or the width of a text (the sketch dialog) as a dimension of its box: the one it has takes the
+   * value, else one is added (on its left side, on its baseline) in place of a dimension of the other — one of
+   * them sizes the text. `undoable` as in `editText`. False when it conflicts with the sketch.
+   */
+  setTextSize(id: string, side: 'height' | 'width', value: string, undoable: boolean): boolean {
+    // typed on: from the sketch before the field's first edit, as `change` takes it
+    const past = useEditor.getState().sketch?.past;
+    const cur = !undoable && past?.length ? past[past.length - 1] : this.data();
+    const text = cur?.entities.find((e) => e.id === id);
+    if (!cur || !text || text.type !== 'text' || !hasTextBox(text)) return false;
+    const dims = textSizeDims(cur, text);
+    const own = dims[side];
+    const other = dims[side === 'height' ? 'width' : 'height'];
+    const line = textBoxLines(cur.entities, text)[side === 'height' ? 'left' : 'bottom'];
+    const map = entityMap(cur.entities);
+    const fr = textFrame(text, map);
+    if (!own && (!line || !fr)) return false;
+    return this.change(
+      (d) => {
+        if (own) {
+          const c = d.constraints.find((x) => x.id === own.id);
+          if (c) c.value = value;
+          return;
+        }
+        if (other) d.constraints = d.constraints.filter((c) => c.id !== other.id);
+        // its label: left of the text (the height), under it (the width)
+        const { o, up, right, h } = fr!;
+        const p3 = pointOf(map, text.p3);
+        const w = Math.hypot(p3[0] - o[0], p3[1] - o[1]);
+        const labelPos: Vec2 =
+          side === 'height'
+            ? [o[0] + (up[0] * h) / 2 - right[0] * h * 0.6, o[1] + (up[1] * h) / 2 - right[1] * h * 0.6]
+            : [o[0] + (right[0] * w) / 2 - up[0] * h * 0.6, o[1] + (right[1] * w) / 2 - up[1] * h * 0.6];
+        addConstraint(d, 'distance', [line!], { value, labelPos });
+      },
+      { checkConflict: true, undoable, typing: !undoable },
+    );
   }
 
   private deactivate() {
@@ -436,11 +515,18 @@ export class SketchEditor {
     else useEditor.getState().setSketchTool('select');
   }
 
-  change(fn: (d: Draft<SketchData>) => void, opts: { checkConflict?: boolean } = {}): boolean {
-    const cur = this.data();
+  /**
+   * Apply an edit, re-solve and store; with `undoable: false` in the same undo step. `typing` — a field's value typed
+   * on: the edit goes onto the sketch as it was before the field's first edit (the values typed on the way leave no
+   * trace — the solve moves nothing for them).
+   */
+  change(fn: (d: Draft<SketchData>) => void, opts: { checkConflict?: boolean; undoable?: boolean; typing?: boolean } = {}): boolean {
+    const past = useEditor.getState().sketch?.past;
+    const cur = opts.typing && past?.length ? past[past.length - 1] : this.data();
     if (!cur) return false;
     const next = produce(cur, fn);
-    if (next === cur) return true;
+    // (typed back to what it was: the sketch as it was)
+    if (next === cur && !opts.typing) return true;
     const res = this.solve(next);
     if (opts.checkConflict && (!res.info.ok || res.info.conflicting.length)) {
       const before = this.solve(cur, { analyze: true });
@@ -455,7 +541,7 @@ export class SketchEditor {
       d.entities = res.entities as Draft<SkEntity>[];
       d.constraints = next.constraints as Draft<SkConstraint>[];
       d.plane = next.plane as Draft<SketchData['plane']>;
-    });
+    }, opts.undoable ?? true);
     ed.setSolve(res.info);
     return true;
   }
@@ -966,7 +1052,7 @@ export class SketchEditor {
     const sel = ed.sketch?.selection ?? [];
     const items = [
       { label: t('Finish sketch'), icon: 'check', shortcut: 'Enter', action: () => ed.commitEditing() },
-      { label: t('Construction'), icon: 'construction', shortcut: 'Q', action: () => this.toggleConstruction(), disabled: !sel.length },
+      { label: t('Construction'), icon: 'construction', shortcut: 'Q', action: () => this.change((d) => toggleConstruction(d, sel)), disabled: !sel.length },
       { label: t('Delete'), icon: 'trash', shortcut: 'Del', action: () => this.deleteSelection(), disabled: !sel.length, danger: true },
       { separator: true, label: '' },
       { label: t('Cancel'), icon: 'close', shortcut: 'Esc', action: () => ed.cancelEditing() },
@@ -1860,7 +1946,8 @@ export class SketchEditor {
           // the tangent handles move with the curve
           return [...ent.pts, ...[ent.h0, ent.h1].filter((h): h is string => !!h && map.has(h))];
         case 'text':
-          return [ent.p1, ent.p2];
+          // with the corners of its box
+          return [ent.p1, ent.p2, ...[ent.p3, ent.p4].filter((p): p is string => !!p && map.has(p))];
         case 'gear':
           return [ent.c];
       }
@@ -1887,10 +1974,17 @@ export class SketchEditor {
         const owner = (map.get(pid) as SkEntity & { owner?: string }).owner;
         if (!owner) continue;
         exclude.add(owner);
-        for (const q of d.entities) if (q.type === 'point' && q.owner === owner) exclude.add(q.id);
+        for (const q of d.entities) if ((q.type === 'point' || q.type === 'line') && q.owner === owner) exclude.add(q.id);
       }
     }
-    this.drag = { kind: 'points', ids, start: p0, orig, base: d, exclude };
+    // a corner of a text's box turns and scales it about the start of its baseline (that one — about the top left)
+    let pin: Map<string, Vec2> | undefined;
+    const text = e.type === 'point' && e.owner ? map.get(e.owner) : undefined;
+    if (text?.type === 'text' && hasTextBox(text)) {
+      const about = id === text.p1 ? text.p2 : text.p1;
+      pin = new Map([[about, pointOf(map, about)]]);
+    }
+    this.drag = { kind: 'points', ids, start: p0, orig, base: d, exclude, pin };
   }
 
   private updateDrag(p: Vec2, screen?: { x: number; y: number }) {
@@ -1902,6 +1996,7 @@ export class SketchEditor {
     if (dr.kind === 'points') {
       const delta: Vec2 = [p[0] - dr.start[0], p[1] - dr.start[1]];
       const pts: Record<string, Vec2> = {};
+      for (const [id, o] of dr.pin ?? []) pts[id] = o;
       for (const [id, o] of dr.orig) pts[id] = [o[0] + delta[0], o[1] + delta[1]];
       // inference: a dragged point snaps to points / curves / midpoints / the origin (Onshape)
       if (dr.exclude && screen) {
@@ -1928,7 +2023,23 @@ export class SketchEditor {
       return;
     }
     const { dims } = sketchDims(cur, this.evalCtx());
-    const res = solveSketch(cur.entities, cur.constraints, dims, { drag, analyze: false });
+    let res = solveSketch(cur.entities, cur.constraints, dims, { drag, analyze: false });
+    // a text that cannot turn or scale there (say, its height set, its baseline on a line): dragged without the pin
+    if (dr.kind === 'points' && dr.pin && drag.points) {
+      const id = dr.ids[0];
+      const want = drag.points[id];
+      const miss = (r: typeof res) => {
+        const q = pointOf(entityMap(r.entities), id);
+        return Math.hypot(q[0] - want[0], q[1] - want[1]);
+      };
+      const held = miss(res);
+      if (held > 1e-6 * (1 + Math.hypot(want[0], want[1]))) {
+        const points = { ...drag.points };
+        for (const pid of dr.pin.keys()) delete points[pid];
+        const free = solveSketch(cur.entities, cur.constraints, dims, { drag: { points }, analyze: false });
+        if (miss(free) < held * 0.5) res = free;
+      }
+    }
     useEditor.getState().updateSketch((d) => {
       d.entities = res.entities as Draft<SkEntity>[];
     }, false);
@@ -1987,10 +2098,11 @@ export class SketchEditor {
     useEditor.getState().setSketchSelection([]);
   }
 
+  /** Q: the selected geometry construction (or not); with a drawing tool on (or nothing selected) — what is drawn next. */
   toggleConstruction() {
     const ed = useEditor.getState();
     const sel = ed.sketch?.selection ?? [];
-    if (!sel.length) {
+    if (!sel.length || isDrawTool(ed.sketch!.tool)) {
       const s = ed.sketch!;
       useEditor.setState({ sketch: { ...s, construction: !s.construction } });
       return;
@@ -2036,7 +2148,9 @@ export class SketchEditor {
         if (points.length >= 2 && ents.length === points.length)
           for (let i = 1; i < points.length; i++) toAdd.push({ type, refs: [points[0].id, points[i].id] });
         else if (points.length === 1 && ents.length === 2) toAdd.push({ type, refs: [points[0].id, ents.find(isCurve)!.id] });
-        else return fail('Select points (and optionally one curve)');
+        // lines on one line (Onshape: coincident lines are collinear)
+        else if (lines.length >= 2 && ents.length === lines.length) for (let i = 1; i < lines.length; i++) toAdd.push({ type, refs: [lines[0].id, lines[i].id] });
+        else return fail('Select points (and optionally one curve), or lines');
         break;
       case 'parallel':
       case 'perpendicular':
@@ -2657,7 +2771,9 @@ export class SketchEditor {
         ptIds.push(id);
         continue;
       }
-      const color = copy ? this.copyColor(e, selectedPatterns) : this.statusColor(e.id, e.construction);
+      // the box of a selected / hovered text is shown with it
+      const box = e.type === 'line' && e.owner && (s.selection.includes(e.owner) || s.hover === e.owner) ? e.owner : null;
+      const color = copy ? this.copyColor(e, selectedPatterns) : this.statusColor(box ?? e.id, e.construction);
       const emphasized = color === COLORS.selected || color === COLORS.hover;
       const key = `${color}|${!!e.construction}|${emphasized}`;
       const g = groups.get(key) ?? { color, construction: !!e.construction, width: emphasized ? 3 : 1.8, segs: [] };
@@ -2894,7 +3010,8 @@ export class SketchEditor {
       // its arrow where that circle is plain to see: on the tip of the tooth nearest to the upper right (the outer
       // diameter), in the middle of the gap next to it (the pitch circle, dash-dotted there)
       const step = (2 * Math.PI) / size.size.z;
-      const toward = size.rotation + Math.round((Math.PI / 4 - size.rotation) / step) * step + (pitch ? step / 2 : 0);
+      const rotation = gearRotation(gear, map, ctx) ?? size.rotation;
+      const toward = rotation + Math.round((Math.PI / 4 - rotation) / step) * step + (pitch ? step / 2 : 0);
       const c = pointOf(map, gear.c);
       const labelPos: Vec2 = [c[0] + (radius + 30 * px) * Math.cos(toward), c[1] + (radius + 30 * px) * Math.sin(toward)];
       const g = dimensionGeometry({ id: circle.id, type: 'diameter', refs: [circle.id], labelPos }, new Map(map).set(circle.id, circle), px);
@@ -3459,10 +3576,15 @@ export class SketchEditor {
     return [];
   }
 
-  /** The parameters of a new gear: as the sketch's last gear has them (a second one meshes with the first), else the defaults. */
+  /**
+   * The parameters of a new gear: as the sketch's last gear has them, meshing with it (the second gear of a pair: the
+   * same module and backlash, its teeth in the first one's gaps), else the defaults.
+   */
   private gearParams(): GearParamsOf {
     const last = [...(this.data()?.entities ?? [])].reverse().find((e) => e.type === 'gear');
-    return last && last.type === 'gear' ? { teeth: last.teeth, sizeBy: last.sizeBy, size: last.size, pressureAngle: last.pressureAngle, rotation: last.rotation } : DEFAULT_GEAR;
+    if (!last || last.type !== 'gear') return DEFAULT_GEAR;
+    const { teeth, sizeBy, size, pressureAngle, rotation, backlash } = last;
+    return { teeth, sizeBy, size, pressureAngle, rotation, backlash, meshWith: last.id };
   }
 
   private updatePreview() {
@@ -3486,7 +3608,7 @@ export class SketchEditor {
     };
     const st = this.tool;
     // the gear tool: the gear as it will be placed, at the cursor
-    if (this.toolName === 'gear') for (const pl of gearOutline(this.gearParams(), c, this.evalCtx())) poly(pl);
+    if (this.toolName === 'gear') for (const pl of gearOutline(this.gearParams(), c, this.evalCtx(), this.data()?.entities)) poly(pl);
     switch (st.k) {
       case 'line':
         seg(st.start.pos, c);
