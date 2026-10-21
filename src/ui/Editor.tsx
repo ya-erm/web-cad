@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import type { LengthUnit } from '../core/types';
 import { useEditor } from '../store/editorStore';
 import { activeAssembly, activeTab, newAssemblyTab, newDrawingTab, newPartStudio, useDoc } from '../store/docStore';
-import { AssemblyToolbar, InsertDialog, InstanceList, InstancePanel, MateDialog, MateList, selectedInstances } from '../assembly/AssemblyUI';
-import { RelationDialog } from '../assembly/RelationUI';
-import { AnimateDialog } from '../assembly/AnimateUI';
-import { BomPanel, ExplodeDialog, ExplodedViewList } from '../assembly/BomExplodeUI';
+import { AssemblyToolbar, closeMateInsertDialogs, InsertDialog, InstanceList, InstancePanel, MateDialog, MateList, selectedInstances } from '../assembly/AssemblyUI';
+import { closeRelationDialog, RelationDialog } from '../assembly/RelationUI';
+import { AnimateDialog, animationOpen, closeAnimation } from '../assembly/AnimateUI';
+import { BomPanel, closeBom, closeExploded, ExplodeDialog, ExplodedViewList } from '../assembly/BomExplodeUI';
+import { explodeActive } from '../assembly/explode';
+import { ErrorBoundary } from './ErrorBoundary';
 import { requestRebuild, startRebuildLoop } from '../store/rebuild';
 import { restoreDraft, startDraftPersistence } from '../store/draftPersistence';
 import { saveThumbnail } from '../store/persistence';
@@ -53,6 +55,7 @@ function FolderState({ docId }: { docId: string }) {
 function TopBar({ onBack }: { onBack: () => void }) {
   const doc = useDoc((s) => s.doc)!;
   const saving = useDoc((s) => s.saving);
+  const saveError = useDoc((s) => s.saveError);
   const update = useDoc((s) => s.update);
   const [name, setName] = useState(doc.name);
   const [menu, setMenu] = useState<'doc' | null>(null);
@@ -82,10 +85,22 @@ function TopBar({ onBack }: { onBack: () => void }) {
       <VersionsButton />
       <FolderState docId={doc.id} />
       {/* last, both words in one cell (the other one invisible): nothing moves when the state changes */}
-      <span className="save-state save-state-fixed" role="status">
-        <span className={saving ? '' : 'off'}>{t('Saving…')}</span>
-        <span className={saving ? 'off' : ''}>{t('Saved')}</span>
-      </span>
+      {saveError ? (
+        // the edits are only in memory: why, and a click saves again now
+        <button
+          className="save-state save-error"
+          role="alert"
+          title={`${t(saveError)}. ${t('The edits are kept in this tab: do not close it. Click to save again.')}`}
+          onClick={() => void useDoc.getState().flushSave()}
+        >
+          <Icon name="warning" size={13} /> {t('Not saved')}
+        </button>
+      ) : (
+        <span className="save-state save-state-fixed" role="status">
+          <span className={saving ? '' : 'off'}>{t('Saving…')}</span>
+          <span className={saving ? 'off' : ''}>{t('Saved')}</span>
+        </span>
+      )}
       <div className="spacer" />
       <button className="icon-btn" title={`${t('Help')} (F1)`} onClick={() => openHelp(contextHelpPage())}>
         <Icon name="help" size={18} />
@@ -286,6 +301,21 @@ function BottomBar() {
   );
 }
 
+/**
+ * What an error boundary closes before drawing its part again: the dialog being edited (nothing changes in the
+ * document), the windows and menus, the assembly's dialogs — so that what failed is not drawn the same way at once.
+ */
+function closePanels() {
+  const ed = useEditor.getState();
+  if (ed.editing) ed.cancelEditing();
+  useEditor.setState({ contextMenu: null, exportOpen: null, materialOpen: null, measure: null });
+  closeMateInsertDialogs();
+  closeRelationDialog();
+  if (animationOpen()) closeAnimation();
+  if (explodeActive()) closeExploded();
+  closeBom();
+}
+
 export function Editor({ onBack }: { onBack: () => void }) {
   const doc = useDoc((s) => s.doc);
   const readOnly = useDoc((s) => s.readOnly);
@@ -347,50 +377,69 @@ export function Editor({ onBack }: { onBack: () => void }) {
       {tab.type === 'partStudio' && <Toolbar />}
       {tab.type === 'assembly' && <AssemblyToolbar />}
       <div className="workspace">
+        {/* a part that fails to draw shows a card in its place; the model and the rest keep working */}
         {tab.type === 'assembly' ? (
           <>
             <div className="left-panel">
-              <InstanceList />
-              <MateList />
-              <ExplodedViewList />
+              <ErrorBoundary scope="panel" name="Assembly lists">
+                <InstanceList />
+                <MateList />
+                <ExplodedViewList />
+              </ErrorBoundary>
             </div>
             <div className="graphics">
-              <Viewport />
-              <InstancePanel />
-              <MateDialog />
-              <RelationDialog />
-              <AnimateDialog />
-              <ExplodeDialog />
-              <BomPanel />
-              <InsertDialog />
+              <ErrorBoundary scope="panel" name="Graphics area">
+                <Viewport />
+              </ErrorBoundary>
+              <ErrorBoundary scope="panel" name="Assembly dialogs" onReset={closePanels}>
+                <InstancePanel />
+                <MateDialog />
+                <RelationDialog />
+                <AnimateDialog />
+                <ExplodeDialog />
+                <BomPanel />
+                <InsertDialog />
+              </ErrorBoundary>
               <Toast />
             </div>
           </>
         ) : tab.type === 'partStudio' ? (
           <>
             <div className="left-panel">
-              <FeatureTree />
-              <PartsList />
+              <ErrorBoundary scope="panel" name="Feature list">
+                <FeatureTree />
+              </ErrorBoundary>
+              <ErrorBoundary scope="panel" name="Parts list">
+                <PartsList />
+              </ErrorBoundary>
             </div>
             <div className="graphics">
-              <Viewport />
-              <FeatureDialog />
-              <SketchPatternPanel />
-              <SketchTransformPanel />
-              <SketchDialog />
-              <RightPanels />
-              <MeasurePanel />
+              <ErrorBoundary scope="panel" name="Graphics area">
+                <Viewport />
+              </ErrorBoundary>
+              <ErrorBoundary scope="panel" name="Feature dialog" onReset={closePanels}>
+                <FeatureDialog />
+                <SketchPatternPanel />
+                <SketchTransformPanel />
+                <SketchDialog />
+                <RightPanels />
+                <MeasurePanel />
+              </ErrorBoundary>
               <Toast />
             </div>
           </>
         ) : (
-          <DrawingEditor key={tab.id} tabId={tab.id} />
+          <ErrorBoundary scope="panel" name="Drawing">
+            <DrawingEditor key={tab.id} tabId={tab.id} />
+          </ErrorBoundary>
         )}
       </div>
       <BottomBar />
-      <ContextMenu />
-      <ExportDialog />
-      <MaterialDialog />
+      <ErrorBoundary scope="panel" name="Menus and windows" onReset={closePanels}>
+        <ContextMenu />
+        <ExportDialog />
+        <MaterialDialog />
+      </ErrorBoundary>
     </div>
   );
 }

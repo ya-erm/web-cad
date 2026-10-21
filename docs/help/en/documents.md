@@ -46,7 +46,10 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 ## Saving and undo {#saving}
 
-- All changes are saved automatically; the status is shown next to the document name: **Saved** or **Saving…**.
+- All changes are saved automatically; the status is shown next to the document name: **Saved** or **Saving…**. The last edits are written also when you go straight back to the document list, open another document, switch to another browser tab, or close the page. With edits not saved yet, the browser asks whether to close the page.
+- If the browser does not let a document be written (out of space, storage not available), a red **Not saved** appears instead of **Saved**, with the reason in its tooltip. The edits stay in the open tab — do not close it. WebCAD tries to save again by itself (in 2 s, then less often); a click on **Not saved** tries at once. To free space, empty the [trash](#trash) or delete documents you do not need.
+- If a panel or dialog fails to draw, a card "This part of the interface failed" takes its place, with **Close and try again** and **Copy details**; the model and the rest of the editor keep working. If the whole app fails, a "Something went wrong" page offers **Reload the page**: the documents are already saved.
+- If the geometry kernel (OpenCascade) fails — say, it runs out of memory — or does not answer for more than 3 minutes, it restarts by itself and the model is rebuilt; a notification says so. If the kernel fails on a model again and again, undo the last change (`Ctrl+Z`).
 - **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Y` or `Ctrl+Shift+Z`) work for the whole document. While a feature dialog is open, document undo is unavailable; a sketch has its own undo history.
 - If you reload the page in the middle of editing a sketch or feature, the unfinished work is restored.
 - The undo history lives while the document is open. To come back to a state of the document later, make a [version](versions); the autosaves of the [history](versions#history) are made by themselves.

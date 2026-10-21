@@ -461,7 +461,9 @@ export type WorkerRequest =
   | ViewRefsRequest
   | PlaceRequest
   | ViewPartRequest
-  | PingRequest;
+  | PingRequest
+  /** Forget every builder (another document opened): their shapes' memory goes back to the kernel. */
+  | { type: 'reset'; reqId: number };
 
 export type WorkerResponse =
   | BuildResult
@@ -472,8 +474,10 @@ export type WorkerResponse =
   | ViewAnchorResult
   | ViewRefsResult
   | { type: 'place'; reqId: number }
+  | { type: 'reset'; reqId: number }
   | ViewPartResult
   | { type: 'ping'; reqId: number }
-  | { type: 'error'; reqId: number; message: string }
+  /** `fatal`: the WebAssembly kernel itself failed (out of memory, a trap) — its state cannot be trusted any more. */
+  | { type: 'error'; reqId: number; message: string; fatal?: boolean }
   | { type: 'ready' }
   | { type: 'progress'; message: string };

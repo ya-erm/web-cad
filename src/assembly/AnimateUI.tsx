@@ -55,7 +55,7 @@ export function startAnimation(m: AssemblyMate) {
   useAnim.setState({ anim: { mateId: m.id, motion: motions[0], from, to, seconds: 4, mode: 'bounce' }, playing: true, t: 0, dir: 1 });
 }
 
-function closeAnimation() {
+export function closeAnimation() {
   useAnim.setState({ anim: null, playing: false, t: 0, dir: 1 });
   requestRebuild();
 }

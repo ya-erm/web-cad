@@ -3,13 +3,17 @@ import { createRoot } from 'react-dom/client';
 import './styles/app.css';
 import App from './App';
 import { installAgentApi } from './agent/browser';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 // window.webcad for agents (and the dev-server bridge used by `npm run agent`); help tabs stay out of it
 if (!location.hash.startsWith('#/help')) installAgentApi();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* an error while drawing: a page that says so instead of a white one */}
+    <ErrorBoundary scope="app">
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 

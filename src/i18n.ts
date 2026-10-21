@@ -244,6 +244,22 @@ const RU: Record<string, string> = {
   'Back to documents': 'К документам',
   'Saved': 'Сохранено',
   'Saving…': 'Сохранение…',
+  'Not saved': 'Не сохранено',
+  'The geometry kernel failed and was restarted: the model is being rebuilt': 'Геометрическое ядро сбоило и перезапущено — модель перестраивается',
+  'The geometry kernel keeps failing on this model: undo the last change (Ctrl+Z) or reload the page':
+    'Геометрическое ядро снова и снова сбоит на этой модели — отмените последнее изменение (Ctrl+Z) или перезагрузите страницу',
+  'Something went wrong': 'Что-то пошло не так',
+  'The documents are saved in the browser: reload the page to go on. If it happens again, copy the details and report the error.':
+    'Документы сохранены в браузере — перезагрузите страницу, чтобы продолжить. Если ошибка повторится, скопируйте подробности и сообщите о ней.',
+  'Reload the page': 'Перезагрузить страницу',
+  'This part of the interface failed': 'Эта часть интерфейса не отрисовалась',
+  'Close and try again': 'Закрыть и повторить',
+  'Try again': 'Повторить',
+  'Copy details': 'Скопировать подробности',
+  Copied: 'Скопировано',
+  'The browser storage is full': 'В хранилище браузера закончилось место',
+  'The browser storage is not available': 'Хранилище браузера недоступно',
+  'The edits are kept in this tab: do not close it. Click to save again.': 'Правки сохранены только в этой вкладке — не закрывайте её. Щёлкните, чтобы сохранить снова.',
   // features
   Features: 'Фичи',
   Parts: 'Детали',

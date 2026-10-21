@@ -14,6 +14,8 @@ export interface DocState {
   past: CadDocument[];
   future: CadDocument[];
   saving: boolean;
+  /** The last save failed (why, for people): the edits are only in memory until a save goes through. */
+  saveError: string | null;
   /** Coalesces consecutive edits with the same key into one undo step. */
   lastKey: string | null;
   /** A version is open for viewing: no edits (switching tabs and options is fine) and nothing is saved. */
@@ -72,19 +74,52 @@ export function newDocument(name: string): CadDocument {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/** Saving again after a failure: soon, then less often. */
+let retryDelay = 2000;
+
+/** Why a save failed, for people: the browser's storage is full or not available. */
+export function saveErrorText(e: unknown): string {
+  const name = (e as { name?: string } | null)?.name;
+  if (name === 'QuotaExceededError') return 'The browser storage is full';
+  if (name === 'InvalidStateError' || name === 'UnknownError' || name === 'AbortError') return 'The browser storage is not available';
+  return (e as Error | null)?.message || String(e);
+}
 
 export const useDoc = create<DocState>()((set, get) => {
   const scheduleSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     set({ saving: true });
-    saveTimer = setTimeout(save, 400);
+    saveTimer = setTimeout(() => void save(get().doc), 400);
   };
-  const save = async () => {
+  /** Write `d` (the document as it is when the save starts); a failure is shown and tried again later. */
+  const save = async (d: CadDocument | null) => {
     saveTimer = null;
-    const d = get().doc;
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
     // never a version being viewed over the document
-    if (d && !get().readOnly) await db.saveDocument(d);
-    set({ saving: false });
+    if (!d || get().readOnly) return set({ saving: false });
+    try {
+      await db.saveDocument(d);
+      retryDelay = 2000;
+      // edits made meanwhile have a save of their own waiting
+      set({ saving: !!saveTimer, ...(get().saveError ? { saveError: null } : {}) });
+    } catch (e) {
+      console.error('Saving the document failed', e);
+      set({ saving: false, saveError: saveErrorText(e) });
+      // the open one again in a while (it is still in memory, with all its edits)
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!saveTimer && get().doc?.id === d.id) void save(get().doc);
+      }, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    }
+  };
+  /** A save waiting for its moment: now (before the document goes away). */
+  const saveWaiting = async () => {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    await save(get().doc);
   };
 
   return {
@@ -93,13 +128,16 @@ export const useDoc = create<DocState>()((set, get) => {
     past: [],
     future: [],
     saving: false,
+    saveError: null,
     lastKey: null,
     readOnly: false,
 
     async flushSave() {
-      if (!saveTimer) return;
-      clearTimeout(saveTimer);
-      await save();
+      // waiting for its moment, or failed before: now
+      if (saveTimer || (get().saveError && get().doc)) {
+        if (saveTimer) clearTimeout(saveTimer);
+        await save(get().doc);
+      }
     },
 
     async loadList() {
@@ -114,15 +152,19 @@ export const useDoc = create<DocState>()((set, get) => {
     },
 
     async openDocument(id) {
+      // the last edits of the one open now first (a save still waiting would write the new one instead)
+      await saveWaiting();
       const doc = await db.loadDocument(id);
       if (!doc) return false;
-      set({ doc, past: [], future: [], lastKey: null, readOnly: false });
+      set({ doc, past: [], future: [], lastKey: null, readOnly: false, saveError: null });
       return true;
     },
 
     closeDocument() {
+      // its last edits (still waiting for their save) go to the browser before it closes
+      const saved = saveWaiting();
       set({ doc: null, past: [], future: [], readOnly: false });
-      void get().loadList();
+      void saved.then(() => get().loadList());
     },
 
     async deleteDocument(id) {
@@ -260,6 +302,27 @@ export function featureIndex(studio: PartStudioTab, id: string) {
 
 export function effectiveRollback(studio: PartStudioTab) {
   return studio.rollback === null ? studio.features.length : Math.min(studio.rollback, studio.features.length);
+}
+
+let guarded = false;
+
+/**
+ * The last edits are not lost with the page: saved at once when the tab is hidden or left (the browser may not wait
+ * for the usual pause), and closing the tab with edits not saved yet (or a failed save) asks first.
+ */
+export function startSaveGuards() {
+  if (guarded) return;
+  guarded = true;
+  const flush = () => void useDoc.getState().flushSave();
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flush());
+  window.addEventListener('pagehide', flush);
+  window.addEventListener('beforeunload', (e) => {
+    const s = useDoc.getState();
+    if (!s.doc || (!s.saving && !s.saveError)) return;
+    flush();
+    e.preventDefault();
+    e.returnValue = '';
+  });
 }
 
 export type { Feature };

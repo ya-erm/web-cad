@@ -35,6 +35,9 @@ interface RelationDraft {
 
 const useRelation = create<{ draft: RelationDraft | null }>(() => ({ draft: null }));
 
+/** Close the relation dialog (without adding the relation). */
+export const closeRelationDialog = () => useRelation.setState({ draft: null });
+
 export function relationDialogOpen() {
   return useRelation.getState().draft !== null;
 }

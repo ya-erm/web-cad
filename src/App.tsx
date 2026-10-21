@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { useDoc } from './store/docStore';
+import { startSaveGuards, useDoc } from './store/docStore';
 import { DocumentsPage } from './ui/DocumentsPage';
 import { Editor } from './ui/Editor';
 import { requestPersistentStorage } from './store/persistence';
@@ -25,6 +25,8 @@ export default function App() {
 
   useEffect(() => {
     void requestPersistentStorage();
+    // the last edits saved when the page is hidden or closed
+    startSaveGuards();
     // a folder on the computer chosen earlier (Chrome / Edge): its linked documents are saved to their files
     void startFolder();
     // versions and history of the open document

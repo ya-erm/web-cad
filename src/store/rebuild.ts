@@ -13,6 +13,7 @@ import { buildStudio, useAssembly } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { composeDisplayed } from '../assembly/explode';
 import { usedTabs } from '../assembly/expand';
+import { t } from '../i18n';
 
 const PART_PALETTE = ['#a9bfd6', '#d8c3a1', '#a8c99e', '#d6a6a6', '#b3a8d6', '#9fcfcc', '#d9c27a', '#c9a6c9'];
 
@@ -227,6 +228,25 @@ export function startRebuildLoop() {
   const k = kernel();
   if (k.isReady) useEditor.setState({ kernelReady: true });
   k.readyListeners.add(() => useEditor.setState({ kernelReady: true }));
+  // the kernel failed or hung and was started anew: the model is built again — unless it keeps failing on it
+  const restarts: number[] = [];
+  k.restartListeners.add(() => {
+    const now = Date.now();
+    restarts.push(now);
+    while (restarts.length && now - restarts[0] > 60_000) restarts.shift();
+    useEditor.setState({ building: false, kernelReady: false });
+    if (restarts.length >= 3) {
+      useEditor.getState().showToast(t('The geometry kernel keeps failing on this model: undo the last change (Ctrl+Z) or reload the page'), 'error');
+      return;
+    }
+    useEditor.getState().showToast(t('The geometry kernel failed and was restarted: the model is being rebuilt'), 'error');
+    requestRebuild();
+  });
+  // another document: the builders of the one before (its Part Studios, variants, sources) are forgotten — their
+  // shapes would stay in the kernel's memory for the whole session otherwise (the new one is built anew anyway)
+  useDoc.subscribe((s, prev) => {
+    if (prev.doc && s.doc?.id !== prev.doc.id) void k.reset().catch(() => undefined);
+  });
   useDoc.subscribe(schedule);
   useEditor.subscribe((s, prev) => {
     if (s.editing !== prev.editing) schedule();

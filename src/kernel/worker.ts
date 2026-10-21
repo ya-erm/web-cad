@@ -109,13 +109,35 @@ async function handle(req: WorkerRequest) {
       builderFor(req.studioKey).place(req.instances, (key) => builders.get(key));
       post({ type: 'place', reqId: req.reqId });
       return;
+    case 'reset':
+      // shapes no longer referenced are deleted from the kernel's memory as they are collected
+      builders.clear();
+      post({ type: 'reset', reqId: req.reqId });
+      return;
   }
+}
+
+/**
+ * An error of the WebAssembly kernel itself (a trap: out of bounds, unreachable; an abort; out of memory), not of a
+ * geometry operation: OpenCascade's memory may be broken — the worker is to be started anew.
+ */
+function fatalError(e: unknown): boolean {
+  if (typeof WebAssembly !== 'undefined' && e instanceof WebAssembly.RuntimeError) return true;
+  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  return /Aborted\(|out of memory|memory access out of bounds|unreachable|table index is out of bounds/i.test(m);
 }
 
 async function pump() {
   if (running) return;
   running = true;
-  await ready;
+  try {
+    await ready;
+  } catch (e) {
+    // the kernel did not load: every request fails (the client starts the worker anew)
+    for (const req of queue.splice(0)) post({ type: 'error', reqId: req.reqId, message: `The geometry kernel did not load: ${errorMessage(e)}`, fatal: true });
+    running = false;
+    return;
+  }
   while (queue.length) {
     const req = queue.shift()!;
     // Skip superseded builds of the same studio: only the latest matters.
@@ -126,7 +148,7 @@ async function pump() {
     try {
       await handle(req);
     } catch (e) {
-      post({ type: 'error', reqId: req.reqId, message: errorMessage(e) });
+      post({ type: 'error', reqId: req.reqId, message: errorMessage(e), ...(fatalError(e) ? { fatal: true } : {}) });
     }
   }
   running = false;

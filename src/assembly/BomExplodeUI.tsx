@@ -23,6 +23,9 @@ const useBom = create<{ open: boolean; columns: BomColumn[]; type: BomType; coll
   collapsed: [],
 }));
 
+/** Close the bill of materials panel. */
+export const closeBom = () => useBom.setState({ open: false });
+
 export function toggleBom() {
   useBom.setState((s) => ({ open: !s.open }));
 }

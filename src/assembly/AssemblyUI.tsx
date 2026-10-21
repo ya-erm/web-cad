@@ -702,6 +702,12 @@ interface MateDraft {
 
 const useMate = create<{ draft: MateDraft | null }>(() => ({ draft: null }));
 
+/** Close the mate and insert dialogs (nothing added). */
+export function closeMateInsertDialogs() {
+  useMate.setState({ draft: null });
+  useInsert.setState({ open: false });
+}
+
 /** Whether the mate dialog is open (clicks in the graphics area pick mate ends then). */
 export function mateDialogOpen() {
   return useMate.getState().draft !== null;

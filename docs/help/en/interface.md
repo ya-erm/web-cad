@@ -17,7 +17,7 @@ alt: Part Studio window: top bar, toolbar, feature list and parts list, graphics
 10 16% 98% Tabs and status bar
 ```
 
-1. **Top bar.** The ◆ logo takes you back [to the document list](documents). Next to it are the document name (click to rename), the [**Versions**](versions) button, the file name if the document lives in a [folder on your computer](documents), and the save status: **Saved** or **Saving…**. On the right are the **?** button (help for the current context, `F1`), the **Settings** menu, and the **Export** button.
+1. **Top bar.** The ◆ logo takes you back [to the document list](documents). Next to it are the document name (click to rename), the [**Versions**](versions) button, the file name if the document lives in a [folder on your computer](documents), and the save status: **Saved**, **Saving…**, or a red **Not saved** when the browser did not let the document be written (see [Documents](documents)). On the right are the **?** button (help for the current context, `F1`), the **Settings** menu, and the **Export** button.
 2. **Toolbar.** Undo and redo, the Part Studio feature buttons, and the **Search tools** field: type part of a name and press `Enter` to start the first matching tool. In sketch mode, the [sketch tools](sketch) appear here. The buttons that do not fit in the window go behind the **»** button at the end of the toolbar — click it to reach them.
 3. **Feature list** (**Features**). The default geometry (**Origin**, the **Top**, **Front**, and **Right** planes) and the build history with the rollback bar. See [Feature list](feature-list).
 4. **Parts list** (**Parts**). All bodies in the Part Studio with their color and visibility. See [Parts and appearance](parts).
