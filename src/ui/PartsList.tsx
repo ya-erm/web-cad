@@ -36,6 +36,18 @@ export function PartsList() {
     e.preventDefault();
     const ref = { kind: 'part' as const, partId: id };
     if (!ed().selection.some((r) => sameRef(r, ref))) ed().setSelection([ref]);
+    // the menu acts on the selected parts (the one clicked among them), as in Onshape; renaming — on this one
+    const picked = ed().selection.flatMap((r) => (r.kind === 'part' ? [r.partId] : []));
+    const ids = picked.includes(id) ? picked : [id];
+    const many = ids.length > 1;
+    const setMeta = (patch: Record<string, unknown>, key?: string) =>
+      useDoc.getState().update(
+        (d) =>
+          withStudio(d, (s) => {
+            for (const p of ids) s.parts[p] = { ...(s.parts[p] ?? {}), ...patch };
+          }),
+        { key },
+      );
     const items = [
       {
         label: t('Rename'), icon: 'rename',
@@ -44,13 +56,14 @@ export function PartsList() {
           setName(parts.find((p) => p.id === id)?.name ?? '');
         },
       },
-      { label: hidden ? t('Show') : t('Hide'), icon: hidden ? 'eye' : 'eyeOff', action: () => setPartMeta(id, { hidden: !hidden }) },
+      // shown or hidden all as the one clicked becomes
+      { label: hidden ? t('Show') : t('Hide'), icon: hidden ? 'eye' : 'eyeOff', action: () => setMeta({ hidden: !hidden }) },
       {
         label: t('Hide other parts'), icon: 'eyeOff',
         action: () =>
           useDoc.getState().update((d) =>
             withStudio(d, (s) => {
-              for (const p of parts) if (p.id !== id) s.parts[p.id] = { ...(s.parts[p.id] ?? {}), hidden: true };
+              for (const p of parts) if (!ids.includes(p.id)) s.parts[p.id] = { ...(s.parts[p.id] ?? {}), hidden: true };
             }),
           ),
       },
@@ -63,18 +76,12 @@ export function PartsList() {
             }),
           ),
       },
-      {
-        // the selected parts (the one clicked among them), or just this one
-        label: t('Material…'), icon: 'massProps',
-        action: () => {
-          const ids = ed().selection.flatMap((r) => (r.kind === 'part' ? [r.partId] : []));
-          useEditor.setState({ materialOpen: { partIds: ids.includes(id) ? ids : [id] } });
-        },
-      },
-      { label: t('Export part'), icon: 'export', action: () => useEditor.setState({ exportOpen: { partIds: [id] } }) },
+      { label: t('Material…'), icon: 'massProps', action: () => useEditor.setState({ materialOpen: { partIds: ids } }) },
+      { label: t(many ? 'Export parts' : 'Export part'), icon: 'export', action: () => useEditor.setState({ exportOpen: { partIds: ids } }) },
       { separator: true, label: '' },
       {
-        label: t('Delete part'), icon: 'deletePart',
+        // one Delete part feature for all of them
+        label: t(many ? 'Delete parts' : 'Delete part'), icon: 'deletePart',
         danger: true,
         action: () => {
           if (!studio) return;
@@ -82,7 +89,7 @@ export function PartsList() {
             id: uid('f'),
             type: 'deletePart' as const,
             name: nextFeatureName(studio.features, 'deletePart'),
-            params: { ...defaultParams('deletePart'), parts: [ref] },
+            params: { ...defaultParams('deletePart'), parts: ids.map((partId) => ({ kind: 'part' as const, partId })) },
           };
           useDoc.getState().update((d) =>
             withStudio(d, (s) => {
@@ -101,11 +108,11 @@ export function PartsList() {
         items,
         palette: {
           colors: COLOR_CHOICES,
-          onPick: (color) => setPartMeta(id, { color }, `color-${id}`),
+          onPick: (color) => setMeta({ color }, `color-${ids.join()}`),
           // dragging the slider is one undo step; fully opaque leaves no value behind
           opacity: {
             value: studio?.parts[id]?.opacity ?? 1,
-            onChange: (v) => setPartMeta(id, { opacity: v >= 1 ? undefined : v }, `opacity-${id}`),
+            onChange: (v) => setMeta({ opacity: v >= 1 ? undefined : v }, `opacity-${ids.join()}`),
           },
         },
       },

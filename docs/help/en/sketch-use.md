@@ -25,7 +25,7 @@ width: 600
 ## Details {#details}
 
 - Projected entities are fixed (the **Fix** constraint) — you cannot move them by hand, but you can snap to them and add constraints and dimensions to them.
-- If the source changes (for example, a part dimension changes), the projected geometry updates on rebuild.
+- If the source changes (for example, a part dimension changes), the projected geometry updates on rebuild. Open such a sketch again and the projected entities stand where the source is now, with what is tied to them (coincidences, dimensions) following; **Finish sketch** saves their new place. If the model is still rebuilding, the sketch opens once the rebuild is done.
 - If the source is gone (the feature was deleted or changed so that the edge cannot be found), the sketch shows the warning "Some projected (Use) geometry could not be found".
 - If the geometry is already projected, the message "This geometry is already used in the sketch" appears.
 - To use projected geometry only as a reference that does not form regions, make it [construction](sketch#construction) (`Q`).

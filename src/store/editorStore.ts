@@ -9,6 +9,7 @@ import { uid } from '../core/ids';
 import { commitConfigured, configuredFeatures } from '../core/config';
 import { FIELD_SPECS, keepRefs, type SelToken } from '../core/fieldSpecs';
 import { activeStudio, effectiveRollback, featureIndex, useDoc, withStudio } from './docStore';
+import { withBuiltUse } from '../sketch/useGeometry';
 
 export type SketchTool =
   | 'select'
@@ -327,6 +328,30 @@ export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
 let viewCounter = 0;
 let toastCounter = 0;
 
+/** A sketch waiting for the rebuild to open (see `editFeature`): stop waiting. */
+let stopWaiting: (() => void) | null = null;
+/** Opening it now: no more waiting (the rebuild is done, or it took too long). */
+let openingNow = false;
+
+/** `then` once the model is built and not rebuilding (at most 15 s later); a newer call replaces the waiting one. */
+function afterRebuild(then: () => void) {
+  stopWaiting?.();
+  const stop = () => {
+    unsub();
+    clearTimeout(timer);
+    if (stopWaiting === stop) stopWaiting = null;
+  };
+  const finish = () => {
+    stop();
+    then();
+  };
+  const unsub = useEditor.subscribe((s) => {
+    if (!s.building && s.build) finish();
+  });
+  const timer = setTimeout(finish, 15000);
+  stopWaiting = stop;
+}
+
 export const useEditor = create<EditorState>()((set, get) => ({
   build: null,
   building: false,
@@ -417,7 +442,24 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const idx = featureIndex(studio, id);
     if (idx < 0) return;
     // the dialog shows the values of the chosen configuration
-    const f = configuredFeatures(studio)[idx];
+    let f = configuredFeatures(studio)[idx];
+    // a sketch with projected (Use) geometry while the model is being rebuilt (or not built yet): it opens when the
+    // rebuild is done — its projection must stand where its source is now, and once it is open the model is built only
+    // up to it, so it would not be projected again
+    if (f.type === 'sketch' && f.params.entities.some((e) => e.use) && (get().building || !get().build) && !openingNow) {
+      afterRebuild(() => {
+        openingNow = true;
+        try {
+          get().editFeature(id);
+        } finally {
+          openingNow = false;
+        }
+      });
+      return;
+    }
+    // a sketch: its projected (Use) geometry where its source is now (as the last rebuild projected it)
+    const built = f.type === 'sketch' ? get().build?.sketches.find((s) => s.featureId === id) : undefined;
+    if (f.type === 'sketch' && built) f = { ...f, params: withBuiltUse(f.params, built.entities) };
     set({
       hover: null,
       editing: { featureId: id, isNew: false, index: idx, draft: f },

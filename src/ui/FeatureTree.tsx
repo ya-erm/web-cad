@@ -90,10 +90,13 @@ export function FeatureTree() {
   const editing = useEditor((s) => s.editing);
   const selection = useEditor((s) => s.selection);
   // the feature that made the face or edge under the cursor in the graphics area (Onshape): its row is marked;
-  // an edge's — the later of its faces' features (the hole's rim: the hole)
+  // an edge's — the later of its faces' features (the hole's rim: the hole); a sketch's curve, point or region — the
+  // sketch (one a Derived feature brings, "derivedId.sketchId": that feature)
   const originCandidates = useEditor((s) => {
     const h = s.hover;
-    if (s.editing || !h || (h.kind !== 'face' && h.kind !== 'edge')) return '';
+    if (s.editing || !h) return '';
+    if (h.kind === 'sketchEntity' || h.kind === 'region') return h.sketchId.split('.')[0];
+    if (h.kind !== 'face' && h.kind !== 'edge') return '';
     const part = s.build?.parts.find((p) => p.id === h.partId);
     const ff = part?.faceFeatures;
     if (!part || !ff) return '';

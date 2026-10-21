@@ -17,22 +17,22 @@ The **Parts** list is below the feature list. The header shows the number of par
 ```figure
 image: ../images/parts-menu.png
 alt: A part context menu with visibility, export and color controls
-caption: The menu applies to the selected part. The palette changes its color; Hide only changes visibility.
+caption: The menu applies to the selected part (or all the selected ones). The palette changes its color; Hide only changes visibility.
 width: 350
 ```
 
-Right-click a part in the list:
+Right-click a part in the list. With several parts selected (by clicking their rows), right-clicking one of them applies the menu to all the selected parts, except **Rename**; the items then read **Export parts** and **Delete parts**.
 
 | Item | What it does |
 |---|---|
 | **Rename** | Changes the part name. |
-| **Hide** / **Show** | Part visibility. |
-| **Hide other parts** | Leaves only this part visible. |
+| **Hide** / **Show** | Visibility of the part (the selected parts). |
+| **Hide other parts** | Leaves only this part (the selected parts) visible. |
 | **Show all** | Shows all parts. |
 | **Material…** | The part's material (or all the selected parts') from the library or your own — the mass comes from its density, see [Measure](measure#material). |
-| **Export part** | Opens the export dialog for this part only, see [Import and export](import-export). |
-| **Delete part** | Adds a [Delete part](delete-part) feature to the history. |
-| **Change color** | A palette of 20 colors and **Custom color…** for any color. |
+| **Export part** / **Export parts** | Opens the export dialog for this part or all the selected ones, see [Import and export](import-export). |
+| **Delete part** / **Delete parts** | Adds a [Delete part](delete-part) feature to the history — one for all the selected parts. |
+| **Change color** | A palette of 20 colors and **Custom color…** for any color (for all the selected parts). |
 | **Opacity** | The slider under the palette, 10–100 %: a see-through part shows what is inside and behind it. Dragging it is one undo step; mass and export are not affected. |
 
 Color, opacity, name, and visibility are stored in the document. The color is preserved when you export to 3MF.

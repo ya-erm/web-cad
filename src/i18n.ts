@@ -270,6 +270,7 @@ const RU: Record<string, string> = {
   Split: 'Разделение',
   Transform: 'Перемещение',
   'Delete part': 'Удалить деталь',
+  'Delete parts': 'Удалить детали',
   Plane: 'Плоскость',
   Variable: 'Переменная',
   Import: 'Импорт',

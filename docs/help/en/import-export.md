@@ -10,7 +10,7 @@ width: 460
 ## Exporting parts {#export-parts}
 
 1. Select the parts to export in the [parts list](parts). If no parts are selected, all visible parts are exported.
-2. Click **Export** in the top-right corner (or **Export part** in the part context menu).
+2. Click **Export** in the top-right corner (or **Export part** in the part context menu; with several parts selected — **Export parts**, all the selected ones).
 3. In the **Export parts** dialog (the **Parts** tab), choose the **Format**, **Resolution** (for mesh formats), and **Units**. They are remembered for the next export.
 4. Click **Export**; the browser downloads the file.
 

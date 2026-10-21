@@ -162,3 +162,31 @@ export function updateUsedEntity(entities: SkEntity[], id: string, g: LocalGeom)
   }
   return false;
 }
+
+/**
+ * A sketch's projected (Use) geometry where the last rebuild re-projected it (`built`: the sketch's entities in the
+ * build): the document keeps the coordinates of the moment it was projected, and each rebuild re-projects only for
+ * itself — a sketch opened for editing must show its source where it is now. The used entities and their points take
+ * the built values, their fix constraints hold those. The same data when nothing moved.
+ */
+export function withBuiltUse(sketch: SketchData, built: SkEntity[]): SketchData {
+  const used = sketch.entities.filter((e) => e.use);
+  if (!used.length) return sketch;
+  const now = new Map(built.map((e) => [e.id, e] as const));
+  const ids = new Set(sketch.entities.map((e) => e.id));
+  // a used entity and the points it is drawn by (a line's ends, a circle's centre, a spline's points…)
+  const related = new Set<string>();
+  for (const e of used) {
+    related.add(e.id);
+    for (const v of Object.values(e)) for (const x of Array.isArray(v) ? v : [v]) if (typeof x === 'string' && ids.has(x)) related.add(x);
+  }
+  const fresh = (e: SkEntity) => {
+    const b = now.get(e.id);
+    return related.has(e.id) && b && b.type === e.type && JSON.stringify(b) !== JSON.stringify(e) ? b : null;
+  };
+  if (!sketch.entities.some(fresh)) return sketch;
+  const entities = sketch.entities.map((e) => (fresh(e) ? structuredClone(fresh(e)!) : e));
+  const usedIds = new Set(used.map((e) => e.id));
+  const constraints = sketch.constraints.map((c) => (c.type === 'fix' && usedIds.has(c.refs[0]) ? { ...c, frozen: frozenValues(c.refs[0], entities) } : c));
+  return { ...sketch, entities, constraints };
+}

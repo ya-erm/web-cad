@@ -1171,7 +1171,10 @@ export class Engine {
       this.addHighlight(r, COLORS.selected);
     }
     if (ed.hover && !seen.has(refKey(ed.hover))) this.addHighlight(ed.hover, COLORS.hover);
-    if (ed.hoverFeatures?.length && !ed.editing) this.addFeatureHighlight(new Set(ed.hoverFeatures), COLORS.hover);
+    if (ed.hoverFeatures?.length && !ed.editing) {
+      this.addFeatureHighlight(new Set(ed.hoverFeatures), COLORS.hover);
+      this.addSketchHover(new Set(ed.hoverFeatures));
+    }
     if (ed.compare) this.addCompare(ed.compare);
     this.syncTriad();
     this.needsRender = true;
@@ -1422,6 +1425,57 @@ export class Engine {
       );
       m.userData.sharedGeometry = true;
       this.highlightGroup.add(m);
+    }
+  }
+
+  /**
+   * The sketches and curves of features under the pointer in the feature list (a sketch, a Derived feature's
+   * sketches, a folder's): drawn in the hover colour over everything, hidden ones too — to see where they lie.
+   */
+  private addSketchHover(features: Set<string>) {
+    const build = useEditor.getState().build;
+    if (!build) return;
+    for (const s of build.sketches) {
+      if (!features.has(s.featureId) && !features.has(s.featureId.split('.')[0])) continue;
+      const map = entityMap(s.entities);
+      const lines: number[] = [];
+      const constr: number[] = [];
+      const pts: [number, number][] = [];
+      for (const e of s.entities) {
+        if (e.type === 'point') {
+          if (!e.owner) pts.push([e.x, e.y]);
+          continue;
+        }
+        if (e.construction && isTextPart(e.id)) continue;
+        (e.construction ? constr : lines).push(...polylineSegments(entityPolyline(e, map)));
+      }
+      const g = new THREE.Group();
+      g.matrixAutoUpdate = false;
+      g.matrix.copy(frameMatrix(s.frame));
+      g.matrixWorldNeedsUpdate = true;
+      // its regions lightly filled: where it lies shows on the parts
+      let regions: SketchRegion[] = [];
+      try {
+        regions = computeRegions(s.entities);
+      } catch {
+        // curves that do not close: lines only
+      }
+      for (const r of regions)
+        g.add(new THREE.Mesh(regionGeometry(r), new THREE.MeshBasicMaterial({ color: COLORS.hover, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false, depthTest: false })));
+      if (lines.length) g.add(fatSegments(lines, lineMaterial(COLORS.hover, 2.4, { depthTest: false })));
+      if (constr.length) g.add(fatSegments(constr, lineMaterial(COLORS.hover, 1.2, { dashed: true, depthTest: false })));
+      if (pts.length) g.add(pointsObject(pts, COLORS.hover, 6, false));
+      g.traverse((o) => void (o.renderOrder = 19));
+      this.highlightGroup.add(g);
+    }
+    // curves (a helix): as drawn
+    for (const c of build.curves) {
+      if (!features.has(c.featureId)) continue;
+      const segs: number[] = [];
+      for (let i = 0; i + 1 < c.points.length / 3; i++) segs.push(...c.points.subarray(i * 3, i * 3 + 6));
+      const l = fatSegments(segs, lineMaterial(COLORS.hover, 2.4, { depthTest: false }));
+      l.renderOrder = 19;
+      this.highlightGroup.add(l);
     }
   }
 

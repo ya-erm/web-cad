@@ -26,8 +26,8 @@ Each row shows the feature type icon and the feature name. For [variables](varia
 - **Yellow dot**: the feature built with a warning.
 - **Gray row**: the feature is suppressed or below the rollback bar.
 - Sketches, planes, and helices have an eye icon that hides or shows them in the graphics area.
-- **An orange mark on the left** — the feature that created the face or edge under the cursor in the graphics area (as in Onshape). A face trimmed or split later (the top of a block with a hole) stays with the feature that created it; an edge belongs to the later of its two faces' features (a hole's rim — to the hole). If the feature is in a collapsed folder, the folder is marked. There is no mark while a feature dialog is open.
-- The other way round: the pointer over a feature's row lights up the faces it created in the graphics area (over a folder — those of all its features).
+- **An orange mark on the left** — the feature that created the face or edge under the cursor in the graphics area (as in Onshape). A face trimmed or split later (the top of a block with a hole) stays with the feature that created it; an edge belongs to the later of its two faces' features (a hole's rim — to the hole). With a sketch's line, point, or region under the cursor, that sketch is marked (a sketch brought in by a [Derived](derived) feature — that feature), so you can see which sketch the lines come from. If the feature is in a collapsed folder, the folder is marked. There is no mark while a feature dialog is open.
+- The other way round: the pointer over a feature's row lights up the faces it created in the graphics area (over a folder — those of all its features). The pointer over a sketch (or a helix) shows it in orange over the model, its regions filled, even when the sketch is hidden with its eye or all sketches are hidden — so you can see where it lies.
 
 ## Selecting and editing {#selecting}
 
