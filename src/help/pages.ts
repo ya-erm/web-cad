@@ -33,6 +33,7 @@ export const FEATURE_HELP: Record<FeatureType, string> = {
   split: 'split',
   transform: 'transform',
   deletePart: 'delete-part',
+  compositePart: 'composite-part',
   plane: 'plane',
   variable: 'variable',
   import: 'import',

@@ -467,7 +467,14 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'expr', key: 'scale', label: 'Scale', unit: 'number', when: (p) => p.mode === 'scale' },
     { kind: 'check', key: 'copy', label: 'Copy part' },
   ],
-  deletePart: [{ kind: 'sel', key: 'parts' }],
+  deletePart: [
+    { kind: 'sel', key: 'parts' },
+    { kind: 'check', key: 'dissolve', label: 'Dissolve composite parts' },
+  ],
+  compositePart: [
+    { kind: 'sel', key: 'parts' },
+    { kind: 'check', key: 'closed', label: 'Closed' },
+  ],
   plane: [
     {
       kind: 'select',

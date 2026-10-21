@@ -1112,7 +1112,15 @@ class Runner {
       case 'deletePart': {
         const p = defaultParams('deletePart');
         p.parts = await this.parts(op.parts);
+        if (op.dissolve) p.dissolve = true;
         this.add('deletePart', op.name, p);
+        return;
+      }
+      case 'composite': {
+        const p = defaultParams('compositePart');
+        p.parts = await this.parts(op.parts);
+        p.closed = !!op.closed;
+        this.add('compositePart', op.name, p);
         return;
       }
       case 'feature': {
@@ -1370,6 +1378,7 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       faces: p.faces.length,
       edges: p.edges.filter((e) => !e.seam).length,
       ...(p.surface ? { surface: true as const } : {}),
+      ...(p.composite ? { composite: { closed: p.composite.closed, members: p.composite.members.map((m) => m.name) } } : {}),
     });
   }
   const vars = collectVariables(configured, rollback, units);

@@ -481,6 +481,14 @@ const ICONS = {
       {badge('remove')}
     </>
   ),
+  // Two bodies acting as one part: a dashed outline about them.
+  compositePart: (
+    <>
+      <rect x={1.5} y={2.5} width={21} height={19} rx={3} fill="none" stroke={BLUE} {...DASH} />
+      {box(8.5, 6, 5, 5, GREY_SHADE, SMALL)}
+      {box(15.5, 8.5, 5, 5, BLUE_SHADE, SMALL)}
+    </>
+  ),
   plane: (
     <>
       <polygon points={PLANE_OUTLINE} fill={BLUE_FILL} stroke={BLUE} />

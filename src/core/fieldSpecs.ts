@@ -150,6 +150,7 @@ export const FIELD_SPECS: FieldSpecs = {
     toMate: { label: 'Destination mate connector', accepts: ['mate'], max: 1 },
   },
   deletePart: { parts: { label: 'Parts to delete', accepts: ['part'] } },
+  compositePart: { parts: { label: 'Parts', accepts: ['part'] } },
   derived: { placeTo: { label: 'Location (mate connector)', accepts: ['mate'], max: 1 } },
   plane: {
     refs: { label: 'Entities', accepts: ['plane', 'planarFace', 'vertex', 'sketchPoint', 'origin', 'sketchLine', 'linearEdge'] },

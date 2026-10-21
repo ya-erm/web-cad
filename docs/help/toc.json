@@ -114,6 +114,7 @@
         { "id": "boolean", "icon": "boolean", "title": { "ru": "Булева операция", "en": "Boolean" } },
         { "id": "split", "icon": "split", "title": { "ru": "Разделение", "en": "Split" } },
         { "id": "transform", "icon": "transform", "title": { "ru": "Перемещение", "en": "Transform" } },
+        { "id": "composite-part", "icon": "compositePart", "title": { "ru": "Составная деталь", "en": "Composite part" } },
         { "id": "delete-part", "icon": "deletePart", "title": { "ru": "Удалить деталь", "en": "Delete part" } },
         { "id": "plane", "icon": "plane", "title": { "ru": "Плоскость", "en": "Plane" } },
         { "id": "helix", "icon": "helix", "title": { "ru": "Спираль", "en": "Helix" } },

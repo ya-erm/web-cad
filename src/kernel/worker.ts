@@ -63,7 +63,7 @@ async function handle(req: WorkerRequest) {
             if (!it) throw new Error(`Part is not built: ${p.name}`);
             return { name: p.name, color: it.color, shape: placedShape(it.shape, p) };
           })
-        : builderFor(req.studioKey).shapesFor(req.partIds);
+        : builderFor(req.studioKey).exportItems(req.partIds);
       let data: Uint8Array;
       let mime = 'application/octet-stream';
       if (req.format === 'step') {

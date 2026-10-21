@@ -301,6 +301,7 @@ function prefill(f: Draft<Feature>, sel: SelRef[]) {
       f.params.points = sel.filter((r) => r.kind === 'sketchEntity') as SelRef[];
       break;
     case 'deletePart':
+    case 'compositePart':
     case 'split':
     case 'transform':
       f.params.parts = parts as SelRef[];
@@ -353,6 +354,7 @@ export const FIRST_FIELD: Partial<Record<FeatureType, string>> = {
   split: 'parts',
   transform: 'parts',
   deletePart: 'parts',
+  compositePart: 'parts',
   plane: 'refs',
   helix: 'axis',
   mateConnector: 'location',

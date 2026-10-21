@@ -14,7 +14,7 @@ import type { EdgeInfo, FaceInfo } from './protocol';
 import { relativeTo } from './sigs';
 import { bboxDiag, bboxOf, fail, regionToFace } from './geom';
 import { topologyOf } from './meshing';
-import type { BuildState, PartState, SketchState } from './state';
+import { openComposite, type BuildState, type PartState, type SketchState } from './state';
 
 // ---------------------------------------------------------------------------
 // Signature matching
@@ -125,13 +125,18 @@ export function resolveVertex(st: BuildState, ref: SelRef): Vec3 {
   return topo.vertices[best];
 }
 
-/** Parts referenced directly or through one of their faces/edges/vertices. */
+/** Parts referenced directly or through one of their faces/edges/vertices; an open composite — its bodies. */
 export function resolveParts(st: BuildState, refs: SelRef[]): PartState[] {
   const out = new Map<string, PartState>();
   for (const r of refs) {
     if (r.kind === 'part' || r.kind === 'face' || r.kind === 'edge' || r.kind === 'vertex') {
       const p = st.parts.get(r.partId);
       if (p) out.set(p.id, p);
+      else
+        for (const m of openComposite(st, r.partId)?.members ?? []) {
+          const q = st.parts.get(m);
+          if (q) out.set(q.id, q);
+        }
     }
   }
   return [...out.values()];

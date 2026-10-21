@@ -2,7 +2,7 @@ import type * as R from 'replicad';
 import type { VariableTable } from '../core/expr';
 import type { BoolOp, PlaneFrame, SkEntity, Vec3 } from '../core/types';
 import type { SketchRegion } from '../sketch/regions';
-import type { Shape3D } from './geom';
+import { compoundOf, type Shape3D } from './geom';
 import type { PartFaceOrigins } from './faceOrigins';
 import type { HoleCallout } from './protocol';
 
@@ -80,6 +80,17 @@ export interface ToolRecord {
   op: BoolOp;
 }
 
+/**
+ * A composite part (Onshape): bodies acting as one part. Closed — they are consumed: the composite is a part of its
+ * own, the compound of them (the members, in order, are what it was made of); open — they stay parts of their own, and
+ * the composite is the compound of those of them still there (made when asked for: `compositeShape`).
+ */
+export interface CompositeState {
+  featureId: string;
+  members: string[];
+  closed: boolean;
+}
+
 /** Immutable-by-convention snapshot of the part studio after N features. */
 export interface BuildState {
   parts: Map<string, PartState>;
@@ -101,6 +112,10 @@ export interface BuildState {
   holes: Map<string, HoleState>;
   /** The features that made each part's faces (replaced as a whole after each feature, see faceOrigins.ts). */
   faceOrigins: Map<string, PartFaceOrigins>;
+  /** Composite parts by their part id. */
+  composites: Map<string, CompositeState>;
+  /** The ids of the composites ever made, in creation order (default "Composite part N" names; not counted as parts). */
+  compositeOrder: string[];
 }
 
 export function emptyState(): BuildState {
@@ -118,6 +133,8 @@ export function emptyState(): BuildState {
     derived: new Map(),
     threads: new Map(),
     holes: new Map(),
+    composites: new Map(),
+    compositeOrder: [],
   };
 }
 
@@ -136,6 +153,8 @@ export function cloneState(s: BuildState): BuildState {
     derived: new Map(s.derived),
     threads: new Map(s.threads),
     holes: new Map(s.holes),
+    composites: new Map(s.composites),
+    compositeOrder: s.compositeOrder,
   };
 }
 
@@ -154,7 +173,39 @@ export function removePart(st: BuildState, id: string) {
   st.parts.delete(id);
   // its cosmetic threads go with it
   for (const [k, t] of st.threads) if (t.owner === id) st.threads.delete(k);
+  // a closed composite removed (consumed, deleted): it is no composite any more
+  if (st.composites.get(id)?.closed) st.composites.delete(id);
 }
+
+/** An open composite: bodies that stay parts of their own, grouped (none — not one, or none of them left). */
+export function openComposite(st: BuildState, id: string): CompositeState | null {
+  const c = st.composites.get(id);
+  return c && !c.closed && c.members.some((m) => st.parts.has(m)) ? c : null;
+}
+
+/**
+ * A part's shape, an open composite's too (the compound of its members still there, made once per state for the
+ * same members' shapes); undefined — there is no such part.
+ */
+export function partShape(st: BuildState, id: string): Shape3D | undefined {
+  const p = st.parts.get(id);
+  if (p) return p.shape;
+  const c = openComposite(st, id);
+  if (!c) return undefined;
+  const shapes = c.members.flatMap((m) => {
+    const s = st.parts.get(m)?.shape;
+    return s ? [s] : [];
+  });
+  let byState = openShapes.get(st);
+  if (!byState) openShapes.set(st, (byState = new Map()));
+  const known = byState.get(id);
+  if (known && known.of.length === shapes.length && known.of.every((s, i) => s === shapes[i])) return known.shape;
+  const shape = compoundOf(shapes);
+  byState.set(id, { of: shapes, shape });
+  return shape;
+}
+
+const openShapes = new WeakMap<BuildState, Map<string, { of: Shape3D[]; shape: Shape3D }>>();
 
 /** Part `from` merged into part `to` (before `from` is removed): its cosmetic threads are `to`'s now. */
 export function adoptThreads(st: BuildState, from: string, to: string) {

@@ -5,7 +5,7 @@ import * as R from 'replicad';
 import type { EvalContext } from '../core/expr';
 import type { Feature, Vec2, Vec3, ViewOrientation } from '../core/types';
 import { perpendicular as perpendicularTo, v3 } from '../core/math';
-import { FeatureError, bboxOf, compoundOf, isSurface, prism, type Shape3D } from './geom';
+import { FeatureError, bboxOf, bodiesOf, compoundOf, isSurface, prism, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
 import { exportMesh, meshPart, topologyOf } from './meshing';
@@ -36,7 +36,7 @@ import { trackFaceOrigins } from './faceOrigins';
 import { resolveAxis, resolveCurveEdges, resolveEdge, resolveFace, resolveParts, resolvePlaneRef, resolvePoint, resolveVertex } from './refs';
 import { edgeSig, faceSig, vertexSig } from './sigs';
 import { angleBetween, centerDistance, maxDistance, type Center, type Direction } from './measure';
-import { cloneState, emptyState, type BuildState, type ThreadState } from './state';
+import { cloneState, emptyState, openComposite, partShape, type BuildState, type ThreadState } from './state';
 import type { SelRef, ViewRef } from '../core/types';
 
 export const DEFAULT_PART_COLOR = '#a9bfd6';
@@ -83,11 +83,22 @@ export class StudioBuilder {
     if (m?.name) return m.name;
     const d = st.derived.get(id);
     if (d) return d.name;
-    // surfaces are counted apart (Onshape: "Surface 1"), parts without them
+    // surfaces and composites are counted apart (Onshape: "Surface 1", "Composite part 1"), parts without them
     const s = st.surfaceOrder.indexOf(id);
     if (s >= 0) return `Surface ${s + 1}`;
-    if (!st.surfaceOrder.length) return `Part ${st.partOrder.indexOf(id) + 1}`;
-    return `Part ${st.partOrder.filter((x) => !st.surfaceOrder.includes(x)).indexOf(id) + 1}`;
+    const c = st.compositeOrder.indexOf(id);
+    if (c >= 0) return `Composite part ${c + 1}`;
+    if (!st.surfaceOrder.length && !st.compositeOrder.length) return `Part ${st.partOrder.indexOf(id) + 1}`;
+    return `Part ${st.partOrder.filter((x) => !st.surfaceOrder.includes(x) && !st.compositeOrder.includes(x)).indexOf(id) + 1}`;
+  }
+
+  /** The parts a build shows: its parts, and its open composites (made of some of them). */
+  private shownParts(st: BuildState): { id: string; shape: Shape3D }[] {
+    const open = [...st.composites.keys()].flatMap((id) => {
+      const shape = openComposite(st, id) && partShape(st, id);
+      return shape ? [{ id, shape }] : [];
+    });
+    return [...st.parts.values(), ...open];
   }
 
   /** A part's own colour, if it has one (given here, or its colour in the source). */
@@ -109,6 +120,8 @@ export class StudioBuilder {
     const m = meshPart(id, shape, { name: this.partName(st, id), color: this.ownColor(st, id) || DEFAULT_PART_COLOR, hidden: !!this.meta[id]?.hidden }, quality);
     if (st.derived.has(id)) m.derived = true;
     if (isSurface(shape)) m.surface = true;
+    const c = st.composites.get(id);
+    if (c) m.composite = { closed: c.closed, members: c.members.map((p) => ({ id: p, name: this.partName(st, p) })) };
     const origins = st.faceOrigins.get(id);
     if (origins?.shape === shape) m.faceFeatures = origins.faces.map((f) => f.feature);
     return m;
@@ -166,8 +179,8 @@ export class StudioBuilder {
       type: 'build',
       reqId: req.reqId,
       // a source built for another Part Studio's Derived feature: no meshes, only its parts' names
-      parts: req.meshless ? [] : [...final.parts.values()].map((p) => this.meshOf(final, p.id, p.shape, quality)),
-      partList: [...final.parts.keys()].map((id) => ({ id, name: this.partName(final, id) })),
+      parts: req.meshless ? [] : this.shownParts(final).map((p) => this.meshOf(final, p.id, p.shape, quality)),
+      partList: this.shownParts(final).map(({ id }) => ({ id, name: this.partName(final, id) })),
       sketches: this.sketchResults(final),
       planes: this.planeResults(final),
       mates: [...final.mates.values()].map((m) => ({ featureId: m.featureId, name: m.name, frame: m.frame, owner: m.owner })),
@@ -240,13 +253,36 @@ export class StudioBuilder {
   // Export / measure / projection on the current state
   // -------------------------------------------------------------------------
 
+  /** The parts asked for (an open composite: the compound of its bodies), by default the parts not hidden. */
   shapesFor(partIds: string[]): { id: string; name: string; color: string; shape: Shape3D }[] {
     const st = this.current;
     const ids = partIds.length ? partIds : [...st.parts.keys()].filter((id) => !this.meta[id]?.hidden);
-    return ids
-      .map((id) => st.parts.get(id))
-      .filter((p): p is NonNullable<typeof p> => !!p)
-      .map((p) => ({ id: p.id, name: this.partName(st, p.id), color: this.partColor(p.id), shape: p.shape }));
+    return ids.flatMap((id) => {
+      const shape = partShape(st, id);
+      return shape ? [{ id, name: this.partName(st, id), color: this.partColor(id), shape }] : [];
+    });
+  }
+
+  /**
+   * The parts to export: a composite as its bodies (Onshape) — an open one's under their own names, a closed one's
+   * under the names they had (when it still has as many), else "Composite part 1 (2)".
+   */
+  exportItems(partIds: string[]): { id: string; name: string; color: string; shape: Shape3D }[] {
+    const st = this.current;
+    return this.shapesFor(partIds).flatMap((it) => {
+      const c = st.composites.get(it.id);
+      if (!c) return [it];
+      if (!c.closed) return this.shapesFor(c.members.filter((m) => st.parts.has(m)));
+      // (its bodies come solids first, then surfaces: the members in that order)
+      const bodies = bodiesOf(it.shape);
+      const members = [...c.members.filter((m) => !st.surfaceOrder.includes(m)), ...c.members.filter((m) => st.surfaceOrder.includes(m))];
+      return bodies.map((shape, i) => ({
+        ...it,
+        id: `${it.id}/${i}`,
+        name: bodies.length === members.length ? this.partName(st, members[i]) : `${it.name} (${i + 1})`,
+        shape,
+      }));
+    });
   }
 
   /**
@@ -259,10 +295,12 @@ export class StudioBuilder {
     const meta: Meta = {};
     for (const p of instances) {
       const src = builderOf(p.studioKey);
-      const part = src?.current.parts.get(p.partId);
-      if (!src || !part) continue;
+      // (an open composite: the compound of its bodies, with their holes and threads)
+      const shape = src && partShape(src.current, p.partId);
+      if (!src || !shape) continue;
+      const owners = new Set([p.partId, ...(openComposite(src.current, p.partId)?.members ?? [])]);
       const id = p.id ?? p.name;
-      st.parts.set(id, { ...part, id, shape: placedShape(part.shape, p) });
+      st.parts.set(id, { id, shape: placedShape(shape, p) });
       st.partOrder.push(id);
       meta[id] = { name: p.name, color: src.partColor(p.partId) };
       // p' = Rz·Ry·Rx·p + t
@@ -270,23 +308,23 @@ export class StudioBuilder {
       const turn = (q: Vec3): Vec3 => [0, 1, 2].map((i) => M[i * 3] * q[0] + M[i * 3 + 1] * q[1] + M[i * 3 + 2] * q[2]) as Vec3;
       const at = (q: Vec3) => v3.add(turn(q), p.position);
       // each instance's holes counted apart ("4×" — of one part, as its Hole feature made them)
-      for (const [k, h] of src.current.holes) if (h.owner === p.partId) st.holes.set(`${id}/${k}`, { ...h, owner: id, source: `${id}/${h.source}`, origin: at(h.origin), dir: turn(h.dir) });
-      for (const [k, th] of src.current.threads) if (th.owner === p.partId) st.threads.set(`${id}/${k}`, { ...th, owner: id, origin: at(th.origin), dir: turn(th.dir) });
+      for (const [k, h] of src.current.holes) if (h.owner && owners.has(h.owner)) st.holes.set(`${id}/${k}`, { ...h, owner: id, source: `${id}/${h.source}`, origin: at(h.origin), dir: turn(h.dir) });
+      for (const [k, th] of src.current.threads) if (th.owner && owners.has(th.owner)) st.threads.set(`${id}/${k}`, { ...th, owner: id, origin: at(th.origin), dir: turn(th.dir) });
     }
     this.current = st;
     this.meta = meta;
   }
 
   async exportStep(partIds: string[], unit: 'mm' | 'in' = 'mm'): Promise<Uint8Array> {
-    return stepOf(this.shapesFor(partIds), unit);
+    return stepOf(this.exportItems(partIds), unit);
   }
 
   async exportStl(partIds: string[], tolerance: number, angularTolerance: number, binary: boolean): Promise<Uint8Array> {
-    return stlOf(this.shapesFor(partIds), tolerance, angularTolerance, binary);
+    return stlOf(this.exportItems(partIds), tolerance, angularTolerance, binary);
   }
 
   meshes(partIds: string[], tolerance: number, angularTolerance: number) {
-    return this.shapesFor(partIds).map((it) => ({ id: it.id, name: it.name, color: it.color, ...exportMesh(it.shape, tolerance, angularTolerance) }));
+    return this.exportItems(partIds).map((it) => ({ id: it.id, name: it.name, color: it.color, ...exportMesh(it.shape, tolerance, angularTolerance) }));
   }
 
   measure(refs: SelRef[]): Omit<MeasureResult, 'type' | 'reqId'> {
@@ -340,8 +378,10 @@ export class StudioBuilder {
       centers.push(center);
       dirs.push(dir);
       if (r.kind === 'part') {
-        const p = st.parts.get(r.partId);
-        if (!p) continue;
+        // (an open composite: its bodies as one)
+        const shape = partShape(st, r.partId);
+        if (!shape) continue;
+        const p = { shape };
         shapes.push(p.shape);
         if (refs.length === 1 && isSurface(p.shape)) {
           // a surface: its area (no volume, no mass)

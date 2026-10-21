@@ -60,6 +60,11 @@ export interface PartMesh {
   derived?: boolean;
   /** A surface body (faces with no solid): no volume, listed under Surfaces. */
   surface?: boolean;
+  /**
+   * A composite part (Onshape), listed under Composite parts: its bodies (`members`, as they were named). Closed — they
+   * are no parts of their own any more; open — they are, and are drawn as such (the composite is not drawn itself).
+   */
+  composite?: { closed: boolean; members: { id: string; name: string }[] };
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;

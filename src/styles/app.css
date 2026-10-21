@@ -1148,6 +1148,19 @@ textarea {
   color: var(--text-3);
   padding: 8px 12px;
 }
+/* a composite part's bodies under it; a closed one's (no parts of their own any more) muted */
+.tree-item.composite-member {
+  height: 22px;
+  padding-left: 48px;
+  font-size: 12px;
+}
+.tree-item.composite-member.consumed {
+  color: var(--text-3);
+  cursor: default;
+}
+.tree-item.composite-member.consumed:hover {
+  background: none;
+}
 .tree-group {
   color: var(--text-3);
   font-size: 11px;

@@ -10,6 +10,13 @@ Removes parts from the model starting at this point in the history. It is a feat
 2. In the **Parts to delete** field, select parts.
 3. Click ✓ (`Enter`).
 
+## Composite parts {#composite}
+
+- Deleting an [open composite part](composite-part) removes only the composite: the parts it is made of stay.
+- With **Dissolve composite parts** checked, the composite parts selected are not deleted but dissolved. A closed one falls apart into its parts, with their names, colors and materials back; an open one just goes. Parts that are not composites are left alone.
+
+The **Dissolve composite part** command in the Parts list's context menu adds such a feature.
+
 > **Tip.** If you just want a part out of the way, hide it with the eye icon in the Parts list — this does not change the history.
 
 | Action | What changes |

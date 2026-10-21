@@ -300,7 +300,13 @@ export type AgentOp =
   /** Move parts so that mate connector `from` lands on `to` (Onshape "mate connector to mate connector"). */
   | (Named & { op: 'transform'; parts: Parts; from: string; to: string; copy?: boolean })
   | (Named & { op: 'boolean'; type: 'union' | 'subtract' | 'intersect'; targets: Parts; tools: Parts; keepTools?: boolean })
-  | (Named & { op: 'deletePart'; parts: Parts })
+  /** Delete parts; with `dissolve` (Dissolve composite parts) — the composites among them become their bodies again. */
+  | (Named & { op: 'deletePart'; parts: Parts; dissolve?: boolean })
+  /**
+   * Composite part (Onshape): the parts act as one part (one row in the BOM, one instance in an assembly). `closed` —
+   * they are consumed (only the composite is left); open by default — they stay parts of their own too.
+   */
+  | (Named & { op: 'composite'; parts: Parts; closed?: boolean })
   /** Any feature type with raw params; values like {"$edges": …} are resolved (see docs). */
   | (Named & { op: 'feature'; type: FeatureType; params: Record<string, unknown> })
   /**
@@ -490,6 +496,8 @@ export interface PartSummary {
   edges: number;
   /** A surface body (no volume). */
   surface?: true;
+  /** A composite part: the names of its bodies; closed — they are no parts of their own, open — they are listed too. */
+  composite?: { closed: boolean; members: string[] };
 }
 
 export interface SketchSummary {

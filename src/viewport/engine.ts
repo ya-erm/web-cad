@@ -672,7 +672,8 @@ export class Engine {
     for (const c of this.partGeos.values()) c.used = false;
     if (build) {
       for (const p of build.parts) {
-        if (p.hidden) continue;
+        // an open composite is its bodies, drawn as themselves (in an assembly an instance of it is drawn: no members there)
+        if (p.hidden || (p.composite && !p.composite.closed && build.parts.some((q) => p.composite!.members.some((m) => m.id === q.id)))) continue;
         this.addPart(p, changed.has(p.id), studio?.parts[p.id]?.opacity);
       }
       // cosmetic threads of tapped holes (not of hidden parts)
@@ -1569,8 +1570,11 @@ export class Engine {
         return;
       }
       case 'part': {
-        // a sub-assembly instance lights all its parts (`X/…`)
-        const pos = this.parts.get(r.partId) ? [this.parts.get(r.partId)!] : [...this.parts.entries()].filter(([pid]) => pid.startsWith(`${r.partId}/`)).map(([, p]) => p);
+        // a sub-assembly instance lights all its parts (`X/…`), an open composite — its bodies
+        const members = useEditor.getState().build?.parts.find((p) => p.id === r.partId)?.composite?.members ?? [];
+        const pos = this.parts.get(r.partId)
+          ? [this.parts.get(r.partId)!]
+          : [...this.parts.entries()].filter(([pid]) => pid.startsWith(`${r.partId}/`) || members.some((m) => m.id === pid)).map(([, p]) => p);
         for (const po of pos) {
           const m = new THREE.Mesh(
             po.mesh.geometry,

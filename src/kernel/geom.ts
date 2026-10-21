@@ -105,6 +105,27 @@ export function splitPieces(target: Shape3D, tool: R.AnyShape): Shape3D[] {
   return [...groups.values()].map((g) => sewFaces(g));
 }
 
+/**
+ * The bodies a shape is made of (a composite's): its solids, then its surfaces — shells outside the solids, faces
+ * outside the shells; a shape that is one body — itself.
+ */
+export function bodiesOf(shape: Shape3D): Shape3D[] {
+  if (!(shape instanceof R.Compound)) return [shape];
+  const oc = R.getOC();
+  const ta = oc.TopAbs_ShapeEnum;
+  const out: Shape3D[] = [];
+  for (const [find, avoid] of [
+    [ta.TopAbs_SOLID, ta.TopAbs_SHAPE],
+    [ta.TopAbs_SHELL, ta.TopAbs_SOLID],
+    [ta.TopAbs_FACE, ta.TopAbs_SHELL],
+  ]) {
+    const ex = new oc.TopExp_Explorer(shape.wrapped, find, avoid);
+    for (; ex.More(); ex.Next()) out.push(R.cast(ex.Current()) as Shape3D);
+    ex.delete();
+  }
+  return out.length ? out : [shape];
+}
+
 export function compoundOf(shapes: R.AnyShape[]): Shape3D {
   if (shapes.length === 1) return shapes[0] as Shape3D;
   // makeCompound deletes its inputs' wrappers, so pass clones.

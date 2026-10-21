@@ -11,6 +11,7 @@ The **Parts** list is below the feature list. The header shows the number of par
 - Double-click to rename (`Enter` saves, `Esc` cancels).
 - The eye icon at the right of the row hides or shows the part: it appears on hover, and anywhere on the row's right end works.
 - The eye in the **Parts** header hides all the parts (surfaces too) while any is shown, and shows them all when all are hidden — one undo step.
+- Surfaces and [composite parts](composite-part) have sections of their own after the parts. The arrow at a composite part expands the parts it is made of.
 
 ## Context menu {#context-menu}
 
@@ -31,6 +32,7 @@ Right-click a part in the list. With several parts selected (by clicking their r
 | **Show all** | Shows all parts. |
 | **Material…** | The part's material (or all the selected parts') from the library or your own — the mass comes from its density, see [Measure](measure#material). |
 | **Export part** / **Export parts** | Opens the export dialog for this part or all the selected ones, see [Import and export](import-export). |
+| **Dissolve composite part** | For [composite parts](composite-part): adds a [Delete part](delete-part) with **Dissolve composite parts** checked — their parts are parts of their own again. |
 | **Delete part** / **Delete parts** | Adds a [Delete part](delete-part) feature to the history — one for all the selected parts. |
 | **Change color** | A palette of 20 colors and **Custom color…** for any color (for all the selected parts). |
 | **Opacity** | The slider under the palette, 10–100 %: a see-through part shows what is inside and behind it. Dragging it is one undo step; mass and export are not affected. |

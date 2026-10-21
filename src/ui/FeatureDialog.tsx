@@ -47,6 +47,7 @@ export const FEATURE_ICONS: Record<FeatureType, IconName> = {
   split: 'split',
   transform: 'transform',
   deletePart: 'deletePart',
+  compositePart: 'compositePart',
   plane: 'plane',
   variable: 'variable',
   import: 'import',

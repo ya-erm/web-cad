@@ -630,6 +630,15 @@ export interface TransformParams {
 
 export interface DeletePartParams {
   parts: SelRef[];
+  /** Dissolve composite parts (Onshape): the composites selected go, their bodies are parts again. */
+  dissolve?: boolean;
+}
+
+/** Composite part (Onshape): the parts selected act as one part. */
+export interface CompositePartParams {
+  parts: SelRef[];
+  /** Closed: they are consumed — only the composite is left; open: they stay parts of their own as well. */
+  closed: boolean;
 }
 
 export interface PlaneParams {
@@ -722,6 +731,7 @@ export interface FeatureParamsMap {
   split: SplitParams;
   transform: TransformParams;
   deletePart: DeletePartParams;
+  compositePart: CompositePartParams;
   plane: PlaneParams;
   variable: VariableParams;
   import: ImportParams;

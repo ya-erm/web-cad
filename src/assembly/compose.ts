@@ -167,9 +167,10 @@ export function composeAssembly(tab: AssemblyTab, sources: AssemblySources): { b
     m.hidden = !!inst.hidden;
     parts.push(m);
     if (inst.hidden) continue;
-    // the part's own mate connectors travel with the instance
+    // the part's own mate connectors travel with the instance (an open composite's: its bodies')
+    const owners = new Set([inst.partId, ...(src.composite && !src.composite.closed ? src.composite.members.map((m) => m.id) : [])]);
     for (const mc of sources.get(sourceKey(inst))?.mates ?? []) {
-      if (mc.owner !== inst.partId) continue;
+      if (!mc.owner || !owners.has(mc.owner)) continue;
       const f = mc.frame;
       mates.push({
         featureId: instanceConnectorId(inst.id, mc.featureId),

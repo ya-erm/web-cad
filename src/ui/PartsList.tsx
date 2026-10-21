@@ -3,6 +3,8 @@ import { useEditor, sameRef } from '../store/editorStore';
 import { activeStudio, useDoc, withStudio } from '../store/docStore';
 import { uid } from '../core/ids';
 import { defaultParams, nextFeatureName } from '../core/features';
+import type { Feature, FeatureParamsMap } from '../core/types';
+import type { PartMesh } from '../kernel/protocol';
 import { Icon } from './icons';
 import { t } from '../i18n';
 
@@ -29,8 +31,23 @@ export function PartsList() {
   const studio = activeStudio(doc);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [name, setName] = useState('');
+  // composite parts shown with their bodies
+  const [expanded, setExpanded] = useState<string[]>([]);
   const parts = build?.parts ?? [];
   const ed = useEditor.getState;
+
+  /** A feature of the Part Studio, inserted at the rollback bar. */
+  const insertFeature = <T extends 'deletePart'>(type: T, params: FeatureParamsMap[T]) => {
+    if (!studio) return;
+    const f = { id: uid('f'), type, name: nextFeatureName(studio.features, type), params };
+    useDoc.getState().update((d) =>
+      withStudio(d, (s) => {
+        const at = s.rollback ?? s.features.length;
+        s.features.splice(at, 0, f as Feature);
+        if (s.rollback !== null) s.rollback++;
+      }),
+    );
+  };
 
   const menu = (e: React.MouseEvent, id: string, hidden: boolean) => {
     e.preventDefault();
@@ -40,6 +57,7 @@ export function PartsList() {
     const picked = ed().selection.flatMap((r) => (r.kind === 'part' ? [r.partId] : []));
     const ids = picked.includes(id) ? picked : [id];
     const many = ids.length > 1;
+    const composites = ids.filter((p) => parts.find((x) => x.id === p)?.composite);
     const setMeta = (patch: Record<string, unknown>, key?: string) =>
       useDoc.getState().update(
         (d) =>
@@ -79,26 +97,20 @@ export function PartsList() {
       { label: t('Material…'), icon: 'massProps', action: () => useEditor.setState({ materialOpen: { partIds: ids } }) },
       { label: t(many ? 'Export parts' : 'Export part'), icon: 'export', action: () => useEditor.setState({ exportOpen: { partIds: ids } }) },
       { separator: true, label: '' },
+      // the composites among them: their bodies parts again (a Delete part feature dissolving them)
+      ...(composites.length
+        ? [
+            {
+              label: t(composites.length > 1 ? 'Dissolve composite parts' : 'Dissolve composite part'), icon: 'compositePart',
+              action: () => insertFeature('deletePart', { parts: composites.map((partId) => ({ kind: 'part' as const, partId })), dissolve: true }),
+            },
+          ]
+        : []),
       {
         // one Delete part feature for all of them
         label: t(many ? 'Delete parts' : 'Delete part'), icon: 'deletePart',
         danger: true,
-        action: () => {
-          if (!studio) return;
-          const f = {
-            id: uid('f'),
-            type: 'deletePart' as const,
-            name: nextFeatureName(studio.features, 'deletePart'),
-            params: { ...defaultParams('deletePart'), parts: ids.map((partId) => ({ kind: 'part' as const, partId })) },
-          };
-          useDoc.getState().update((d) =>
-            withStudio(d, (s) => {
-              const at = s.rollback ?? s.features.length;
-              s.features.splice(at, 0, f);
-              if (s.rollback !== null) s.rollback++;
-            }),
-          );
-        },
+        action: () => insertFeature('deletePart', { ...defaultParams('deletePart'), parts: ids.map((partId) => ({ kind: 'part' as const, partId })) }),
       },
     ];
     useEditor.setState({
@@ -119,14 +131,39 @@ export function PartsList() {
     });
   };
 
-  // surfaces apart, after the parts (Onshape: Parts / Surfaces)
-  const solids = parts.filter((p) => !p.surface);
-  const surfaces = parts.filter((p) => p.surface);
+  // surfaces and composite parts apart, after the parts (Onshape: Parts / Surfaces / Composite parts)
+  const solids = parts.filter((p) => !p.surface && !p.composite);
+  const surfaces = parts.filter((p) => p.surface && !p.composite);
+  const composites = parts.filter((p) => p.composite);
   const anyShown = parts.some((p) => !p.hidden);
+  const group = (key: string, label: string, n: number) => (
+    <div key={key} className="tree-group">
+      {t(label)} <span className="count">({n})</span>
+    </div>
+  );
+  // the bodies of a composite part: an open one's are parts of their own (a click selects one), a closed one's are not
+  const members = (p: PartMesh) =>
+    expanded.includes(p.id) &&
+    p.composite!.members.map((m) => {
+      const own = !p.composite!.closed && parts.some((x) => x.id === m.id);
+      const ref = { kind: 'part' as const, partId: m.id };
+      return (
+        <div
+          key={`${p.id}/${m.id}`}
+          className={'tree-item composite-member' + (own ? '' : ' consumed') + (own && selection.some((r) => sameRef(r, ref)) ? ' selected' : '')}
+          title={own ? undefined : t('In the composite part only')}
+          onClick={own ? () => ed().pickIntoField(ref, 'part') || ed().select(ref) : undefined}
+          onMouseEnter={own ? () => ed().setHover(ref) : undefined}
+          onMouseLeave={own ? () => ed().setHover(null) : undefined}
+        >
+          <span className="tree-name">{m.name}</span>
+        </div>
+      );
+    });
   return (
     <div className="panel-section parts">
       <div className="panel-header">
-        {t('Parts')} <span className="count">({solids.length})</span>
+        {t('Parts')} <span className="count">({solids.length + composites.filter((p) => p.composite!.closed).length})</span>
         {parts.length > 0 && (
           // all of them at once (surfaces too): hide while any is shown, else show all; one undo step
           <span
@@ -145,15 +182,15 @@ export function PartsList() {
         )}
       </div>
       <div className="panel-body">
-        {[...solids, ...surfaces].map((p, i) => {
+        {[...solids, ...surfaces, ...composites].map((p, i) => {
           const ref = { kind: 'part' as const, partId: p.id };
           const sel = selection.some((r) => sameRef(r, ref));
           const head =
-            p.surface && i === solids.length ? (
-              <div key="surfaces" className="tree-group">
-                {t('Surfaces')} <span className="count">({surfaces.length})</span>
-              </div>
-            ) : null;
+            i === solids.length && surfaces.length
+              ? group('surfaces', 'Surfaces', surfaces.length)
+              : i === solids.length + surfaces.length && composites.length
+                ? group('composites', 'Composite parts', composites.length)
+                : null;
           return [
             head,
             <div
@@ -169,7 +206,28 @@ export function PartsList() {
               }}
               onContextMenu={(e) => menu(e, p.id, p.hidden)}
             >
-              {p.surface ? <Icon name="offsetSurface" size={14} /> : <span className="color-swatch" style={{ background: p.color }} />}
+              {p.composite && (
+                <span
+                  className="tree-icon"
+                  title={t(expanded.includes(p.id) ? 'Collapse' : 'Expand')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded((x) => (x.includes(p.id) ? x.filter((k) => k !== p.id) : [...x, p.id]));
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  <Icon name={expanded.includes(p.id) ? 'chevronDown' : 'chevronRight'} size={12} />
+                </span>
+              )}
+              {p.composite ? (
+                <span title={t(p.composite.closed ? 'Closed composite part' : 'Open composite part: its parts are listed too')}>
+                  <Icon name="compositePart" size={14} />
+                </span>
+              ) : p.surface ? (
+                <Icon name="offsetSurface" size={14} />
+              ) : (
+                <span className="color-swatch" style={{ background: p.color }} />
+              )}
               {renaming === p.id ? (
                 <input
                   className="tree-rename"
@@ -207,6 +265,7 @@ export function PartsList() {
                 <Icon name={p.hidden ? 'eyeOff' : 'eye'} size={14} />
               </span>
             </div>,
+            p.composite && members(p),
           ];
         })}
       </div>

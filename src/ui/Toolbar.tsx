@@ -45,6 +45,7 @@ export const FEATURE_TOOLS: (ToolDef | '|')[] = [
   { id: 'boolean', icon: 'boolean', label: 'Boolean' },
   { id: 'split', icon: 'split', label: 'Split' },
   { id: 'transform', icon: 'transform', label: 'Transform' },
+  { id: 'compositePart', icon: 'compositePart', label: 'Composite part' },
   { id: 'deletePart', icon: 'deletePart', label: 'Delete part' },
   '|',
   { id: 'plane', icon: 'plane', label: 'Plane' },

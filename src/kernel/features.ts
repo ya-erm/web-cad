@@ -24,6 +24,7 @@ import { expandTexts } from '../sketch/text';
 import { expandGears, gearSizeOf } from '../sketch/gear';
 import {
   bboxOf,
+  bodiesOf,
   compoundOf,
   fail,
   frameToPlane,
@@ -61,7 +62,7 @@ import {
   resolveSketchPlane,
   worldGeometryForRef,
 } from './refs';
-import { adoptThreads, removePart, setPart, setSurface, type BuildState, type HoleState, type PartState, type ThreadState } from './state';
+import { adoptThreads, openComposite, partShape, removePart, setPart, setSurface, type BuildState, type HoleState, type PartState, type ThreadState } from './state';
 import type { HoleCallout } from './protocol';
 import { standardHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
@@ -154,6 +155,11 @@ function replacePart(st: BuildState, id: string, shape: Shape3D, fid: string) {
   const solids = solidsOf(shape);
   if (solids.length === 0) {
     removePart(st, id);
+    return;
+  }
+  // a closed composite stays one part, whatever its bodies come to
+  if (st.composites.get(id)?.closed) {
+    setPart(st, id, shape);
     return;
   }
   setPart(st, id, solids[0]);
@@ -2169,11 +2175,78 @@ function buildMateConnector(ctx: Ctx, f: FeatureOf<'mateConnector'>): FeatureOut
   return {};
 }
 
+/**
+ * Delete part (Onshape): the parts selected are gone. An open composite selected — the composite goes, its bodies
+ * stay. With `dissolve` (Dissolve composite parts): the composites selected go, their bodies parts again.
+ */
 function buildDeletePart(ctx: Ctx, f: FeatureOf<'deletePart'>): FeatureOutput {
-  const parts = resolveParts(ctx.st, f.params.parts);
-  if (!parts.length) fail('Select parts to delete');
-  parts.forEach((p) => removePart(ctx.st, p.id));
+  const { st } = ctx;
+  const open = f.params.parts.flatMap((r) => (r.kind === 'part' && openComposite(st, r.partId) ? [r.partId] : []));
+  const parts = resolveParts(
+    st,
+    f.params.parts.filter((r) => !(r.kind === 'part' && open.includes(r.partId))),
+  );
+  for (const id of open) st.composites.delete(id);
+  if (f.params.dissolve) {
+    const closed = parts.filter((p) => st.composites.get(p.id)?.closed);
+    if (!closed.length && !open.length) fail('Select composite parts to dissolve');
+    for (const p of closed) dissolveComposite(ctx, p.id);
+    return {};
+  }
+  if (!parts.length && !open.length) fail('Select parts to delete');
+  parts.forEach((p) => removePart(st, p.id));
   return {};
+}
+
+/**
+ * Composite part (Onshape): the parts selected act as one part. Closed — they are consumed into it: a part of its
+ * own, their compound, with their cosmetic threads, holes and mate connectors; open — they stay parts of their own,
+ * and the composite groups them (its shape — theirs as they are, see `partShape`). An open composite selected stands
+ * for its bodies; a closed one is a part like any other (consumed by a closed composite, kept by an open one).
+ */
+function buildCompositePart(ctx: Ctx, f: FeatureOf<'compositePart'>): FeatureOutput {
+  const { st } = ctx;
+  const parts = resolveParts(st, f.params.parts);
+  if (!parts.length) fail('Select parts for the composite part');
+  const id = newPartId(st, `${ctx.fid}.0`);
+  const members = parts.map((p) => p.id);
+  if (!st.compositeOrder.includes(id)) st.compositeOrder = [...st.compositeOrder, id];
+  if (!f.params.closed) {
+    st.composites.set(id, { featureId: ctx.fid, members, closed: false });
+    return {};
+  }
+  const shape = compoundOf(parts.map((p) => p.shape));
+  for (const m of members) {
+    adoptThreads(st, m, id);
+    for (const [k, mc] of st.mates) if (mc.owner === m) st.mates.set(k, { ...mc, owner: id });
+    removePart(st, m);
+  }
+  setPart(st, id, shape);
+  st.composites.set(id, { featureId: ctx.fid, members, closed: true });
+  return {};
+}
+
+/**
+ * A closed composite dissolved: its bodies parts again — under the ids they had, when it still has as many (their
+ * names and colours come back), else new ones; its threads and holes go to the body they are in.
+ */
+function dissolveComposite(ctx: Ctx, id: string) {
+  const { st } = ctx;
+  const c = st.composites.get(id)!;
+  const bodies = bodiesOf(st.parts.get(id)!.shape);
+  st.parts.delete(id);
+  st.composites.delete(id);
+  // its bodies come solids first, then surfaces: the members in that order
+  const members = [...c.members.filter((m) => !st.surfaceOrder.includes(m)), ...c.members.filter((m) => st.surfaceOrder.includes(m))];
+  const same = bodies.length === members.length && members.every((m, i) => !st.parts.has(m) && isSurface(bodies[i]) === st.surfaceOrder.includes(m));
+  const ids = bodies.map((_, i) => (same ? members[i] : newPartId(st, `${id}~${ctx.fid}.${i}`)));
+  bodies.forEach((b, i) => (isSurface(b) && !st.partOrder.includes(ids[i]) ? setSurface(st, ids[i], b) : setPart(st, ids[i], b)));
+  // which body a point is in (its box; else the first)
+  const boxes = bodies.map((b) => bboxOf(b));
+  const bodyAt = (p: Vec3) => ids[Math.max(0, boxes.findIndex(([lo, hi]) => p.every((v, k) => v >= lo[k] - 1e-6 && v <= hi[k] + 1e-6)))];
+  for (const [k, t] of st.threads) if (t.owner === id) st.threads.set(k, { ...t, owner: bodyAt(t.origin) });
+  for (const [k, h] of st.holes) if (h.owner === id) st.holes.set(k, { ...h, owner: bodyAt(h.origin) });
+  for (const [k, mc] of st.mates) if (mc.owner === id) st.mates.set(k, { ...mc, owner: bodyAt(mc.frame.origin) });
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -2230,14 +2303,15 @@ function buildDerived(ctx: Ctx, f: FeatureOf<'derived'>): FeatureOutput {
   }
   let lostParts = 0;
   for (const id of wanted) {
-    const part = src.state.parts.get(id);
-    if (!part) {
+    // (an open composite too: the compound of its bodies)
+    const shape = partShape(src.state, id);
+    if (!shape) {
       lostParts++;
       continue;
     }
     // a copy: the source's shapes stay its own
     const pid = `${ctx.fid}.${id}`;
-    setPart(ctx.st, pid, place(part.shape.clone() as Shape3D));
+    setPart(ctx.st, pid, place(shape.clone() as Shape3D));
     ctx.st.derived.set(pid, { name: src.name(id), color: src.color(id) });
     // with its cosmetic threads
     for (const [k, t] of src.state.threads)
@@ -2328,6 +2402,8 @@ export async function applyFeature(st: BuildState, feature: Feature, ec: EvalCon
       return buildTransform(ctx, feature);
     case 'deletePart':
       return buildDeletePart(ctx, feature);
+    case 'compositePart':
+      return buildCompositePart(ctx, feature);
     case 'import':
       return buildImport(ctx, feature);
     case 'derived':
