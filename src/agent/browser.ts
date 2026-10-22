@@ -2,7 +2,14 @@
 // (vite.config.ts) that lets command-line agents call it: `npm run agent -- run ops.json`.
 
 import type { Draft } from 'immer';
-import type { CadDocument, ConfigInput, DocTab, Feature, PartStudioTab } from '../core/types';
+import type { CadDocument, ConfigInput, DocTab, DrawingTab, Feature, PartStudioTab } from '../core/types';
+import { browserSourceOf } from '../drawing/DrawingEditor';
+import { drawSheet, sheetFile } from '../drawing/drawingModel';
+import { loadPdfFont } from '../export/pdfFont';
+import { t } from '../i18n';
+import { summarizeDrawing } from './drawing';
+import { addReport, isMain, isVersionOp, mergedSummary, sameName, stretches, takeAll, type AnyOp } from './versions';
+import { branchFromVersion, createVersion, currentWorkspace, mergeWorkspace, planMerge, switchWorkspace, useVersions } from '../store/versions';
 import { buildDerivedSources, sourceUnits } from '../core/derived';
 import { derivableVersions, loadVersionSources, versionDocument } from '../store/versionSources';
 import { kernel } from '../kernel/client';
@@ -23,7 +30,7 @@ import { useExplode } from '../assembly/explode';
 import { requestRebuild } from '../store/rebuild';
 import { configuredFeatures } from '../core/config';
 import { needsDocument, runDocumentOps, type DocumentHost, type DocumentOp } from './document';
-import type { AgentOp, AnimateQuery, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
+import type { AgentOp, AnimateQuery, AssemblySummary, DrawingSummary, Edges, Faces, ModelSummary, Parts, RunReport, VersionOp, VersionsSummary } from './types';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -89,7 +96,76 @@ function agentKernel(studio: PartStudioTab, doc: CadDocument): AgentKernel {
 const browserHost: DocumentHost = {
   kernel: (doc, studio) => agentKernel(studio, doc),
   studio: (doc, studio) => buildStudio(doc, studio),
+  // drawings: their views' Part Studios and assemblies built in the worker as the drawing tab builds them
+  drawingSource: (doc) => browserSourceOf(doc),
 };
+
+/** A version op on the open document, through the app's own versions (as the Versions panel does it); a merge — what it brought. */
+async function versionOp(op: VersionOp): Promise<VersionsSummary['merged'] | undefined> {
+  const doc = useDoc.getState().doc;
+  if (!doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
+  if (useEditor.getState().editing) throw new AgentError('A feature dialog or sketch is open in the app: finish it first or call cancelEdit()');
+  const records = await db.listVersions(doc.id);
+  // the app's list of them (it may not have been read yet)
+  useVersions.setState({ docId: doc.id, versions: records, loaded: true });
+  const versions = records.filter((v) => v.kind === 'version');
+  const workspaces = records.filter((v) => v.kind === 'workspace');
+  const cur = currentWorkspace(doc);
+  const workspace = (name: string) => {
+    const w = workspaces.find((x) => x.name === name) ?? workspaces.find((x) => sameName(x.name, name) || (isMain(name) && x.id === `${doc.id}:main`));
+    if (!w) throw new AgentError(`No other workspace "${name}". Workspaces: ${[cur.name, ...workspaces.map((x) => x.name)].join(', ')}`);
+    return w;
+  };
+  switch (op.op) {
+    case 'version': {
+      const name = op.name?.trim() ?? '';
+      if (name && versions.some((v) => sameName(v.name, name))) throw new AgentError(`There is a version "${name}" already`);
+      await createVersion(name, op.description ?? '');
+      return undefined;
+    }
+    case 'branch': {
+      const v = versions.find((x) => x.name === op.from) ?? versions.find((x) => sameName(x.name, op.from));
+      if (!v) throw new AgentError(`No version "${op.from}". Versions: ${versions.map((x) => x.name).reverse().join(', ') || '(none)'}`);
+      const name = op.name?.trim() ?? '';
+      if (name && [cur.name, ...workspaces.map((x) => x.name)].some((x) => sameName(x, name))) throw new AgentError(`There is a workspace "${name}" already`);
+      await branchFromVersion(v.id, name);
+      return undefined;
+    }
+    case 'workspace':
+      if (sameName(cur.name, op.name) || (isMain(op.name) && cur.id === 'main')) return undefined;
+      await switchWorkspace(workspace(op.name).id);
+      return undefined;
+    case 'merge': {
+      const w = workspace(op.from);
+      const p = await planMerge(w.id);
+      if (!p) throw new AgentError(`The workspace "${w.name}" could not be read`);
+      await mergeWorkspace(p.source, p.base, p.plan, takeAll(p.plan), !!p.plan.units);
+      return mergedSummary(w.name, p.plan);
+    }
+  }
+}
+
+/** The open document's versions (oldest first) and the workspaces it is not in. */
+async function versionsSummary(): Promise<VersionsSummary> {
+  const doc = useDoc.getState().doc;
+  if (!doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
+  const records = await db.listVersions(doc.id);
+  const ws = currentWorkspace(doc);
+  const name = (id?: string) => (id ? records.find((v) => v.id === id)?.name : undefined);
+  return {
+    workspace: ws.name,
+    ...(ws.base ? { base: name(ws.base) ?? ws.base } : {}),
+    versions: records
+      .filter((v) => v.kind === 'version')
+      .reverse()
+      .map((v) => ({ name: v.name, ...(v.description ? { description: v.description } : {}), created: new Date(v.created).toISOString() })),
+    workspaces: records.filter((v) => v.kind === 'workspace').map((v) => ({ name: v.name, ...(v.base ? { base: name(v.base) ?? v.base } : {}) })),
+  };
+}
+
+/** The open document's active drawing tab, else its first one (none — it has no drawing). */
+const drawingOf = (doc: CadDocument | null, active = false): DrawingTab | undefined =>
+  (doc?.tabs.find((t) => t.id === doc.activeTab && t.type === 'drawing') ?? (active ? undefined : doc?.tabs.find((t) => t.type === 'drawing'))) as DrawingTab | undefined;
 
 function current(forEdit = false) {
   const doc = useDoc.getState().doc;
@@ -115,9 +191,13 @@ Methods:
   documents()                       list documents in this browser
   open(idOrName) / create(name)     open or create a document (shows it in the app)
   state()                           features (status), variables, parts (bbox, volume), sketch frames — or, on an
-                                    assembly tab, its instances (placement, box) and mates (ok or not)
+                                    assembly tab, its instances (placement, box) and mates (ok or not); on a drawing
+                                    tab, its views (places, sizes), dimensions (values), notes, bill of materials
   run(ops, {atomic?})               apply operations as ONE undo step; atomic (default) = nothing changes if a feature fails;
-                                    assemblies: {"op":"assembly"}, insert, place, mate, group, relation… ({"op":"studio"} back)
+                                    assemblies: {"op":"assembly"}, insert, place, mate, group, relation… ({"op":"studio"} back);
+                                    drawings: {"op":"drawing","of":"Part Studio 1"}, view, section, detail, dimension, note, bom;
+                                    versions (applied at once, in order): version, branch, workspace, merge
+  versions()                        the document's versions, its workspace (branch) and the others
   query({faces|edges|parts})        list matching faces / edges with geometry (to design queries)
   measure({faces|edges|parts})      the measure panel: sizes of one; min / max distance, centre to centre, angle of two
   animate({mate, motion?, from?, to?, frames?})
@@ -128,7 +208,8 @@ Methods:
   section({plane, offset?, flip?})  section view by top | front | right (null = off)
   screenshot({view?, exploded?, amount?})
                                     PNG data URL of the graphics area (an assembly's exploded view by name, 0…1)
-  export(format)                    stl | step | webcad → { fileName, mime, base64 }
+  export(format, drawing?)          stl | step | webcad; a drawing (by name; default the active one): pdf | svg | dxf
+                                    → { fileName, mime, base64 }
 Ops reference with examples: docs/agent-api.md in the WebCAD repository.`;
 
 export const webcadApi = {
@@ -159,8 +240,11 @@ export const webcadApi = {
     return { id, name };
   },
 
-  async state(): Promise<(ModelSummary | { assembly: AssemblySummary }) & { document: { id: string; name: string }; tab: string }> {
+  async state(): Promise<(ModelSummary | { assembly: AssemblySummary } | { drawing: DrawingSummary }) & { document: { id: string; name: string }; tab: string }> {
     const doc = useDoc.getState().doc;
+    const dw = drawingOf(doc, true);
+    // a drawing tab: its views (places, sizes), dimensions (values), notes, bill of materials
+    if (doc && dw) return { document: { id: doc.id, name: doc.name }, tab: dw.name, drawing: await summarizeDrawing(doc, dw, browserSourceOf(doc)) };
     const asm = activeAssembly(doc);
     if (doc && asm) {
       // an assembly tab: its instances, mates and whether they hold
@@ -171,14 +255,38 @@ export const webcadApi = {
     return { document: { id: d.id, name: d.name }, tab: studio.name, ...(await summarize(studio, d.units, agentKernel(studio, d))) };
   },
 
-  async run(ops: DocumentOp[], opts: { atomic?: boolean } = {}): Promise<RunReport> {
+  async run(ops: AnyOp[], opts: { atomic?: boolean } = {}): Promise<RunReport> {
+    if (!Array.isArray(ops)) throw new AgentError('ops must be an array of operations');
     if (useDoc.getState().readOnly) throw new AgentError('A version of the document is open for viewing in the app: return to the workspace first');
-    if (needsDocument(ops)) {
-      // assemblies / several tabs: the whole document, as one undo step
+    if (ops.some(isVersionOp)) {
+      // the document's ops in stretches between version ops (applied at once, in order: the app's versions and workspaces)
+      const out: RunReport = { ok: true, added: [], changed: [], removed: [], failed: [], applied: false };
+      let merged: VersionsSummary['merged'];
+      for (const s of stretches(ops)) {
+        if ('op' in s) {
+          try {
+            merged = (await versionOp(s.op)) ?? merged;
+            out.applied = true;
+          } catch (e) {
+            return { ...out, ok: false, error: `op #${s.at} (${s.op.op}): ${e instanceof Error ? e.message : String(e)}` };
+          }
+          continue;
+        }
+        const r = await webcadApi.run(s.ops, opts);
+        addReport(out, r, s.at);
+        if (r.applied) out.applied = true;
+        if (r.error || !r.ok) return out;
+      }
+      out.versions = { ...(await versionsSummary()), ...(merged ? { merged } : {}) };
+      return out;
+    }
+    const docOps = ops as DocumentOp[];
+    if (needsDocument(docOps)) {
+      // assemblies, drawings, several tabs: the whole document, as one undo step
       const doc = useDoc.getState().doc;
       if (!doc) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
       if (useEditor.getState().editing) throw new AgentError('A feature dialog or sketch is open in the app: finish it first or call cancelEdit()');
-      const { doc: next, report } = await runDocumentOps(doc, ops, browserHost);
+      const { doc: next, report } = await runDocumentOps(doc, docOps, browserHost);
       if (!report.error && (report.ok || opts.atomic === false)) {
         useDoc.getState().update((d) => {
           d.tabs = next.tabs as Draft<DocTab>[];
@@ -204,6 +312,11 @@ export const webcadApi = {
       report.applied = true;
     }
     return report;
+  },
+
+  /** The open document's versions (oldest first), the workspace it is in and the others. */
+  versions(): Promise<VersionsSummary> {
+    return versionsSummary();
   },
 
   async query(q: { faces?: Faces; edges?: Edges; parts?: Parts }) {
@@ -299,7 +412,7 @@ export const webcadApi = {
     }
   },
 
-  async export(format: 'stl' | 'step' | 'webcad' = 'stl') {
+  async export(format: 'stl' | 'step' | 'webcad' | 'pdf' | 'svg' | 'dxf' = 'stl', drawing?: string) {
     const open = useDoc.getState().doc;
     if (!open) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
     const safe = open.name.replace(/[^\p{L}\p{N}._ -]+/gu, '_');
@@ -308,7 +421,18 @@ export const webcadApi = {
       const bytes = new TextEncoder().encode(projectText(open, await fileVersions(open.id)));
       return { fileName: `${safe}.webcad.json`, mime: 'application/json', base64: toBase64(bytes) };
     }
-    if (format !== 'stl' && format !== 'step') throw new AgentError('format: stl | step | webcad');
+    if (format === 'pdf' || format === 'svg' || format === 'dxf') {
+      // a drawing: the one named, the active one, else the first
+      const dw = drawing !== undefined ? (open.tabs.find((t) => t.type === 'drawing' && (t.name === drawing || t.name.toLowerCase() === drawing.toLowerCase())) as DrawingTab | undefined) : drawingOf(open);
+      if (!dw) throw new AgentError(drawing !== undefined ? `No drawing "${drawing}"` : 'The document has no drawing: make one with {"op":"drawing"}');
+      // Cyrillic and the like in a PDF: in the embedded font (without it — its service labels in English)
+      const font = format === 'pdf' ? await loadPdfFont().catch(() => undefined) : undefined;
+      const sheet = await drawSheet(open, dw, browserSourceOf(open), format === 'pdf' && !font ? (key) => key : t);
+      const file = sheetFile(sheet, format, dw.drawing.title || dw.name, font);
+      const bytes = typeof file.data === 'string' ? new TextEncoder().encode(file.data) : file.data;
+      return { fileName: `${safe} — ${dw.name}.${file.ext}`, mime: file.mime, base64: toBase64(bytes) };
+    }
+    if (format !== 'stl' && format !== 'step') throw new AgentError('format: stl | step | webcad | pdf | svg | dxf');
     const asm = activeAssembly(open);
     if (asm) {
       // the assembly (STEP: with its product tree), every Part Studio built by the app's kernel

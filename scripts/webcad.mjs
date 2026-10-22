@@ -17,9 +17,12 @@ Live (the app must be open in a browser tab served by \`npm run dev\` or \`npm r
   --tab <id>                      target tab, required when several tabs are connected (or WEBCAD_TAB)
   docs                            list documents
   open <id|name> | create <name>  open / create a document in the tab
-  state                           features, variables, parts (bbox, volume), sketch frames
+  state                           features, variables, parts (bbox, volume), sketch frames; an assembly's instances
+                                  and mates; a drawing's views, dimensions, notes, bill of materials
   run <ops.json|-|'[…]'> [--keep-failed]
-                                  apply ops (one undo step); by default nothing changes if a feature fails
+                                  apply ops (one undo step); by default nothing changes if a feature fails;
+                                  version / branch / workspace / merge ops are applied at once, in order
+  versions                        the document's versions, its workspace (branch) and the others
   query '<json>'                  e.g. '{"edges":{"dir":"z"}}' — matching faces / edges with geometry
   measure '<json>'                the same queries → the measure panel: distances (min / max / centres), angle, totals
   animate '<json>'                e.g. '{"mate":"Revolute 1","from":0,"to":90,"frames":4}' — where the moving
@@ -29,13 +32,17 @@ Live (the app must be open in a browser tab served by \`npm run dev\` or \`npm r
   shot <out.png> [view] [--exploded "<name>"] [--amount 0…1]
                                   screenshot of the graphics area (view: iso, top, front, right, fit…); an
                                   assembly's exploded view by name, exploded that far
-  export <stl|step|webcad> <out>  export the open document
+  export <stl|step|webcad|pdf|svg|dxf> <out> [--drawing "<name>"]
+                                  export the open document; pdf / svg / dxf — a drawing (the active one by default)
   call <method> [json args…]      any window.webcad method
 
 Headless (no browser):
-  build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f.stl] [--step f.step] [--name "Doc name"]
+  build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f.stl] [--step f.step]
+        [--pdf f.pdf] [--svg f.svg] [--dxf f.dxf] [--drawing "<name>"] [--lang ru|en] [--name "Doc name"]
                                   run ops on a document file and print the report; the .webcad.json
-                                  can be imported in the app (Documents → Import)
+                                  can be imported in the app (Documents → Import); --pdf / --svg / --dxf —
+                                  a drawing of it (the active one, else the first; or --drawing); --lang — the
+                                  language of its title block, section letters, callouts (default: the system's)
 
 Environment: WEBCAD_URL (default http://localhost:5173, then :4173)`;
 
@@ -112,10 +119,15 @@ async function headless(args) {
   const outPath = flag(args, '--out');
   const stl = flag(args, '--stl');
   const step = flag(args, '--step');
+  const sheets = { pdf: flag(args, '--pdf'), svg: flag(args, '--svg'), dxf: flag(args, '--dxf') };
+  const drawing = flag(args, '--drawing');
+  const lang = flag(args, '--lang');
   const name = flag(args, '--name');
   const ops = readJsonArg(args[0]);
   const { runnerImport } = await import('vite');
   const { module: h } = await runnerImport(resolve(ROOT, 'src/agent/headless.ts'), { root: ROOT, logLevel: 'error' });
+  if (lang === 'ru' || lang === 'en') h.setLang(lang);
+  else if (lang !== undefined) throw new Error('--lang ru | en');
   const wasm = resolve(ROOT, 'node_modules/replicad-opencascadejs/dist/replicad_single.wasm');
   const doc = docPath ? JSON.parse(readFileSync(resolve(docPath), 'utf8')) : h.emptyDocument(name ?? 'Agent model');
   const s = await h.openHeadless(doc, wasm);
@@ -124,6 +136,7 @@ async function headless(args) {
     if (outPath) writeFileSync(resolve(outPath), JSON.stringify(s.doc));
     if (stl) writeFileSync(resolve(stl), await s.exportStl());
     if (step) writeFileSync(resolve(step), await s.exportStep());
+    for (const [format, file] of Object.entries(sheets)) if (file) writeFileSync(resolve(file), await s.exportDrawing(format, drawing));
   }
   out(report);
   if (!report.ok) process.exitCode = 1;
@@ -148,6 +161,8 @@ async function main() {
       return out(await call('create', args.join(' ') || 'Agent model'));
     case 'state':
       return out(await call('state'));
+    case 'versions':
+      return out(await call('versions'));
     case 'run': {
       const keep = args.includes('--keep-failed');
       const rest = args.filter((a) => a !== '--keep-failed');
@@ -186,8 +201,9 @@ async function main() {
       return out(`saved ${resolve(args[0])}`);
     }
     case 'export': {
-      if (!args[0] || !args[1]) throw new Error('export <stl|step|webcad> <out>');
-      const r = await call('export', args[0]);
+      const drawing = flag(args, '--drawing');
+      if (!args[0] || !args[1]) throw new Error('export <stl|step|webcad|pdf|svg|dxf> <out> [--drawing "<name>"]');
+      const r = await call('export', args[0], ...(drawing !== undefined ? [drawing] : []));
       writeFileSync(resolve(args[1]), Buffer.from(r.base64, 'base64'));
       return out(`saved ${resolve(args[1])} (${r.mime})`);
     }

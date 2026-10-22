@@ -1558,6 +1558,8 @@ export async function queryModel(
       start: v(m.info.start),
       end: v(m.info.end),
       ...(m.info.radius !== undefined ? { radius: round(m.info.radius / k) } : {}),
+      // a circle's (an arc's) centre: e.g. a hole's, to dimension it on a drawing
+      ...(m.info.circleCenter ? { center: v(m.info.circleCenter) } : {}),
       length: round(m.info.length / k),
     }));
   }

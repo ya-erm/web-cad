@@ -531,6 +531,154 @@ export interface ModelSummary {
   threads?: { designation: string; origin: Pt3; dir: Pt3; length: number; part?: string }[];
 }
 
+/** A view of the active drawing: its id, its letter ("A" — section A-A, detail B), its orientation ("front" — the first such plain view), or its 0-based index. */
+export type ViewQuery = string | number;
+
+/** A drawing's scale: a number (0.5) or a ratio ("1:2", "2:1"). */
+export type ScaleSpec = number | string;
+
+/**
+ * Drawing operations: they work on a drawing tab (the active one, or the one a `drawing` op opens). Model points are in
+ * document units, in the source's (Part Studio's, assembly's) coordinates; sheet points (`at`) — in sheet mm from its
+ * lower left corner.
+ */
+export type DrawingOp =
+  /**
+   * Open the drawing with this name, or create it (A3 landscape by default), and set its sheet and title block. `of` —
+   * a Part Studio or an assembly by name: its standard views (front, the side and below it, isometric) are inserted at
+   * the standard scale that fits the sheet (Onshape "Insert standard views").
+   */
+  | {
+      op: 'drawing';
+      name?: string;
+      of?: string;
+      sheet?: 'A4' | 'A3' | 'A2' | 'A1' | 'A0' | 'Letter' | 'Tabloid';
+      landscape?: boolean;
+      /** First-angle (ISO / ГОСТ, default) or third-angle (ANSI) projection. */
+      projection?: 'first' | 'third';
+      /** The title block: `custom` (default), `gost` (ГОСТ 2.104 form 1). */
+      template?: 'custom' | 'gost';
+      title?: string;
+      designation?: string;
+      author?: string;
+      material?: string;
+      organization?: string;
+      /** The decimal sign of the numbers on the sheet. */
+      decimal?: '.' | ',';
+    }
+  /**
+   * A view: of `of` (a Part Studio or an assembly by name; default — what the drawing's views show, else the first
+   * Part Studio) along `orientation` (front by default) at sheet point `at` (its centre; default — the middle of the
+   * sheet) and `scale` (default — the drawing's, else one that fits); or projected from view `from` towards
+   * `direction` (right by default) — aligned with it, at its scale, `gap` mm beside it. `parts` — names of the parts
+   * shown (default all); `hidden` — hidden lines (default: on for orthographic views).
+   */
+  | {
+      op: 'view';
+      of?: string;
+      orientation?: 'front' | 'back' | 'top' | 'bottom' | 'left' | 'right' | 'iso' | 'dimetric' | 'trimetric';
+      at?: [number, number];
+      scale?: ScaleSpec;
+      hidden?: boolean;
+      parts?: string[];
+      from?: ViewQuery;
+      direction?: 'right' | 'left' | 'up' | 'down';
+      gap?: number;
+    }
+  /**
+   * A section view of `view` (Onshape Section view): cut along a line through model point `through` across the view —
+   * `vertical` (default) or `horizontal` — and placed `direction` of it (right / down by default; the arrows show the
+   * way it is seen), at its scale. Lettered A-A, B-B …
+   */
+  | { op: 'section'; view: ViewQuery; through: Pt3; line?: 'vertical' | 'horizontal'; direction?: 'right' | 'left' | 'up' | 'down'; gap?: number }
+  /** A detail view of `view`: the circle about model point `center` of `radius`, enlarged (`scale`, default twice the view's) at sheet point `at` (default: right of the view). */
+  | { op: 'detail'; view: ViewQuery; center: Pt3; radius: Num; scale?: ScaleSpec; at?: [number, number] }
+  /**
+   * A dimension on `view`. `horizontal` / `vertical` / `aligned`: between model points `from` and `to`;
+   * `diameter` / `radius`: of the circle (seen end-on) centred at model point `center`; `hole`: a hole callout (a
+   * hole of the Hole feature) at `center`. Anchored to the model's vertices and circles there, it follows the model.
+   * `offset` — the dimension line's (a label's) distance from the geometry, sheet mm (default 10, outwards; negative —
+   * inwards); `at` — a sheet point instead: the dimension line goes through it, a label (Ø, a hole callout) stands there.
+   */
+  | {
+      op: 'dimension';
+      view: ViewQuery;
+      type: 'horizontal' | 'vertical' | 'aligned' | 'diameter' | 'radius' | 'hole';
+      from?: Pt3;
+      to?: Pt3;
+      center?: Pt3;
+      offset?: number;
+      at?: [number, number];
+    }
+  /** A note at sheet point `at` (its first line's start), text `height` mm (3.5 by default); "\n" — a new line. */
+  | { op: 'note'; text: string; at: [number, number]; height?: number }
+  /**
+   * The bill of materials of an assembly (`assembly`; default — the one the views show) as a table, its lower right
+   * corner at `at` (default: on the title block). `balloons` — item numbers on a view of it (`true` — its first view),
+   * one per row of the table.
+   */
+  | { op: 'bom'; assembly?: string; at?: [number, number]; balloons?: ViewQuery | boolean }
+  /** Remove a view with what is on it (dimensions, item numbers) and the section and detail views made from it. */
+  | { op: 'deleteView'; view: ViewQuery };
+
+/**
+ * Versions and branches (Onshape): they are applied at once, in order, between the other operations of a run (a
+ * version is a record of its own, a branch switch replaces the document's content): an error later does not undo them.
+ */
+export type VersionOp =
+  /** Save a version of the document as it is now: `name` (default V1, V2 …), `description`. */
+  | { op: 'version'; name?: string; description?: string }
+  /** A new branch (workspace) from version `from` (by name): the document as the version has it; the workspace it was in is kept to switch back to. */
+  | { op: 'branch'; from: string; name?: string }
+  /** Switch to another workspace by name ("Main" too); the one it was in is kept. */
+  | { op: 'workspace'; name: string }
+  /** Merge workspace `from` into this one: everything it changed since the version it was branched from (where both changed — its changes). */
+  | { op: 'merge'; from: string };
+
+/** The document's versions and workspaces after the operations. */
+export interface VersionsSummary {
+  /** The workspace the document is in. */
+  workspace: string;
+  /** The version it was branched from. */
+  base?: string;
+  /** Oldest first. */
+  versions: { name: string; description?: string; created: string }[];
+  /** The other workspaces, kept to switch to. */
+  workspaces: { name: string; base?: string }[];
+  /** A merge: the tabs it changed (whole, or `items` of them — features, instances, views…), `conflict` — changed here too. */
+  merged?: { from: string; tabs: { name: string; change: string; conflict: boolean; items?: number }[] };
+}
+
+/** A drawing after the operations: its sheet, views (their places and sizes), dimensions (their values as written). */
+export interface DrawingSummary {
+  name: string;
+  sheet: string;
+  landscape: boolean;
+  projection: 'first' | 'third';
+  /** The sheet's size, mm. */
+  size: [number, number];
+  views: {
+    id: string;
+    kind: 'view' | 'projected' | 'section' | 'detail';
+    /** A section's or detail's letter. */
+    label?: string;
+    orientation: string;
+    /** The Part Studio or assembly it shows. */
+    of: string;
+    scale: string;
+    /** Its centre on the sheet, mm. */
+    at: [number, number];
+    /** Its size on the sheet, mm. */
+    size?: [number, number];
+    /** The view it is projected from (made from: a section, a detail). */
+    parent?: string;
+  }[];
+  dimensions: { id: string; view: string; type: string; value: number; text: string; anchored: boolean }[];
+  notes: number;
+  bom?: { assembly: string; rows: number };
+  balloons: number;
+}
+
 export interface RunReport {
   ok: boolean;
   /** Fatal error of an op (nothing was applied). */
@@ -545,4 +693,8 @@ export interface RunReport {
   model?: ModelSummary;
   /** Assembly operations: the assembly after them. */
   assembly?: AssemblySummary;
+  /** Drawing operations: the drawing after them. */
+  drawing?: DrawingSummary;
+  /** Version operations: the versions and workspaces after them. */
+  versions?: VersionsSummary;
 }

@@ -4,11 +4,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
 import type { AssemblyTab, CadDocument, ConfigInput, DocTab, DrawingBalloon, DrawingData, DrawingDimension, DrawingTab, DrawingView, PartStudioTab, Vec2, Vec3, ViewOrientation, ViewRef } from '../core/types';
 import { shownParts } from '../assembly/expand';
-import { rotationMatrix, sourceKey } from '../assembly/compose';
-import { storedBom } from '../assembly/bom';
+import { sourceKey } from '../assembly/compose';
 import { uid } from '../core/ids';
-import { cuttingLine, isDerivedView, isPictorial, nextViewLetter, parentView, sectionCut, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
-import type { Breakout, PlacedPart, SectionCut, ViewCut } from '../kernel/protocol';
+import { cuttingLine, isDerivedView, isPictorial, nextViewLetter, parentView, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
+import type { PlacedPart, ViewCut } from '../kernel/protocol';
+import {
+  balloonDot as dotOfBalloon,
+  balloonItem as itemOfBalloon,
+  detailScale,
+  dimHints,
+  dimRefs,
+  drawingAssemblies,
+  lineCross,
+  lineEnd,
+  linearOffset,
+  liveDimension,
+  placeLinear,
+  projectedView,
+  projectionRequest,
+  refsOf,
+  sheetPrims,
+  standardViews,
+  viewCutOf,
+  type SourceOf,
+} from './drawingModel';
 import { v3 } from '../core/math';
 import { chosenLabel, configuredFeatures, inputName, variantStudio } from '../core/config';
 import { ConfigurationFields } from '../ui/ConfigurationFields';
@@ -33,20 +52,15 @@ import {
   angleSector,
   balloonPrims,
   balloonShelf,
-  bomTablePrims,
   bomTableRect,
   ITEM_H,
-  type BomTableRow,
   centerlineOf,
-  chooseScale,
   cuttingLinePrims,
   detailCirclePrims,
   dimLevel,
   dimPrims,
   frameRect,
-  notePrims,
   offsetForLevel,
-  projectedOrientation,
   scaleLabel,
   sheetSize,
   STD_SCALES,
@@ -57,7 +71,6 @@ import {
   toSheet,
   VIEW_NAMES,
   viewLabel,
-  viewPrims,
   viewRect,
   type ProjectionData,
 } from './sheet';
@@ -155,40 +168,26 @@ function tabSource(doc: CadDocument, tab: DocTab | undefined, configuration?: Re
 /** A view's source: its Part Studio as its configuration has it, or its assembly. */
 const viewSource = (doc: CadDocument, v: DrawingView) => tabSource(doc, doc.tabs.find((x) => x.id === v.studioId), v.configuration);
 
-/** The kernel's projection of a view: a section view — along its own axes, cut by its plane. */
-function projectionRequest(v: DrawingView, views: DrawingView[]): { axes?: ViewAxes; section?: SectionCut; breakout?: Breakout } {
-  const parent = v.section && parentView(v, views);
-  if (v.section && parent) {
-    const { axes, cut } = sectionCut(viewAxes(parent, views), v.section);
-    return { axes, section: cut };
-  }
-  // a local section: its outline across the view (in space)
-  if (v.brokenOut && v.brokenOut.outline.length >= 3) {
-    const { n, x } = viewAxes(v, views);
-    const y = v3.cross(n, x);
-    const outline = smoothOutline(v.brokenOut.outline).map((p) => v3.add(v3.scale(x, p[0]), v3.scale(y, p[1])));
-    return { breakout: { outline, ...(v.brokenOut.depth !== undefined ? { depth: v.brokenOut.depth } : {}) } };
-  }
-  return {};
-}
-
-/** The view whose projection a view shows: a detail view — its parent's (the parent's parent's …). */
-function projectedView(v: DrawingView, views: DrawingView[]): DrawingView {
-  let cur = v;
-  for (let i = 0; i < 16 && cur.detail; i++) cur = parentView(cur, views) ?? cur;
-  return cur;
-}
+/**
+ * The kernel's source of a tab (a Part Studio as a configuration has it, an assembly), built in the worker when asked:
+ * for the agent API's drawings.
+ */
+export const browserSourceOf =
+  (doc: CadDocument): SourceOf =>
+  (tab, configuration) => {
+    const src = tabSource(doc, tab, configuration);
+    if (!src) return undefined;
+    return {
+      projection: async (req) => (await src.ensure(), kernel().projection({ studioKey: src.key, ...req })),
+      viewAnchor: async (req) => (await src.ensure(), (await kernel().viewAnchor({ studioKey: src.key, ...req })).ref),
+      viewRefs: async (req) => (await src.ensure(), (await kernel().viewRefs({ studioKey: src.key, ...req })).points),
+    };
+  };
 
 /** A view and the views projected with it (its parent, the parent's other views): they share scale and configuration. */
 const sameFamily = (a: DrawingView, b: DrawingView) => a.id === b.id || a.parent === b.id || b.parent === a.id || (!!a.parent && a.parent === b.parent);
 /** …but a detail view keeps its own scale (it enlarges). */
 const sameScale = (a: DrawingView, b: DrawingView) => a.id === b.id || (sameFamily(a, b) && !a.detail && !b.detail);
-
-/** A detail view's scale: the standard one nearest to twice its parent's (1:1 → 2:1, 1:5 → 1:2.5). */
-function detailScale(parentScale: number): number {
-  const up = [...STD_SCALES].reverse().find((s) => s >= parentScale * 2 - 1e-9);
-  return up ?? STD_SCALES[0];
-}
 
 /** The angle of a cutting line snapped to the view's horizontal or vertical when it is within 5° of it. */
 function alignCut(a: Vec2, b: Vec2): Vec2 {
@@ -203,29 +202,6 @@ function alignCut(a: Vec2, b: Vec2): Vec2 {
 
 /** Where dimensions' anchors are in their views: `${studio version}|${axes}|${refs}` → points (null — lost). */
 const refCache = new Map<string, ({ p: Vec2; r?: number; ends?: [Vec2, Vec2] } | null)[]>();
-
-/** A new dimension's `refs` from the anchors found (none — no field). */
-const refsOf = (a: ViewRef | null, b: ViewRef | null = null): Pick<DrawingDimension, 'refs'> =>
-  a || b ? { refs: { ...(a ? { a } : {}), ...(b ? { b } : {}) } } : {};
-
-/** The anchors of a dimension in order: its first point (a circle's centre), its second. */
-const dimRefs = (dm: DrawingDimension): ViewRef[] => [dm.refs?.a, dm.refs?.b].filter((r): r is ViewRef => !!r);
-
-/**
- * Where a dimension's anchors were, in the same order (a point on each): of a cut's several crossings, lines or
- * circles the kernel takes the nearest. An angle's lines — their points; a centre line's — their middles.
- */
-function dimHints(dm: DrawingDimension): Vec2[] {
-  const mid = (p: Vec2, q: Vec2 = p): Vec2 => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
-  const at = dm.kind === 'angle' ? [dm.b, dm.c] : dm.kind === 'centerline' ? [mid(dm.a, dm.b), dm.c && mid(dm.c, dm.d)] : [dm.a, dm.b];
-  return [dm.refs?.a && (at[0] ?? dm.a), dm.refs?.b && (at[1] ?? dm.a)].filter((p): p is Vec2 => !!p);
-}
-
-/** What a view cuts away (a section, a local section; a detail view — as its parent): none for a plain view. */
-function viewCutOf(v: DrawingView, views: DrawingView[]): ViewCut | undefined {
-  const { section, breakout } = projectionRequest(projectedView(v, views), views);
-  return section ? { section } : breakout ? { breakout } : undefined;
-}
 
 /**
  * Dimensions that follow the model (their points anchored to its vertices and circles): the kernel finds the anchors
@@ -282,32 +258,7 @@ function useLiveDimensions(doc: CadDocument, drawing: DrawingData) {
     let pts = refCache.get(k.key);
     // while the new places are computed: the last ones known
     if (!pts) for (const [key, p] of refCache) if (key.endsWith(k.tail)) pts = p;
-    if (!pts) return dm;
-    let i = 0;
-    const a = dm.refs?.a ? pts[i++] : null;
-    const b = dm.refs?.b ? pts[i++] : null;
-    // a centre line: between its two lines as they are now
-    if (dm.kind === 'centerline') return a?.ends && b?.ends ? { ...dm, a: a.ends[0], b: a.ends[1], c: b.ends[0], d: b.ends[1] } : dm;
-    // an angle: where its lines cross now, each line's end on the side it was measured from
-    if (dm.kind === 'angle') {
-      const x = a?.ends && b?.ends ? lineCross(a.ends, b.ends) : null;
-      if (!x || !dm.b || !dm.c) return dm;
-      const dir = (p: Vec2): Vec2 => [p[0] - dm.a[0], p[1] - dm.a[1]];
-      const nb = lineEnd(a!.ends!, x, dir(dm.b));
-      const nc = lineEnd(b!.ends!, x, dir(dm.c));
-      // the same sector as before: a line whose point is now on the other side of the vertex counts the other way
-      const turned = (n: Vec2, was: Vec2): 1 | -1 => ((n[0] - x[0]) * dir(was)[0] + (n[1] - x[1]) * dir(was)[1] < 0 ? -1 : 1);
-      const sector: [1 | -1, 1 | -1] | undefined = dm.sector && [(dm.sector[0] * turned(nb, dm.b)) as 1 | -1, (dm.sector[1] * turned(nc, dm.c)) as 1 | -1];
-      return { ...dm, a: x, b: nb, c: nc, ...(sector ? { sector } : {}) };
-    }
-    const live = { ...dm };
-    if (a) {
-      live.a = a.p;
-      // a circle's size: its point on the circle from the centre
-      if ((dm.kind === 'diameter' || dm.kind === 'radius' || dm.kind === 'centermark') && a.r !== undefined) live.b = [a.p[0] + a.r, a.p[1]];
-    }
-    if (b) live.b = b.p;
-    return live;
+    return liveDimension(dm, pts);
   };
 }
 
@@ -447,24 +398,6 @@ const BASELINE_STEP = 8;
 
 /** An angle dimension being made: its view and the lines picked (view coordinates). */
 type AngleDraft = { viewId: string; l1: [Vec2, Vec2]; l2?: [Vec2, Vec2] };
-
-/** Where two lines (through their two points each) cross; none when parallel. */
-function lineCross(l1: [Vec2, Vec2], l2: [Vec2, Vec2]): Vec2 | null {
-  const [p, q] = l1;
-  const [r, s] = l2;
-  const d1: Vec2 = [q[0] - p[0], q[1] - p[1]];
-  const d2: Vec2 = [s[0] - r[0], s[1] - r[1]];
-  const den = d1[0] * d2[1] - d1[1] * d2[0];
-  if (Math.abs(den) < 1e-9 * Math.hypot(...d1) * Math.hypot(...d2)) return null;
-  const t = ((r[0] - p[0]) * d2[1] - (r[1] - p[1]) * d2[0]) / den;
-  return [p[0] + t * d1[0], p[1] + t * d1[1]];
-}
-
-/** The end of a line farthest from `x` along `dir` (the side an angle was measured on); else the farthest one. */
-function lineEnd(l: [Vec2, Vec2], x: Vec2, dir?: Vec2): Vec2 {
-  const score = (e: Vec2) => (dir ? (e[0] - x[0]) * dir[0] + (e[1] - x[1]) * dir[1] : Math.hypot(e[0] - x[0], e[1] - x[1]));
-  return score(l[0]) >= score(l[1]) ? l[0] : l[1];
-}
 
 interface DimDraft {
   viewId: string;
@@ -608,36 +541,14 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   /** An item number being placed: the part picked and its dot (in the part's own coordinates). */
   const [balloonDraft, setBalloonDraft] = useState<Pick<DrawingBalloon, 'viewId' | 'instance' | 'at'> | null>(null);
   // the assemblies the views (and the BOM table) show: their bill of materials, each part's item, where each part is
-  const assemblies = useMemo(() => {
-    const out = new Map<string, { rows: BomTableRow[]; itemOf: Map<string, string>; place: Map<string, { R: number[]; t: Vec3 }> }>();
-    for (const id of new Set([...d.views.map((v) => v.studioId), ...(d.bom ? [d.bom.assemblyId] : [])])) {
-      const asm = doc.tabs.find((x) => x.id === id);
-      if (asm?.type !== 'assembly') continue;
-      const bom = storedBom(doc, asm);
-      const itemOf = new Map(bom.flatMap((r) => r.instances.map((i) => [i, r.item] as const)));
-      const place = new Map(shownParts(doc.tabs, asm).map((i) => [i.id, { R: rotationMatrix(i.rotation), t: i.position }]));
-      out.set(id, { rows: bom.map((r) => ({ item: r.item, partNumber: r.partNumber, name: r.name, quantity: r.quantity, material: r.material })), itemOf, place });
-    }
-    return out;
-  }, [doc, d.views, d.bom]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const assemblies = useMemo(() => drawingAssemblies(doc, d), [doc, d.views, d.bom]);
   /** The assembly a view shows (a detail view: its parent's), if it shows one. */
   const viewAssembly = (v: DrawingView) => assemblies.get(projectedView(v, d.views).studioId);
   /** An item number's text: its part's item in the bill of materials. */
-  const balloonItem = (b: Pick<DrawingBalloon, 'viewId' | 'instance'>) => {
-    const v = d.views.find((x) => x.id === b.viewId);
-    return (v && viewAssembly(v)?.itemOf.get(b.instance)) ?? '?';
-  };
+  const balloonItem = (b: Pick<DrawingBalloon, 'viewId' | 'instance'>) => itemOfBalloon(d, assemblies, b);
   /** An item number's dot on the sheet: its point of the part where the assembly has the part now (none — it is gone). */
-  const balloonDot = (b: Pick<DrawingBalloon, 'viewId' | 'instance' | 'at'>): Vec2 | null => {
-    const v = d.views.find((x) => x.id === b.viewId);
-    const pr = v && proj(v);
-    const pl = v && viewAssembly(v)?.place.get(b.instance);
-    if (!v || !pr || !pl) return null;
-    const w = v3.add(turn(pl.R, b.at), pl.t);
-    const { n, x } = viewAxes(v, d.views);
-    const y = v3.cross(n, x);
-    return toSheet(v, pr, [v3.dot(w, x), v3.dot(w, y)]);
-  };
+  const balloonDot = (b: Pick<DrawingBalloon, 'viewId' | 'instance' | 'at'>): Vec2 | null => dotOfBalloon(d, assemblies, proj, b);
   const [noteEdit, setNoteEdit] = useState<{ id: string; text: string } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -709,69 +620,12 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
     setInserting(true);
     try {
       await kernel().ready();
-      const src = tabSource(doc, studio)!;
-      await src.ensure();
-      const front = await kernel().projection({ studioKey: src.key, partIds: [], orientation: 'front', hidden: false });
-      const top = await kernel().projection({ studioKey: src.key, partIds: [], orientation: 'top', hidden: false });
-      if (!front.bounds || !top.bounds) {
-        useEditor.getState().showToast(t('The part studio has no parts to draw'), 'error');
-        return;
-      }
-      const fw = front.bounds[1][0] - front.bounds[0][0];
-      const fh = front.bounds[1][1] - front.bounds[0][1];
-      const th = top.bounds[1][1] - top.bounds[0][1];
-      const f = frameRect(d);
-      const availW = f.x1 - f.x0 - 30;
-      const availH = Math.max(1, f.y1 - titleBlockRect(d).y1 - 20);
-      // front + side horizontally, front + top vertically
-      const scale = chooseScale(fw + th + 30, fh + th + 30, availW * 0.95, availH * 0.95);
-      const gap = 20;
-      const projection = d.projection ?? 'first';
-      const cx = f.x0 + 15 + (fw * scale) / 2 + 10;
-      const cy = f.y1 - 15 - (fh * scale) / 2;
-      const sideOri = projectedOrientation('front', 'right', projection)!;
-      const belowOri = projectedOrientation('front', 'down', projection)!;
-      const frontId = uid('v');
-      const views: DrawingView[] = [
-        { id: frontId, studioId: studio.id, partIds: [], orientation: 'front', x: cx, y: cy, scale, showHidden: true },
-        {
-          id: uid('v'),
-          studioId: studio.id,
-          partIds: [],
-          orientation: sideOri,
-          x: cx + (fw * scale) / 2 + gap + (th * scale) / 2,
-          y: cy,
-          scale,
-          showHidden: true,
-          parent: frontId,
-        },
-        {
-          id: uid('v'),
-          studioId: studio.id,
-          partIds: [],
-          orientation: belowOri,
-          x: cx,
-          y: cy - (fh * scale) / 2 - gap - (th * scale) / 2,
-          scale,
-          showHidden: true,
-          parent: frontId,
-        },
-        {
-          id: uid('v'),
-          studioId: studio.id,
-          partIds: [],
-          orientation: 'iso',
-          x: f.x1 - 70,
-          y: f.y1 - 60,
-          scale: STD_SCALES.find((x) => x <= scale * 0.8) ?? scale,
-          showHidden: false,
-        },
-      ];
+      const views = await standardViews(d, studio.id, browserSourceOf(doc)(studio)!);
       upd((dd) => {
         dd.views.push(...views);
       });
     } catch (error) {
-      useEditor.getState().showToast(String(error), 'error');
+      useEditor.getState().showToast(t(error instanceof Error ? error.message : String(error)), 'error');
     } finally {
       setInserting(false);
     }
@@ -1802,25 +1656,9 @@ export function DrawingEditor({ tabId }: { tabId: string }) {
   const date = new Date(doc.modified).toLocaleDateString(getLang() === 'ru' ? 'ru-RU' : 'en-GB');
   const mainScale = d.views.find((v) => !isPictorial(v.orientation))?.scale ?? d.views[0]?.scale;
   /** The views, dimensions and notes; `translate` — the words of hole callouts ("THRU"). */
-  const sheetContent = (translate: (key: string) => string = t) => {
-    const prims: Prim2D[] = [];
+  const sheetContent = (translate: (key: string) => string = t) =>
     // a section's line or a detail's circle being drawn anew: the old one is not shown on its parent meanwhile
-    const marked = editSection ? d.views.filter((x) => x.id !== editSection) : d.views;
-    for (const v of d.views) prims.push(...viewPrims(v, proj(v), marked, comma));
-    for (const dm of d.dimensions) {
-      const v = d.views.find((x) => x.id === dm.viewId);
-      // with its view only: before the view is computed its points have nowhere to go (a reload drew them askew)
-      if (v && proj(v)) prims.push(...dimPrims(live(dm), v, proj(v), uf, translate, comma));
-    }
-    // item numbers (with their parts' views) and the bill of materials they count
-    for (const b of d.balloons ?? []) {
-      const dot = balloonDot(b);
-      if (dot) prims.push(...balloonPrims(dot, [b.x, b.y], balloonItem(b)));
-    }
-    if (d.bom) prims.push(...bomTablePrims(d.bom, assemblies.get(d.bom.assemblyId)?.rows ?? [], translate));
-    prims.push(...notePrims(d));
-    return prims;
-  };
+    sheetPrims(d, { proj, live, assemblies, unitFactor: uf, translate, marked: editSection ? d.views.filter((x) => x.id !== editSection) : d.views });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const contentPrims = useMemo(() => sheetContent(), [d, proj, uf, editSection, assemblies]);
   const titleExtra = { scale: mainScale ? scaleLabel(mainScale, comma) : '—', units: unit, date };
@@ -2581,29 +2419,3 @@ function segDist(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 }
 
-/** Decide horizontal / vertical / aligned from where the user places the dimension. */
-function placeLinear(a: Vec2, b: Vec2, p: Vec2): { kind: DrawingDimension['kind']; offset: number } {
-  const minX = Math.min(a[0], b[0]);
-  const maxX = Math.max(a[0], b[0]);
-  const minY = Math.min(a[1], b[1]);
-  const maxY = Math.max(a[1], b[1]);
-  let kind: DrawingDimension['kind'] = 'linear';
-  if ((p[1] > maxY || p[1] < minY) && p[0] >= minX - 2 && p[0] <= maxX + 2) kind = 'horizontal';
-  else if ((p[0] > maxX || p[0] < minX) && p[1] >= minY - 2 && p[1] <= maxY + 2) kind = 'vertical';
-  if (Math.abs(a[0] - b[0]) < 1e-6) kind = 'vertical';
-  if (Math.abs(a[1] - b[1]) < 1e-6) kind = 'horizontal';
-  return { kind, offset: linearOffset(a, b, kind, p) };
-}
-
-/** The offset of a linear dimension of `kind` between sheet points `a`, `b` whose dimension line goes through `p`. */
-function linearOffset(a: Vec2, b: Vec2, kind: DrawingDimension['kind'], p: Vec2): number {
-  let axis: Vec2 = kind === 'horizontal' ? [1, 0] : kind === 'vertical' ? [0, 1] : [b[0] - a[0], b[1] - a[1]];
-  const l = Math.hypot(axis[0], axis[1]) || 1;
-  axis = [axis[0] / l, axis[1] / l];
-  const n: Vec2 = [-axis[1], axis[0]];
-  const pn = p[0] * n[0] + p[1] * n[1];
-  const an = a[0] * n[0] + a[1] * n[1];
-  const bn = b[0] * n[0] + b[1] * n[1];
-  const offset = pn >= Math.max(an, bn) ? pn - Math.max(an, bn) : pn <= Math.min(an, bn) ? pn - Math.min(an, bn) : pn - Math.max(an, bn);
-  return Math.abs(offset) < 3 ? (offset < 0 ? -8 : 8) : offset;
-}

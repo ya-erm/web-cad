@@ -4,7 +4,14 @@
 
 import { setOC } from 'replicad';
 import opencascade from 'replicad-opencascadejs';
-import type { AssemblyTab, CadDocument, Feature, PartStudioTab, ProjectVersion, SelRef, SkFont } from '../core/types';
+import type { AssemblyTab, CadDocument, DrawingTab, Feature, PartStudioTab, SelRef, SkFont } from '../core/types';
+import { shownParts } from '../assembly/expand';
+import { variantStudio } from '../core/config';
+import { drawSheet, sheetFile } from '../drawing/drawingModel';
+import type { PdfFont } from '../export/pdf';
+import { pdfFontOf } from '../export/pdfFont';
+import { summarizeDrawing } from './drawing';
+import { addReport, applyVersionOp, stretches, summarizeVersions, type AnyOp, type ProjectDoc } from './versions';
 import { FONT_FILES, fontsLoaded, registerFont } from '../sketch/text';
 import { buildDerivedSources, setVersionSnapshot, sourceUnits } from '../core/derived';
 import { docId, uid } from '../core/ids';
@@ -15,8 +22,8 @@ import { sourceKey } from '../assembly/compose';
 import { AgentError, derivedVariant, findDerivedSource, runOps, summarize, queryModel, measureModel, type AgentKernel } from './runner';
 import { animateMate, studioSources, summarizeAssembly } from './assembly';
 import { configuredFeatures } from '../core/config';
-import { runDocumentOps, type DocumentHost, type DocumentOp } from './document';
-import type { AnimateQuery, AnimateResult, AssemblySummary, Edges, Faces, ModelSummary, Parts, RunReport } from './types';
+import { runDocumentOps, type DocumentHost } from './document';
+import type { AnimateQuery, AnimateResult, AssemblySummary, DrawingSummary, Edges, Faces, ModelSummary, Parts, RunReport, VersionsSummary } from './types';
 
 let ocReady: Promise<void> | null = null;
 
@@ -27,13 +34,8 @@ export function initOpenCascade(wasmPath: string): Promise<void> {
       const oc = await opencascade({ locateFile: () => wasmPath } as never);
       setOC(oc);
       if (!fontsLoaded()) {
-        // Node only (the app's types have no Node): the font files next to the module — the built-in module taken
-        // as it is (the CLI's Vite runner is closed once the module is imported: a dynamic import would fail)
-        const fsModule = 'node:fs/promises';
-        const proc = (globalThis as { process?: { getBuiltinModule?(id: string): unknown } }).process;
-        const { readFile } = (proc?.getBuiltinModule?.(fsModule) ?? (await import(/* @vite-ignore */ fsModule))) as { readFile(p: URL): Promise<Uint8Array> };
         for (const [k, url] of Object.entries(FONT_FILES)) {
-          const buf = await readFile(url);
+          const buf = await readBytes(url);
           registerFont(k as SkFont, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
         }
       }
@@ -79,12 +81,34 @@ function studioOf(doc: CadDocument): PartStudioTab {
 }
 
 const assemblyOf = (doc: CadDocument) => doc.tabs.find((x) => x.id === doc.activeTab && x.type === 'assembly') as AssemblyTab | undefined;
+const drawingOf = (doc: CadDocument) => doc.tabs.find((x) => x.id === doc.activeTab && x.type === 'drawing') as DrawingTab | undefined;
+
+/**
+ * A file next to the module (Node only — the app's types have no Node): the built-in module taken as it is (the CLI's
+ * Vite runner is closed once the module is imported: a dynamic import would fail).
+ */
+async function readBytes(url: URL): Promise<Uint8Array> {
+  const fsModule = 'node:fs/promises';
+  const proc = (globalThis as { process?: { getBuiltinModule?(id: string): unknown } }).process;
+  const { readFile } = (proc?.getBuiltinModule?.(fsModule) ?? (await import(/* @vite-ignore */ fsModule))) as { readFile(p: URL): Promise<Uint8Array> };
+  return readFile(url);
+}
+
+let pdfFontReady: Promise<PdfFont | undefined> | null = null;
+/** The font a drawing's PDF embeds (Inter, as the app's): its Cyrillic too. */
+function pdfFont(): Promise<PdfFont | undefined> {
+  pdfFontReady ??= readBytes(new URL('../sketch/fonts/Inter-Regular.woff', import.meta.url))
+    .then((b) => pdfFontOf(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer))
+    .catch(() => undefined);
+  return pdfFontReady;
+}
 
 export interface HeadlessSession {
+  /** The document, with its versions and the workspaces it is not in (as a project file has them). */
   doc: CadDocument;
-  run(ops: DocumentOp[]): Promise<RunReport>;
-  /** The active Part Studio's model, or the active assembly. */
-  state(): Promise<ModelSummary | { assembly: AssemblySummary }>;
+  run(ops: AnyOp[]): Promise<RunReport>;
+  /** The active Part Studio's model, the active assembly, or the active drawing. */
+  state(): Promise<ModelSummary | { assembly: AssemblySummary } | { drawing: DrawingSummary }>;
   query(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<unknown>;
   /** The measure panel's values of the matched selections (document units, degrees). */
   measure(q: { faces?: Faces; edges?: Edges; parts?: Parts }): Promise<Record<string, number>>;
@@ -93,6 +117,10 @@ export interface HeadlessSession {
   /** The active Part Studio's parts, or the active assembly (with its product tree). */
   exportStep(): Promise<Uint8Array>;
   exportStl(binary?: boolean): Promise<Uint8Array>;
+  /** A drawing (by name; default the active one, else the first) as a PDF (Cyrillic too), SVG or DXF file. */
+  exportDrawing(format: 'pdf' | 'svg' | 'dxf', name?: string): Promise<Uint8Array>;
+  /** The document's versions, the workspace it is in and the others. */
+  versions(): VersionsSummary;
 }
 
 /** A document session; `run` applies ops in place when they succeed (like the browser API). */
@@ -106,9 +134,9 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
   const builderOf = (key: string) => kernels.get(key)?.builder;
   const metaOf = (s: PartStudioTab) => Object.fromEntries(Object.entries(s.parts).map(([id, m]) => [id, { name: m.name, color: m.color }]));
   let reqId = 0;
-  // the versions a project file keeps (named ones): Derived features may use their Part Studios
-  const versions = (doc as CadDocument & { versions?: ProjectVersion[] }).versions ?? [];
-  for (const v of versions) if (v?.id && Array.isArray(v.tabs)) setVersionSnapshot(v.id, v);
+  // the versions a project file keeps (named ones, the ones made since): Derived features may use their Part Studios
+  const versionsNow = () => (session.doc as ProjectDoc).versions ?? [];
+  for (const v of (doc as ProjectDoc).versions ?? []) if (v?.id && Array.isArray(v.tabs)) setVersionSnapshot(v.id, v);
   /** Build the Part Studios a studio derives from (theirs first), then ready its features. */
   const prepare = (studioId: string, features: Feature[]) =>
     buildDerivedSources(docNow, studioId, features, (id) => id, (s, feats, units) =>
@@ -117,6 +145,7 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
   /** A Part Studio by name (of the document or of a version it keeps), built (its sources first), as a source for another one. */
   const source = async (name: string, forStudio: string, names?: Record<string, string | number>, from?: { version: string; document?: string }) => {
     if (from?.document) throw new AgentError('Versions of other documents can be derived from in the browser only (`npm run agent -- run`)');
+    const versions = versionsNow();
     const version = from && (versions.find((v) => v.name === from.version) ?? versions.find((v) => v.name.toLowerCase() === from.version.toLowerCase()));
     if (from && !version) throw new AgentError(`No version "${from.version}". Versions: ${versions.map((v) => v.name).join(', ') || '(none)'}`);
     const base = findDerivedSource(docNow, name, forStudio, version?.id);
@@ -145,6 +174,32 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
       const res = await k.builder.build({ type: 'build', reqId: ++reqId, units: d.units, features, partMeta: metaOf(studio), upTo }, builderOf);
       return { parts: new Map(res.parts.map((p) => [p.id, p])), mates: res.mates ?? [] };
     },
+    // drawings: a Part Studio (as a view's configuration has it) built, an assembly's parts placed in a builder of their own
+    drawingSource: (d) => (tab, configuration) => {
+      let get: (() => Promise<StudioBuilder>) | undefined;
+      if (tab?.type === 'partStudio') {
+        const s = variantStudio(tab, configuration);
+        get = async () => {
+          await host.studio(d, s);
+          return kernelOf(d, s).builder;
+        };
+      } else if (tab?.type === 'assembly') {
+        get = async () => {
+          await studioSources(d, host);
+          const b = new StudioBuilder();
+          b.place(shownParts(d.tabs, tab).map((i) => ({ id: i.id, studioKey: sourceKey(i), partId: i.partId, name: i.name, position: i.position, rotation: i.rotation })), builderOf);
+          return b;
+        };
+      }
+      if (!get) return undefined;
+      let built: Promise<StudioBuilder> | null = null;
+      const b = () => (built ??= get!());
+      return {
+        projection: async (r) => ({ type: 'projection', reqId: 0, ...(await b()).projection(r.partIds, r.orientation, r.hidden, { axes: r.axes, section: r.section, breakout: r.breakout }) }),
+        viewAnchor: async (r) => (await b()).viewAnchor(r.partIds, r.axes, r.p, r.circle, r.lineTo, r.cut),
+        viewRefs: async (r) => (await b()).viewRefs(r.axes, r.refs, r.cut, r.near, r.partIds),
+      };
+    },
   };
   /** The active assembly's sources, every Part Studio built (so its builder holds the full model). */
   const assemblySources = async (a: AssemblyTab) => addSubassemblies(session.doc.tabs, a, await studioSources(session.doc, host));
@@ -152,14 +207,36 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
   const session: HeadlessSession = {
     doc,
     async run(ops) {
-      const { doc: next, report } = await runDocumentOps(session.doc, ops, host);
-      if (report.ok) {
+      if (!Array.isArray(ops)) throw new AgentError('ops must be an array of operations');
+      // the document's ops in stretches between version ops (applied at once, in order: the file's versions and workspaces)
+      const out: RunReport = { ok: true, added: [], changed: [], removed: [], failed: [], applied: false };
+      let versions = false;
+      for (const s of stretches(ops)) {
+        if ('op' in s) {
+          try {
+            const r = applyVersionOp(session.doc as ProjectDoc, s.op);
+            if (r.created) setVersionSnapshot(r.created.id, r.created);
+            session.doc = { ...r.doc, modified: Date.now() };
+            if (r.merged) (out.versions ??= summarizeVersions(session.doc)).merged = r.merged;
+            versions = true;
+            out.applied = true;
+          } catch (e) {
+            return { ...out, ok: false, error: `op #${s.at} (${s.op.op}): ${e instanceof Error ? e.message : String(e)}` };
+          }
+          continue;
+        }
+        const { doc: next, report } = await runDocumentOps(session.doc, s.ops, host);
+        addReport(out, report, s.at);
+        if (!report.ok) return out;
         session.doc = { ...next, modified: Date.now() };
-        report.applied = true;
+        out.applied = true;
       }
-      return report;
+      if (versions) out.versions = { ...summarizeVersions(session.doc), ...(out.versions?.merged ? { merged: out.versions.merged } : {}) };
+      return out;
     },
     async state() {
+      const dw = drawingOf(session.doc);
+      if (dw) return { drawing: await summarizeDrawing(session.doc, dw, host.drawingSource(session.doc)) };
       const a = assemblyOf(session.doc);
       if (!a) return summarize(studioOf(session.doc), session.doc.units, kernelOf(session.doc, studioOf(session.doc)));
       const src = await assemblySources(a);
@@ -194,8 +271,20 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
       await summarize(s, session.doc.units, kernelOf(session.doc, s));
       return kernelOf(session.doc, s).builder.exportStl([], 0.01, 0.2, binary);
     },
+    async exportDrawing(format, name) {
+      const dw = (name !== undefined
+        ? session.doc.tabs.find((t) => t.type === 'drawing' && (t.name === name || t.name.toLowerCase() === name.toLowerCase()))
+        : (drawingOf(session.doc) ?? session.doc.tabs.find((t) => t.type === 'drawing'))) as DrawingTab | undefined;
+      if (!dw) throw new AgentError(name !== undefined ? `No drawing "${name}"` : 'The document has no drawing: make one with {"op":"drawing"}');
+      const sheet = await drawSheet(session.doc, dw, host.drawingSource(session.doc));
+      const file = sheetFile(sheet, format, dw.drawing.title || dw.name, format === 'pdf' ? await pdfFont() : undefined);
+      return typeof file.data === 'string' ? new TextEncoder().encode(file.data) : file.data;
+    },
+    versions: () => summarizeVersions(session.doc),
   };
   return session;
 }
 
 export { runOps };
+// the language of the sheets drawn (title block, section letters, callouts): the app's own choice
+export { setLang } from '../i18n';

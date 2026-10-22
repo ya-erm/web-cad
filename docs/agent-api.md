@@ -38,7 +38,7 @@ npm run agent -- run '[{"op":"setVariable","name":"w","value":60}]'
 ## Команды CLI
 
 ```
-status | docs | open <id|name> | create <name> | state | feature <name>
+status | docs | open <id|name> | create <name> | state | versions | feature <name>
 run <ops.json | - | '[…]'> [--keep-failed]
 query '<json>'            {"faces":…} / {"edges":…} / {"parts":…}
 measure '<json>'          те же запросы → панель измерений (см. ниже)
@@ -47,9 +47,11 @@ undo | redo | cancel-edit
 shot <out.png> [view] [--exploded "<имя>"] [--amount 0…1]
                           view: iso, top, front, right, back, left, bottom, dimetric, trimetric, fit;
                           --exploded — разнесённый вид открытой сборки (--amount — насколько разнесён)
-export <stl|step|webcad> <out>
+export <stl|step|webcad|pdf|svg|dxf> <out> [--drawing "<имя>"]
+                          pdf / svg / dxf — чертёж (активный, иначе первый)
 call <method> [json args…]
-build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--step f] [--name n]
+build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--step f]
+      [--pdf f] [--svg f] [--dxf f] [--drawing "<имя>"] [--lang ru|en] [--name n]
 ```
 
 `run` применяет все операции **одним шагом отмены**. По умолчанию он атомарный: если какая-то
@@ -321,6 +323,80 @@ Part Studio. Всё по-прежнему применяется одним ша
 вида «Slider <1> / Planar 1». `state` на вкладке сборки возвращает
 `{assembly}`, `export step` — сборку с деревом изделия, `export stl` — все её детали одной сеткой.
 
+## Чертежи
+
+Операции чертежа работают на активной вкладке чертежа (`drawing` открывает или создаёт её). Точки модели — в
+единицах документа и координатах источника (Part Studio или сборки), как их дают `query` (у круговых рёбер —
+`center`) и `state`; точки листа (`at`) — в мм от левого нижнего угла листа. Размеры привязываются к вершинам и
+окружностям модели и следуют за ней: после `setVariable` экспорт показывает новые значения.
+
+```bash
+npm run agent -- run '[
+  {"op":"drawing","name":"Пластина","of":"Part Studio 1","template":"gost","title":"Пластина","material":"Сталь 45"},
+  {"op":"dimension","view":"top","type":"horizontal","from":[-30,-20,10],"to":[30,-20,10]},
+  {"op":"dimension","view":"top","type":"vertical","from":[30,-20,10],"to":[30,20,10]},
+  {"op":"dimension","view":"top","type":"diameter","center":[15,0,10]},
+  {"op":"section","view":"top","through":[15,0,10]},
+  {"op":"note","text":"1. Острые кромки притупить.","at":[30,60]}
+]'
+npm run agent -- export pdf /tmp/plate.pdf     # активный чертёж; --drawing "<имя>" — другой
+```
+
+| op | Поля |
+| --- | --- |
+| `drawing` | `name?` (открыть или создать; по умолчанию «Drawing N», A3 альбомный), `of?` — Part Studio или сборка: её стандартные виды (спереди, сбоку и под ним по проекции листа, изометрия) в стандартном масштабе по листу; `sheet?` (`A4`…`A0`, `Letter`, `Tabloid`), `landscape?`, `projection?` (`first` — ISO / ГОСТ, `third` — ANSI), `template?` (`custom` / `gost`), `title?`, `designation?`, `author?`, `material?`, `organization?`, `decimal?` (`.` / `,`) |
+| `view` | вид `of?` (по умолчанию то, что показывают виды чертежа, иначе первая Part Studio) по `orientation?` (`front`, `top`, `right`, `left`, `back`, `bottom`, `iso`, `dimetric`, `trimetric`) в точке `at?` (центр; по умолчанию середина листа) с `scale?` (`0.5` или `"1:2"`; по умолчанию масштаб чертежа или подходящий); или проекционный от вида `from` в сторону `direction?` (`right` / `left` / `up` / `down`) на расстоянии `gap?` (20 мм) — по линии проекции, в его масштабе; `parts?` — имена показываемых деталей; `hidden?` — невидимые линии |
+| `section` | разрез вида `view` по линии через точку модели `through`: `line?` — `vertical` (по умолчанию) или `horizontal` поперёк вида; встаёт в сторону `direction?` (вправо / вниз по умолчанию; стрелки — куда смотрят), `gap?` 25 мм; буквы А–А, Б–Б… на языке интерфейса |
+| `detail` | выносной элемент вида `view`: окружность вокруг точки модели `center` радиуса `radius`, увеличенная (`scale?`, по умолчанию вдвое), в точке листа `at?` (по умолчанию справа от вида) |
+| `dimension` | на виде `view`: `type` `horizontal` / `vertical` / `aligned` — между точками модели `from` и `to`; `diameter` / `radius` — окружности (видимой торцом) с центром `center`; `hole` — выноска отверстия фичи «Отверстие» в `center`. `offset?` — расстояние размерной линии (надписи) от геометрии, мм листа (10 наружу, отрицательное — внутрь); `at?` — точка листа: через неё проходит размерная линия, там стоит надпись ⌀ / выноски |
+| `note` | `text` (`\n` — новая строка), `at` (начало первой строки), `height?` (3.5 мм) |
+| `bom` | спецификация сборки `assembly?` (по умолчанию той, что показывают виды) таблицей: её правый нижний угол в `at?` (по умолчанию на основной надписи); `balloons?` — номера позиций на виде (`true` — на первом виде сборки), по одному на строку |
+| `deleteView` | вид `view` — с его размерами, номерами позиций, разрезами и выносными элементами (проекционные виды остаются свободными) |
+
+`view` в операциях — id вида, его буква (`"A"` — разрез А–А, выносной элемент Б), ориентация (`"top"` — первый
+такой обычный вид) или индекс. Отчёт (и `state` на вкладке чертежа) содержит `drawing`:
+
+```jsonc
+"drawing": {
+  "name": "Пластина", "sheet": "A3", "landscape": true, "projection": "first", "size": [420, 297],
+  "views": [{"id":"…","kind":"view","orientation":"front","of":"Part Studio 1","scale":"2:1","at":[115,256],"size":[120,20]},
+            {"id":"…","kind":"projected","orientation":"top","parent":"…", …},
+            {"id":"…","kind":"section","label":"А","orientation":"top", …}],
+  "dimensions": [{"id":"…","view":"…","type":"horizontal","value":60,"text":"60","anchored":true}],
+  "notes": 1, "bom": {"assembly":"Rig","rows":2}, "balloons": 2
+}
+```
+
+`anchored: false` — точки размера не совпали с вершинами (окружностями) модели: он не будет следовать за ней.
+Ставьте виды (в том числе разрезы и выносные элементы) до размеров: надписи ⌀ и выносок отверстий обходят уже
+стоящие виды и надписи; точное место надписи или размерной линии — `at`.
+Экспорт листа: `export pdf|svg|dxf <out> [--drawing "<имя>"]`; без браузера — `build … --pdf f.pdf --svg f.svg
+--dxf f.dxf [--drawing "<имя>"] [--lang ru|en]` (`--lang` — язык основной надписи, букв разрезов, выносок; PDF
+встраивает шрифт с кириллицей).
+
+## Версии и ветви
+
+Версии, ветви (рабочие пространства) и слияние — как в панели «Версии». Эти операции — отдельные записи рядом с
+документом: в `run` они выполняются сразу и по порядку между остальными операциями (ошибка позже их не отменяет).
+В браузере это версии приложения; без браузера — поля `versions` и `workspaces` файла проекта (`--out` их сохраняет).
+
+| op | Поля |
+| --- | --- |
+| `version` | `name?` (по умолчанию V1, V2…), `description?` — версия документа как он есть |
+| `branch` | `from` — версия (по имени), `name?` (по умолчанию «Ветвь N» / «Branch N»): новая ветвь с содержимым версии; текущее пространство сохраняется, чтобы вернуться |
+| `workspace` | `name` — перейти в другое пространство («Main» тоже); текущее сохраняется |
+| `merge` | `from` — пространство, чьи изменения с версии-основы влить в текущее (по фичам, экземплярам, видам — где изменили обе стороны, берутся его изменения) |
+
+```jsonc
+[{"op":"version","description":"До доработки"},
+ {"op":"branch","from":"V1","name":"Шире"}, {"op":"setVariable","name":"w","value":60},
+ {"op":"workspace","name":"Main"}, {"op":"merge","from":"Шире"}]
+// отчёт: "versions": {"workspace":"Main","versions":[{"name":"V1",…}],"workspaces":[{"name":"Шире","base":"V1"}],
+//                     "merged":{"from":"Шире","tabs":[{"name":"Part Studio 1","change":"changed","conflict":false,"items":1}]}}
+```
+
+`npm run agent -- versions` (`webcad.versions()`) — версии документа, его пространство и остальные.
+
 ## Отчёт
 
 `run` и `state` возвращают:
@@ -350,7 +426,7 @@ Part Studio. Всё по-прежнему применяется одним ша
 `run(ops, {atomic})`, `query(q)`, `measure(q)`, `animate(q)`, `feature(name)`, `undo()`, `redo()`, `cancelEdit()`,
 `view(name)`, `section({plane, offset?, flip?} | null)` (сечение по top / front / right),
 `screenshot({view, exploded?, amount?})` (PNG data URL; `exploded` — разнесённый вид открытой сборки по имени),
-`export(format)` (`{fileName, mime, base64}`), `help()`.
+`export(format, drawing?)` (`{fileName, mime, base64}`; `pdf` / `svg` / `dxf` — чертёж), `versions()`, `help()`.
 Из CLI: `npm run agent -- call section '{"plane":"front","offset":5}'`.
 
 Если в приложении открыт диалог фичи или эскиз, изменения отклоняются: завершите правку или
@@ -359,9 +435,11 @@ Part Studio. Всё по-прежнему применяется одним ша
 ## Устройство
 
 - `src/agent/types.ts` — типы операций и отчёта, `src/agent/runner.ts` — разбор операций и запросов,
-  `src/agent/assembly.ts` — операции сборок, `src/agent/document.ts` — список операций по вкладкам,
-  `src/agent/browser.ts` — `window.webcad` и клиент моста, `src/agent/headless.ts` — Node.
+  `src/agent/assembly.ts` — операции сборок, `src/agent/drawing.ts` — чертежей, `src/agent/versions.ts` —
+  версий и ветвей, `src/agent/document.ts` — список операций по вкладкам, `src/agent/browser.ts` —
+  `window.webcad` и клиент моста, `src/agent/headless.ts` — Node. Лист чертежа без редактора (виды, размеры,
+  спецификация, экспорт) — `src/drawing/drawingModel.ts`, общий с редактором чертежа.
 - Мост — плагин в `vite.config.ts` (`/__webcad/rpc|poll|reply|status`, только POST с заголовком
   `x-webcad`, запросы с других сайтов отклоняются). Работает в `npm run dev` и `npm run serve`;
   в статическом хостинге моста нет, `window.webcad` при этом доступен.
-- Тесты: `src/agent/agent.test.ts` (реальное ядро OpenCascade в Node).
+- Тесты: `src/agent/agent.test.ts`, `drawing.test.ts`, `versions.test.ts` и др. (реальное ядро OpenCascade в Node).

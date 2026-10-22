@@ -1,24 +1,26 @@
-// Agent API on a whole document: one list of operations may build parts in a Part Studio and then put them
-// together in an assembly. Consecutive Part Studio ops run on the active Part Studio, assembly ops on the
-// active assembly; {"op":"studio"} / {"op":"assembly"} switch (or create) tabs. Nothing changes on an error.
+// Agent API on a whole document: one list of operations may build parts in a Part Studio, put them together in an
+// assembly and draw them. Consecutive Part Studio ops run on the active Part Studio, assembly ops on the active
+// assembly, drawing ops on the active drawing; {"op":"studio"} / {"op":"assembly"} / {"op":"drawing"} switch (or
+// create) tabs. Nothing changes on an error.
 
 import type { CadDocument, PartStudioTab } from '../core/types';
 import { uid } from '../core/ids';
 import { AgentError, runOps, type AgentKernel } from './runner';
-import { isAssemblyOp, runAssemblyOps, type AssemblyHost } from './assembly';
-import type { AgentOp, AssemblyOp, RunReport } from './types';
+import { isAssemblyOp, runAssemblyOps } from './assembly';
+import { isDrawingOp, runDrawingOps, type DrawingHost } from './drawing';
+import type { AgentOp, AssemblyOp, DrawingOp, RunReport } from './types';
 
 /** Open the Part Studio with this name, or create it. */
 export type StudioOp = { op: 'studio'; name?: string };
-export type DocumentOp = AgentOp | AssemblyOp | StudioOp;
+export type DocumentOp = AgentOp | AssemblyOp | DrawingOp | StudioOp;
 
-export interface DocumentHost extends AssemblyHost {
+export interface DocumentHost extends DrawingHost {
   /** The kernel the Part Studio ops build with. */
   kernel(doc: CadDocument, studio: PartStudioTab): AgentKernel;
 }
 
-type Kind = 'part' | 'assembly' | 'tab';
-const kindOf = (op: DocumentOp): Kind => (op.op === 'studio' ? 'tab' : isAssemblyOp(op) ? 'assembly' : 'part');
+type Kind = 'part' | 'assembly' | 'drawing' | 'tab';
+const kindOf = (op: DocumentOp): Kind => (op.op === 'studio' ? 'tab' : isAssemblyOp(op) ? 'assembly' : isDrawingOp(op) ? 'drawing' : 'part');
 
 /** Whether a list of ops needs the document-level runner (it switches tabs or works on assemblies). */
 export const needsDocument = (ops: DocumentOp[]) => ops.some((op) => kindOf(op) !== 'part');
@@ -57,6 +59,14 @@ export async function runDocumentOps(doc: CadDocument, ops: DocumentOp[], host: 
       out.removed.push(...r.report.removed);
       out.failed.push(...r.report.failed);
       out.assembly = r.report.assembly;
+    } else if (kind === 'drawing') {
+      const r = await runDrawingOps(d, stretch as DrawingOp[], host);
+      if (r.report.error) return fail(i, r.report);
+      d = r.doc;
+      out.added.push(...r.report.added);
+      out.changed.push(...r.report.changed);
+      out.removed.push(...r.report.removed);
+      out.drawing = r.report.drawing;
     } else {
       const studio = d.tabs.find((t) => t.id === d.activeTab && t.type === 'partStudio') as PartStudioTab | undefined;
       if (!studio) return fail(i, { ...out, ok: false, error: `op #0 (${ops[i].op}): the active tab is not a Part Studio — switch with {"op":"studio","name":"…"}` });
