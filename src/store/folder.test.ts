@@ -113,6 +113,21 @@ describe('a folder on the computer', () => {
     expect(versions).toEqual([v1, branch]);
   });
 
+  it('keeps its card picture in the project file (last), apart from the document', () => {
+    const pic = 'data:image/png;base64,iVBORw0KGgo=';
+    const text = projectText(doc, [], pic);
+    const raw = JSON.parse(text);
+    expect(raw.thumbnail).toBe(pic);
+    expect(Object.keys(raw).at(-1)).toBe('thumbnail');
+    const read = readProject(raw, 'x');
+    expect(read.thumbnail).toBe(pic);
+    expect('thumbnail' in read.doc).toBe(false);
+    expect(read.doc).toEqual(doc);
+    // none, or not a picture: nothing
+    expect(readProject(JSON.parse(projectText(doc)), 'x').thumbnail).toBeUndefined();
+    expect(readProject({ ...doc, thumbnail: 'javascript:alert(1)' }, 'x').thumbnail).toBeUndefined();
+  });
+
   it('takes a project file without id or name, and refuses other JSON', () => {
     const p = parseProject(JSON.stringify({ units: doc.units, tabs: [] }), 'From disk');
     expect(p.name).toBe('From disk');

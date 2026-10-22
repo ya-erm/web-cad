@@ -128,6 +128,8 @@ export interface FolderFile {
   title: string;
   modified: number;
   size: number;
+  /** Its card's picture, kept in the file (`thumbnail` of the project file). */
+  thumbnail?: string;
 }
 
 /** The project files of the folder, the latest changed first. */

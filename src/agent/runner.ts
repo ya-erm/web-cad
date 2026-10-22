@@ -505,7 +505,12 @@ class Runner {
 
   /** Resolve {"$faces": …} style placeholders inside raw params. */
   async resolveParams(v: unknown): Promise<unknown> {
-    if (Array.isArray(v)) return Promise.all(v.map((x) => this.resolveParams(x)));
+    if (Array.isArray(v)) {
+      // a placeholder in a list stands for its references in place: [{"$regions":…}, {"$regions":…}] — one list
+      const out = await Promise.all(v.map((x) => this.resolveParams(x)));
+      const placeholder = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length === 1 && Object.keys(x)[0].startsWith('$');
+      return v.flatMap((x, i) => (placeholder(x) && Array.isArray(out[i]) ? (out[i] as unknown[]) : [out[i]]));
+    }
     if (!v || typeof v !== 'object') return v;
     const o = v as Record<string, unknown>;
     const keys = Object.keys(o);
@@ -800,7 +805,12 @@ class Runner {
           p.bodyType = 'surface';
           p.curves = this.sketchCurves(this.sketchFeature(op.sketch));
         } else p.profiles = this.regions(await this.profileSketch(op.sketch), op.regions);
-        p.path = 'sketch' in op.path ? this.sketchCurves(this.sketchFeature(op.path.sketch)) : await this.edges(op.path.edges);
+        if ('curve' in op.path) {
+          // a curve feature's (a helix's) wire
+          const c = this.feature(op.path.curve);
+          if (c.type !== 'helix') throw new AgentError(`"${op.path.curve}" is not a curve (a helix)`);
+          p.path = [{ kind: 'sketchEntity', sketchId: c.id, entityId: c.id }];
+        } else p.path = 'sketch' in op.path ? this.sketchCurves(this.sketchFeature(op.path.sketch)) : await this.edges(op.path.edges);
         if (op.keepOrientation) p.keepOrientation = true;
         if (op.boolean) p.op = op.boolean;
         this.add('sweep', op.name, p);
@@ -1105,6 +1115,11 @@ class Runner {
         p.op = op.type;
         p.targets = await this.parts(op.targets);
         p.tools = await this.parts(op.tools);
+        // The union feature merges its tool parts only: the targets join them.
+        if (op.type === 'union') {
+          p.tools = [...p.targets, ...p.tools.filter((t) => !p.targets.some((r) => r.kind === 'part' && t.kind === 'part' && r.partId === t.partId))];
+          p.targets = [];
+        }
         p.keepTools = !!op.keepTools;
         this.add('boolean', op.name, p);
         return;
@@ -1365,7 +1380,7 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
     const hi = p.bbox[1].map((v) => v / k) as Vec3;
     parts.push({
       id: p.id,
-      name: p.name,
+      name: studio.parts[p.id]?.name ?? p.name,
       bboxMin: round3(lo),
       bboxMax: round3(hi),
       size: round3([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]),

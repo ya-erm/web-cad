@@ -134,9 +134,10 @@ function FolderView({ folderId, onOpen, onRemoved }: { folderId: string; onOpen:
       const id = await createInFolder(folderId, t('Untitled document'));
       if (id) onOpen(id);
     });
+  // the picture of its document in the browser, else the one the file keeps (a file not opened here yet)
   const thumb = (name: string) => {
     const id = Object.keys(links).find((k) => links[k].folder === folderId && links[k].name === name);
-    return id ? docs.find((d) => d.id === id)?.thumbnail : undefined;
+    return (id ? docs.find((d) => d.id === id)?.thumbnail : undefined) ?? files.find((f) => f.name === name)?.thumbnail;
   };
   return (
     <>
@@ -447,10 +448,10 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               const f = e.target.files?.[0];
               if (!f) return;
               try {
-                const { doc, versions } = readProject(JSON.parse(await f.text()), f.name.replace(/(\.webcad)?\.json$/i, ''));
-                // a copy: its versions come as copies too (its Derived features that use them — with them)
+                const { doc, versions, thumbnail } = readProject(JSON.parse(await f.text()), f.name.replace(/(\.webcad)?\.json$/i, ''));
+                // a copy: its versions come as copies too (its Derived features that use them — with them); its picture
                 const copies = copiedVersionIds(versions);
-                const id = await importDocument(withCopiedVersions(doc, copies));
+                const id = await importDocument(withCopiedVersions(doc, copies), thumbnail);
                 await importVersions(id, versions, false, copies);
                 onOpen(id);
               } catch {

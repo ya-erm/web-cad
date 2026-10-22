@@ -138,6 +138,12 @@ export async function deleteVersions(ids: string[]): Promise<void> {
   });
 }
 
+/** A document's thumbnail (its card's picture), if it has one. */
+export async function getThumbnail(id: string): Promise<string | undefined> {
+  const s = await tx<DocumentSummary | undefined>([SUMMARIES], 'readonly', (t) => t.objectStore(SUMMARIES).get(id));
+  return s?.thumbnail || undefined;
+}
+
 export async function saveThumbnail(id: string, thumbnail: string): Promise<void> {
   await tx([SUMMARIES], 'readwrite', (t) => {
     const s = t.objectStore(SUMMARIES);

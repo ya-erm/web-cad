@@ -6,8 +6,7 @@ import type { MeasureResult } from '../kernel/protocol';
 import { formatNumber, LENGTH_FACTOR } from '../core/expr';
 import { download, exportAssembly, exportParts, safeName, type ExportKind } from './exporting';
 import { useAssembly } from '../assembly/sources';
-import { projectText } from '../store/folderStore';
-import { fileVersions } from '../store/versions';
+import { exportProjectText } from '../store/folderStore';
 import { Icon, type IconName } from './icons';
 import { t } from '../i18n';
 import { getEngine } from '../viewport/engineRef';
@@ -256,8 +255,8 @@ export function ExportDialog() {
   const project = projectFor === open;
   const run = async () => {
     if (project) {
-      // with its versions
-      download(projectText(doc, await fileVersions(doc.id)), `${safeName(doc.name)}.webcad.json`, 'application/json');
+      // with its versions and its picture
+      download(await exportProjectText(doc), `${safeName(doc.name)}.webcad.json`, 'application/json');
       return close();
     }
     try {

@@ -50,7 +50,7 @@ export interface DrawingHost extends AssemblyHost {
   drawingSource(doc: CadDocument): SourceOf;
 }
 
-const OPS = new Set(['drawing', 'view', 'section', 'detail', 'dimension', 'note', 'bom', 'deleteView']);
+const OPS = new Set(['drawing', 'view', 'section', 'detail', 'dimension', 'note', 'bom', 'moveView', 'deleteView']);
 export const isDrawingOp = (op: { op: string }) => OPS.has(op.op);
 
 const round = (v: number) => Math.round(v * 1e4) / 1e4 + 0;
@@ -392,9 +392,16 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
             const ra = await anchor(h.c, h.side ? { r: h.r, side: true } : {});
             dr.dimensions.push({ id, viewId: v.id, kind: 'hole', a: h.c, offset: 0, textPos: label(h.r), ...refsOf(ra) });
           } else {
-            // the circle seen end-on there
-            const circle = p.edges.map((e) => e.circle).find((c) => c && Math.hypot(c.c[0] - a[0], c.c[1] - a[1]) < 1e-3);
-            if (!circle) throw new AgentError('No circle centred there in this view (seen end-on)');
+            // the circle seen end-on there (of several about one centre: the one of `diameter`)
+            const want = op.diameter !== undefined ? len(op.diameter, 'diameter') : undefined;
+            const circles = p.edges.map((e) => e.circle).filter((c): c is NonNullable<typeof c> => !!c && Math.hypot(c.c[0] - a[0], c.c[1] - a[1]) < 1e-3);
+            const circle = want !== undefined ? circles.find((c) => Math.abs(2 * c.r - want) < 1e-3) : circles[0];
+            if (!circle)
+              throw new AgentError(
+                circles.length
+                  ? `No circle Ø${want! / k} centred there: ${[...new Set(circles.map((c) => round((2 * c.r) / k)))].map((x) => `Ø${x}`).join(', ')}`
+                  : 'No circle centred there in this view (seen end-on)',
+              );
             const ra = await anchor(circle.c, { r: circle.r });
             dr.dimensions.push({ id, viewId: v.id, kind: op.type, a: circle.c, b: [circle.c[0] + circle.r, circle.c[1]], offset: 0, textPos: label(circle.r), ...refsOf(ra) });
           }
@@ -448,6 +455,39 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
             dr.balloons.push({ id: uid('b'), viewId: v.id, instance: inst.id, at, x: v.x + dir[0] * reach, y: v.y + dir[1] * reach });
           }
         }
+        changed.add(tab!.name);
+        return;
+      }
+      case 'moveView': {
+        const dr = need();
+        const v = viewOf(op.view);
+        const dx = op.at[0] - v.x;
+        const dy = op.at[1] - v.y;
+        // the views aligned with it go with it (projected, section views — not those placed freely)
+        const moved = new Set([v.id]);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const x of dr.views)
+            if (!moved.has(x.id) && x.parent && moved.has(x.parent) && !x.unaligned && !x.detail) {
+              moved.add(x.id);
+              grew = true;
+            }
+        }
+        // a view aligned with its parent, moved off its line of projection: placed freely from now on
+        const parent = v.parent && !v.detail && !v.unaligned ? dr.views.find((x) => x.id === v.parent) : undefined;
+        if (parent && Math.abs(dx) > 1e-6 && Math.abs(dy) > 1e-6) v.unaligned = true;
+        for (const x of dr.views)
+          if (moved.has(x.id)) {
+            x.x += dx;
+            x.y += dy;
+          }
+        // what is on them in sheet coordinates: labels of circles and callouts, item numbers' shelves
+        for (const dm of dr.dimensions) if (moved.has(dm.viewId) && dm.textPos) dm.textPos = [dm.textPos[0] + dx, dm.textPos[1] + dy];
+        for (const b of dr.balloons ?? [])
+          if (moved.has(b.viewId)) {
+            b.x += dx;
+            b.y += dy;
+          }
         changed.add(tab!.name);
         return;
       }

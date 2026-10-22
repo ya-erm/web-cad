@@ -167,7 +167,8 @@ export type AgentOp =
       sketch?: string;
       regions?: Regions;
       surface?: boolean;
-      path: { sketch: string } | { edges: Edges };
+      /** The curves of a sketch, model edges (one chain), or a curve feature by name (`curve`: a helix — a spring, a thread). */
+      path: { sketch: string } | { edges: Edges } | { curve: string };
       keepOrientation?: boolean;
       boolean?: BoolOp;
     })
@@ -607,6 +608,8 @@ export type DrawingOp =
       from?: Pt3;
       to?: Pt3;
       center?: Pt3;
+      /** Of several circles about `center` (a stepped bore, a flange): the one of this diameter. */
+      diameter?: Num;
       offset?: number;
       at?: [number, number];
     }
@@ -618,6 +621,11 @@ export type DrawingOp =
    * one per row of the table.
    */
   | { op: 'bom'; assembly?: string; at?: [number, number]; balloons?: ViewQuery | boolean }
+  /**
+   * Move a view's centre to sheet point `at` (its dimensions and item numbers go with it), the views aligned with it
+   * too (projected and section views); one aligned with its parent moved off its line of projection is placed freely.
+   */
+  | { op: 'moveView'; view: ViewQuery; at: [number, number] }
   /** Remove a view with what is on it (dimensions, item numbers) and the section and detail views made from it. */
   | { op: 'deleteView'; view: ViewQuery };
 

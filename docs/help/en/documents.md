@@ -56,7 +56,7 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 ## Project files {#project-files}
 
-You can save the whole document (all tabs, feature history, settings, [versions](versions#file)) to a file and open it in another browser or on another computer:
+You can save the whole document (all tabs, feature history, settings, [versions](versions#file), its card's picture) to a file and open it in another browser or on another computer:
 
 1. In the open document, click **Export** at the top right, choose the **WebCAD project** tab at the top of the dialog, and click **Export**. A `<name>.webcad.json` file downloads.
 2. On the **Documents** page, click **Import project** and select that file.
@@ -70,7 +70,7 @@ Exporting geometry to STEP, STL, and other formats is described in [Import and e
 In Chrome and Edge, WebCAD can work right in a folder on your computer: its documents are project files `*.webcad.json` that are saved automatically. Such a folder is easy to copy, back up, keep in Git or in a cloud folder (Dropbox, Google Drive and the like).
 
 1. On the documents page, click **Folder on this computer** at the left, then **Choose folder…**, and let the browser view and edit the files in it.
-2. The cards show the WebCAD files of the folder. Click a card to open the document.
+2. The cards show the WebCAD files of the folder with pictures of their models: a project file keeps its card's picture, so it shows even before the document has been opened in this browser. Click a card to open the document.
 3. **New document in the folder** creates a document as a file of the folder right away. A document of the browser goes into a folder with **Save to the folder «…»** in its card menu (one item per folder).
 
 You can add several folders: they are listed at the left under **Folders on this computer**, and **Add folder…** adds one more. **Remove folder from the list** on a folder's page turns it off — the files and the documents stay, but are no longer linked.

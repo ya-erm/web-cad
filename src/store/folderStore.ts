@@ -9,6 +9,7 @@ import * as db from './persistence';
 import { useDoc } from './docStore';
 import { fileVersions, importVersions, useVersions } from './versions';
 import { useEditor } from './editorStore';
+import { getEngine } from '../viewport/engineRef';
 import { t } from '../i18n';
 import {
   fileStamp,
@@ -53,24 +54,67 @@ const setFolder = (id: string, patch: Partial<Folder>) => useFolder.setState((s)
 
 /**
  * The text of a project file: the document as JSON (indented, so that it reads and compares well), with its
- * versions (`versions`, oldest first; the history stays in the browser) and the workspaces it is not in
- * (`workspaces`: the ones `versions` has with `kind: 'workspace'`).
+ * versions (`versions`, oldest first; the history stays in the browser), the workspaces it is not in
+ * (`workspaces`: the ones `versions` has with `kind: 'workspace'`) and its card's picture (`thumbnail`, last: a
+ * folder shows it before the file is opened in the browser).
  */
-export function projectText(doc: CadDocument, versions: ProjectVersion[] = []): string {
+export function projectText(doc: CadDocument, versions: ProjectVersion[] = [], thumbnail?: string): string {
   const named = versions.filter((v) => v.kind !== 'workspace');
   const workspaces = versions.flatMap(({ kind, ...w }) => (kind === 'workspace' ? [w] : []));
-  return JSON.stringify({ ...doc, ...(named.length ? { versions: named } : {}), ...(workspaces.length ? { workspaces } : {}) }, null, 1);
+  return JSON.stringify({ ...doc, ...(named.length ? { versions: named } : {}), ...(workspaces.length ? { workspaces } : {}), ...(thumbnail ? { thumbnail } : {}) }, null, 1);
 }
 
-/** A document and its versions (and workspaces: `kind: 'workspace'`) from a project file (already parsed JSON); throws on anything else. */
-export function readProject(raw: unknown, title: string): { doc: CadDocument; versions: ProjectVersion[] } {
-  const { versions, workspaces, ...doc } = (raw ?? {}) as CadDocument & { versions?: ProjectVersion[]; workspaces?: ProjectVersion[] };
+/**
+ * A document, its versions (and workspaces: `kind: 'workspace'`) and its card's picture from a project file
+ * (already parsed JSON); throws on anything else.
+ */
+export function readProject(raw: unknown, title: string): { doc: CadDocument; versions: ProjectVersion[]; thumbnail?: string } {
+  const { versions, workspaces, thumbnail, ...doc } = (raw ?? {}) as CadDocument & { versions?: ProjectVersion[]; workspaces?: ProjectVersion[]; thumbnail?: unknown };
   if (!raw || typeof raw !== 'object' || !Array.isArray(doc.tabs) || !doc.units) throw new Error('Invalid project file');
   const now = Date.now();
   return {
     doc: { ...doc, id: typeof doc.id === 'string' && doc.id ? doc.id : docId(), name: doc.name || title, created: doc.created ?? now, modified: doc.modified ?? now, version: 1 },
     versions: [...(Array.isArray(versions) ? versions : []), ...(Array.isArray(workspaces) ? workspaces.map((w) => ({ ...w, kind: 'workspace' as const })) : [])],
+    ...(typeof thumbnail === 'string' && thumbnail.startsWith('data:image/') ? { thumbnail } : {}),
   };
+}
+
+/** A document's project file text as the browser has it: with its versions and its card's picture. */
+async function fileText(doc: CadDocument): Promise<string> {
+  return projectText(doc, await fileVersions(doc.id), await db.getThumbnail(doc.id));
+}
+
+/**
+ * The open document's project file (to export): with its versions and its picture — made now from the graphics
+ * area when it shows the document's model (a Part Studio, an assembly), else the one it has.
+ */
+export async function exportProjectText(doc: CadDocument): Promise<string> {
+  const open = useDoc.getState().doc;
+  const shows = open?.id === doc.id && open.tabs.find((x) => x.id === open.activeTab)?.type !== 'drawing';
+  const fresh = shows && !useDoc.getState().readOnly ? getEngine()?.thumbnail() : '';
+  if (fresh) await db.saveThumbnail(doc.id, fresh);
+  return fileText(doc);
+}
+
+/** The pictures of a folder's files by `name|modified|size` (a file read again only when it changed). */
+const fileThumbs = new Map<string, string | null>();
+
+/** A folder's files with their pictures (read from the files: their documents may not be in the browser yet). */
+async function withThumbnails(dir: FileSystemDirectoryHandle, files: FolderFile[]): Promise<FolderFile[]> {
+  return Promise.all(
+    files.map(async (f) => {
+      const key = `${f.name}|${f.modified}|${f.size}`;
+      if (!fileThumbs.has(key)) {
+        try {
+          fileThumbs.set(key, readProject(JSON.parse(await readFolderFile(dir, f.name)), f.title).thumbnail ?? null);
+        } catch {
+          fileThumbs.set(key, null);
+        }
+      }
+      const thumbnail = fileThumbs.get(key);
+      return thumbnail ? { ...f, thumbnail } : f;
+    }),
+  );
 }
 
 /** A document from the text of a project file (without its versions); throws on anything else. */
@@ -137,7 +181,7 @@ export async function refreshFolder(id: string) {
   if (!f) return;
   if (!f.access) return setFolder(id, { files: [] });
   try {
-    setFolder(id, { files: await listFolder(f.dir) });
+    setFolder(id, { files: await withThumbnails(f.dir, await listFolder(f.dir)) });
   } catch {
     // the folder was moved or deleted
     setFolder(id, { access: false, files: [] });
@@ -224,7 +268,9 @@ export async function writeLinked(doc: CadDocument) {
       if (l.title !== undefined) name = await renameFolderFile(f.dir, l.name, freeFileName(doc.name, f.files.map((x) => x.name).filter((n) => n !== l.name)));
       await link(doc.id, { ...l, name, title: doc.name });
     }
-    await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
+    const thumbnail = await db.getThumbnail(doc.id);
+    await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id), thumbnail));
+    writtenThumbs.set(doc.id, thumbnail);
     await remember(doc.id, f.dir, name);
     if (kept) useEditor.getState().showToast(`${t('Another program changed the file at the same time: its version is kept as')} «${kept}»`, 'info');
     if (name !== l.name || kept) await refreshFolder(f.id);
@@ -242,6 +288,16 @@ export async function syncLinked(docId: string) {
   if (doc) await writeLinked(doc);
 }
 
+/** The picture each linked document's file was last written with (by this tab). */
+const writtenThumbs = new Map<string, string | undefined>();
+
+/** A document's picture made anew: its file too, when it has another one (the model changed since it was written). */
+export async function syncThumbnail(docId: string) {
+  if (!useFolder.getState().links[docId] || useDoc.getState().saving) return;
+  if (writtenThumbs.has(docId) && writtenThumbs.get(docId) === (await db.getThumbnail(docId))) return;
+  await syncLinked(docId);
+}
+
 async function link(docId: string, l: FileLink) {
   await linkFile(docId, l);
   useFolder.setState((s) => ({ links: { ...s.links, [docId]: l } }));
@@ -257,14 +313,14 @@ export async function renameFolderDoc(folderId: string, name: string, title: str
   if (!f?.access || !title) return;
   const { links } = useFolder.getState();
   const docId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
-  const { doc: fromFile, versions } = readProject(JSON.parse(await readFolderFile(f.dir, name)), title);
+  const { doc: fromFile, versions, thumbnail } = readProject(JSON.parse(await readFolderFile(f.dir, name)), title);
   const local = docId ? await db.loadDocument(docId) : undefined;
   const file = f.files.find((x) => x.name === name);
   const doc = { ...(local && file && local.modified > file.modified ? local : fromFile), name: title };
   const to = await renameFolderFile(f.dir, name, freeFileName(title, f.files.map((x) => x.name).filter((n) => n !== name)));
-  // its versions: the browser's (with the file's), or the file's own when it is not open here
+  // its versions and picture: the browser's (with the file's versions), or the file's own when it is not open here
   if (docId) await importVersions(docId, versions, true);
-  await writeFolderFile(f.dir, to, projectText(doc, docId ? await fileVersions(docId) : versions));
+  await writeFolderFile(f.dir, to, docId ? await fileText({ ...doc, id: docId }) : projectText(doc, versions, thumbnail));
   if (docId) {
     await link(docId, { folder: folderId, name: to, title });
     await remember(docId, f.dir, to);
@@ -282,7 +338,7 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   if (!f) throw new Error('No folder');
   const { links } = useFolder.getState();
   const file = f.files.find((x) => x.name === name);
-  const { doc: fromFile, versions } = readProject(JSON.parse(await readFolderFile(f.dir, name)), name.replace(/\.webcad\.json$/i, ''));
+  const { doc: fromFile, versions, thumbnail } = readProject(JSON.parse(await readFolderFile(f.dir, name)), name.replace(/\.webcad\.json$/i, ''));
   const linkedId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
   const local = linkedId ? await db.loadDocument(linkedId) : undefined;
   let doc: CadDocument;
@@ -290,13 +346,14 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
     // changed here while the folder could not be written: the browser's copy goes to the file (versions of both)
     doc = local;
     await importVersions(doc.id, versions, true);
-    await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
+    await writeFolderFile(f.dir, name, await fileText(doc));
   } else {
     // the file is the main copy. Not linked yet: a document with its id that is already in the browser (of another
     // file, or the browser's own) is not overwritten — this one gets a new id
     const taken = !linkedId && (!!(await db.loadDocument(fromFile.id)) || links[fromFile.id] !== undefined);
     doc = { ...fromFile, id: linkedId ?? (taken ? docId() : fromFile.id) };
-    await db.saveDocument(doc);
+    // the file's picture, until the document makes its own here
+    await db.saveDocument(doc, (await db.getThumbnail(doc.id)) ? undefined : thumbnail);
     // its versions: the file's own document keeps their ids, a new one gets copies
     await importVersions(doc.id, versions, doc.id === fromFile.id || doc.id === linkedId);
   }
@@ -315,7 +372,7 @@ export async function saveToFolder(docId: string, folderId: string): Promise<str
   const doc = await db.loadDocument(docId);
   if (!f?.access || !doc) return null;
   const name = freeFileName(doc.name, f.files.map((x) => x.name));
-  await writeFolderFile(f.dir, name, projectText(doc, await fileVersions(doc.id)));
+  await writeFolderFile(f.dir, name, await fileText(doc));
   await link(doc.id, { folder: folderId, name, title: doc.name });
   await remember(doc.id, f.dir, name);
   await refreshFolder(folderId);

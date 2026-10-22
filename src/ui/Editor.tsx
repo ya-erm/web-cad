@@ -11,7 +11,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { requestRebuild, startRebuildLoop } from '../store/rebuild';
 import { restoreDraft, startDraftPersistence } from '../store/draftPersistence';
 import { saveThumbnail } from '../store/persistence';
-import { allowFolder, useFolder } from '../store/folderStore';
+import { allowFolder, syncThumbnail, useFolder } from '../store/folderStore';
 import { getEngine } from '../viewport/engineRef';
 import { Toolbar } from './Toolbar';
 import { FeatureTree } from './FeatureTree';
@@ -343,7 +343,8 @@ export function Editor({ onBack }: { onBack: () => void }) {
     const timer = setInterval(() => {
       const e = getEngine();
       const d = useDoc.getState().doc;
-      if (e && d && !useEditor.getState().editing && !useDoc.getState().readOnly) void saveThumbnail(d.id, e.thumbnail());
+      // (a document of a folder: its file keeps the picture too)
+      if (e && d && !useEditor.getState().editing && !useDoc.getState().readOnly) void saveThumbnail(d.id, e.thumbnail()).then(() => syncThumbnail(d.id));
     }, 15000);
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -362,7 +363,7 @@ export function Editor({ onBack }: { onBack: () => void }) {
   if (!doc || !tab) return null;
   const back = () => {
     const e = getEngine();
-    if (e && !useDoc.getState().readOnly) void saveThumbnail(doc.id, e.thumbnail());
+    if (e && !useDoc.getState().readOnly) void saveThumbnail(doc.id, e.thumbnail()).then(() => syncThumbnail(doc.id));
     useEditor.setState({ editing: null, sketch: null, selection: [], build: null });
     onBack();
   };

@@ -34,7 +34,8 @@ export interface DocState {
   emptyTrash(): Promise<void>;
   renameDocument(id: string, name: string): Promise<void>;
   duplicateDocument(id: string): Promise<void>;
-  importDocument(doc: CadDocument): Promise<string>;
+  /** A copy of a document (a project file's) in the browser, with its card's picture if the file has one. */
+  importDocument(doc: CadDocument, thumbnail?: string): Promise<string>;
 
   update(fn: (d: Draft<CadDocument>) => void, opts?: { undoable?: boolean; key?: string }): void;
   undo(): void;
@@ -210,10 +211,10 @@ export const useDoc = create<DocState>()((set, get) => {
       await get().loadList();
     },
 
-    async importDocument(doc) {
+    async importDocument(doc, thumbnail) {
       const now = Date.now();
       const copy: CadDocument = { ...doc, id: docId(), modified: now };
-      await db.saveDocument(copy);
+      await db.saveDocument(copy, thumbnail);
       await get().loadList();
       return copy.id;
     },

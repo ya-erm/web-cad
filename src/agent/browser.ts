@@ -17,8 +17,7 @@ import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
 import { useEditor, type ViewCommand } from '../store/editorStore';
 import * as db from '../store/persistence';
-import { projectText } from '../store/folderStore';
-import { fileVersions } from '../store/versions';
+import { exportProjectText } from '../store/folderStore';
 import { getEngine } from '../viewport/engineRef';
 import { buildStudio } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
@@ -417,8 +416,9 @@ export const webcadApi = {
     if (!open) throw new AgentError('No document is open: call open(idOrName) or create(name) first');
     const safe = open.name.replace(/[^\p{L}\p{N}._ -]+/gu, '_');
     if (format === 'webcad') {
-      // the project file with the document's versions
-      const bytes = new TextEncoder().encode(projectText(open, await fileVersions(open.id)));
+      // the project file with the document's versions and its picture (of the model as the app has built it)
+      await waitFor(() => !useEditor.getState().building, 'the model to rebuild', 30000);
+      const bytes = new TextEncoder().encode(await exportProjectText(useDoc.getState().doc ?? open));
       return { fileName: `${safe}.webcad.json`, mime: 'application/json', base64: toBase64(bytes) };
     }
     if (format === 'pdf' || format === 'svg' || format === 'dxf') {

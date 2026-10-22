@@ -42,6 +42,21 @@ describe('agent API', () => {
     expect(r2.model!.features.every((f) => f.status === 'ok')).toBe(true);
   }, 60000);
 
+  it('unions the targets with the tools and reports the parts by the names given to them', async () => {
+    const s = await session();
+    const r = await s.run([
+      { op: 'sketch', name: 'Plate', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+      { op: 'extrude', sketch: 'Plate', depth: 5 },
+      { op: 'sketch', name: 'Boss', shapes: [{ type: 'circle', c: [0, 0], d: 10 }] },
+      { op: 'extrude', sketch: 'Boss', depth: 15, boolean: 'new' },
+      { op: 'boolean', type: 'union', targets: 'Part 1', tools: 'Part 2' },
+      { op: 'part', part: 'Part 1', name: 'Base' },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.failed).toEqual([]);
+    expect(r.model!.parts.map((p) => [p.name, p.size])).toEqual([['Base', [40, 30, 15]]]);
+  }, 60000);
+
   it('makes variants of a plate with a configuration and switches between them', async () => {
     const s = await session();
     const r1 = await s.run([
