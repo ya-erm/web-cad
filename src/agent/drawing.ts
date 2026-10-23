@@ -149,6 +149,25 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
     const sign = dir === 'right' || dir === 'up' ? 1 : -1;
     if (dir === 'right' || dir === 'left') [v.x, v.y] = [parent.x + sign * step, parent.y];
     else [v.x, v.y] = [parent.x, parent.y + sign * step];
+    await pastOthers(v, dir);
+  };
+  /**
+   * Move `v` on towards `dir` past the views it would land on: a section beside its parent goes beyond the standard
+   * side view standing there, not over it.
+   */
+  const pastOthers = async (v: DrawingView, dir: 'right' | 'left' | 'up' | 'down') => {
+    const others = await Promise.all(need().views.filter((x) => x.id !== v.id).map(async (x) => viewRect(x, await projOf(x).catch(() => undefined))));
+    const pv = v.detail ? undefined : await projOf(v);
+    for (let i = 0; i < others.length; i++) {
+      const r = viewRect(v, pv);
+      const hit = others.find((o) => r.x0 < o.x1 && r.x1 > o.x0 && r.y0 < o.y1 && r.y1 > o.y0);
+      if (!hit) return;
+      // (the rectangles have their margins: they are 8 mm apart then)
+      if (dir === 'right') v.x += hit.x1 - r.x0;
+      else if (dir === 'left') v.x -= r.x1 - hit.x0;
+      else if (dir === 'up') v.y += hit.y1 - r.y0;
+      else v.y -= r.y1 - hit.y0;
+    }
   };
   const partIdsOf = async (src: PartStudioTab | AssemblyTab, names?: string[]): Promise<string[]> => {
     if (!names?.length) return [];
@@ -308,6 +327,7 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
         };
         [v.x, v.y] = op.at ?? [viewRect(parent, pp).x1 + 15 + r * v.scale, parent.y];
         dr.views.push(v);
+        if (!op.at) await pastOthers(v, 'right');
         changed.add(tab!.name);
         return;
       }

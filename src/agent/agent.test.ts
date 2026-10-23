@@ -57,6 +57,23 @@ describe('agent API', () => {
     expect(r.model!.parts.map((p) => [p.name, p.size])).toEqual([['Base', [40, 30, 15]]]);
   }, 60000);
 
+  it('hides a sketch and a curve in the graphics area and shows them again', async () => {
+    const s = await session();
+    const r1 = await s.run([
+      { op: 'feature', type: 'helix', name: 'Coil', params: { axis: { $axis: 'z' }, pitch: '5 mm', turns: '3', radius: '10 mm', leftHanded: false } },
+      { op: 'sketch', name: 'Wire', plane: 'front', shapes: [{ type: 'circle', c: [10, 0], d: 2 }] },
+      { op: 'sweep', sketch: 'Wire', path: { curve: 'Coil' } },
+      { op: 'hide', feature: 'Coil' },
+      { op: 'hide', feature: 'Wire' },
+    ]);
+    expect(r1.error).toBeUndefined();
+    const hidden = (r: typeof r1) => r.model!.features.filter((f) => f.hidden).map((f) => f.name);
+    expect(hidden(r1)).toEqual(['Coil', 'Wire']);
+    expect(hidden(await s.run([{ op: 'hide', feature: 'Wire', value: false }]))).toEqual(['Coil']);
+    // a solid feature has nothing of its own to hide
+    expect((await s.run([{ op: 'hide', feature: 'Sweep 1' }])).error).toMatch(/nothing of its own to hide/);
+  }, 60000);
+
   it('makes variants of a plate with a configuration and switches between them', async () => {
     const s = await session();
     const r1 = await s.run([

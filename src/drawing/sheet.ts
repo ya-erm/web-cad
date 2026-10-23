@@ -544,7 +544,14 @@ function calloutPrims(d: DrawingDimension, v: DrawingView, proj: ProjectionData 
   lines.forEach((line, i) => {
     let x = right ? T[0] + 1 : T[0] - 1 - widths[i];
     const y = T[1] + 1 + (lines.length - 1 - i) * h * 1.5;
-    for (const tok of line) {
+    // words in a row as one text: placed one by one at the estimated widths, a wider font would swallow the spaces
+    const runs = line.reduce<CalloutToken[]>((acc, tok) => {
+      const last = acc[acc.length - 1];
+      if (typeof tok === 'string' && typeof last === 'string') acc[acc.length - 1] = last + tok;
+      else acc.push(tok);
+      return acc;
+    }, []);
+    for (const tok of runs) {
       if (typeof tok === 'string') {
         // spaces as a shift (SVG drops a text's leading and trailing ones)
         const text = tok.trim();

@@ -146,4 +146,22 @@ describe('agent API: drawings', () => {
     expect(svg).toContain('>Pin<');
     expect(svg).toContain('>Plate<');
   }, 180000);
+
+  it('places a section and a detail of the front view past the side view standing beside it', async () => {
+    const { s, hole } = await plate();
+    const r = await s.run([
+      { op: 'drawing', name: 'Plate', of: 'Part Studio 1' },
+      { op: 'section', view: 'front', through: hole },
+      { op: 'detail', view: 'front', center: [30, -20, 10], radius: 5 },
+    ]);
+    expect(r.error).toBeUndefined();
+    const v = viewIds(r.drawing!);
+    const box = (x: DrawingSummary['views'][number]) => [x.at[0] - x.size![0] / 2, x.at[1] - x.size![1] / 2, x.at[0] + x.size![0] / 2, x.at[1] + x.size![1] / 2];
+    const apart = (a: number[], b: number[]) => a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1];
+    // on the front view's line, right of the side view
+    expect(v.section.at[1]).toBeCloseTo(v.front.at[1], 6);
+    expect(box(v.section)[0]).toBeGreaterThan(box(v.left)[2]);
+    for (const other of [v.front, v.left, v.top, v.iso]) expect(apart(box(v.section), box(other))).toBe(true);
+    expect(v.detail.at[0]).toBeGreaterThan(box(v.left)[2]);
+  }, 180000);
 });

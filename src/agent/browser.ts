@@ -304,6 +304,7 @@ export const webcadApi = {
           s.rollback = next.rollback;
           s.parts = next.parts;
           if (next.folders) s.folders = next.folders;
+          s.hidden = next.hidden;
           s.configuration = next.configuration as Draft<ConfigInput>[] | undefined;
           s.configChoice = next.configChoice;
         }),

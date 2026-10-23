@@ -337,6 +337,8 @@ export type AgentOp =
   | { op: 'delete'; feature: string }
   | { op: 'rename'; feature: string; to: string }
   | { op: 'suppress'; feature: string; value?: boolean }
+  /** Hide a sketch, plane, curve (helix) or mate connector in the graphics area (`value: false` — show it again). */
+  | { op: 'hide'; feature: string; value?: boolean }
   /**
    * A configuration input (Onshape List): its options and the table of configured parameters — `{feature, param}`
    * (a dialog field: `depth`, `thin`…; `suppressed` by default) or `{variable}`; `values[option]` — one value per
@@ -479,6 +481,8 @@ export interface FeatureSummary {
   type: string;
   status: 'ok' | 'warning' | 'error' | 'suppressed' | 'rolledBack';
   message?: string;
+  /** Hidden in the graphics area (a sketch, plane, curve, mate connector). */
+  hidden?: true;
 }
 
 export interface PartSummary {

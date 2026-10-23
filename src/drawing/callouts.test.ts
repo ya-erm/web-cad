@@ -50,6 +50,14 @@ describe('Hole callout lines', () => {
     if (arrow?.t !== 'arrow') throw new Error('an arrow');
     expect(Math.hypot(arrow.tip[0] - 100, arrow.tip[1] - 100)).toBeCloseTo(7.5, 9);
   });
+
+  it('writes the words of a line as one text: the spaces between them stay whatever the font', () => {
+    const through = { ...hole({ diameter: 3.4 }, 4), r: 1.7 };
+    const proj: ProjectionData = { type: 'projection', reqId: 0, key: 'k', edges: [], bounds: [[-10, -10], [10, 10]], holes: [through] };
+    const view = { id: 'v', studioId: 's', partIds: [], orientation: 'top' as const, x: 100, y: 100, scale: 1, showHidden: false };
+    const prims = dimPrims({ id: 'd', viewId: 'v', kind: 'hole', a: [0, 0], offset: 0, textPos: [120, 120] }, view, proj, 1, en);
+    expect(prims.filter((p) => p.t === 'text').map((p) => (p.t === 'text' ? p.text : ''))).toEqual(['4× Ø3.4 THRU']);
+  });
 });
 
 describe('Holes in projections (OpenCascade)', () => {

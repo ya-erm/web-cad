@@ -1182,6 +1182,17 @@ class Runner {
         if (!setConfigured(this.s, f.id, 'suppressed', String(op.value !== false))) f.suppressed = op.value !== false;
         return;
       }
+      case 'hide': {
+        const f = this.feature(op.feature);
+        // what the graphics area shows of its own (as the feature list's eye): not parts
+        const shown = f.type === 'sketch' || f.type === 'plane' || f.type === 'helix' || f.type === 'mateConnector' || (f.type === 'derived' && !!f.params.sketches?.length);
+        if (!shown) throw new AgentError(`"${f.name}" (${f.type}) has nothing of its own to hide: sketches, planes, curves and mate connectors do (parts — the "part" op)`);
+        const h = new Set(this.s.hidden ?? []);
+        if (op.value === false) h.delete(f.id);
+        else h.add(f.id);
+        this.s.hidden = [...h];
+        return;
+      }
       case 'derived': {
         if (!this.kernel.derivedSource) throw new AgentError('Derived needs the document: run it on a document');
         if (op.document && !op.version) throw new AgentError('"document" needs "version": other documents are derived from their versions');
@@ -1423,7 +1434,7 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       const st = res.statuses[f.id];
       const status = i >= rollback ? 'rolledBack' : f.suppressed ? 'suppressed' : !st ? 'ok' : !st.ok ? 'error' : st.warning ? 'warning' : 'ok';
       const message = st?.error ?? st?.warning;
-      return { name: f.name, type: f.type, status, ...(message && status !== 'rolledBack' ? { message } : {}) };
+      return { name: f.name, type: f.type, status, ...(message && status !== 'rolledBack' ? { message } : {}), ...(studio.hidden?.includes(f.id) ? { hidden: true as const } : {}) };
     }),
     variables: Object.fromEntries(Object.entries(vars).map(([n, q]) => [n, formatQuantity(q, units.length)])),
     parts,
