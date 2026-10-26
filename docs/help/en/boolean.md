@@ -14,7 +14,7 @@ The **Target** is the plate and the **Tool** is a 14 mm diameter cylinder. **Kee
 
 1. Click **Boolean** and choose the type: **Union**, **Subtract** or **Intersect**.
 2. In the **Tools** field, select parts.
-3. For **Subtract**, click the **Targets** field and select the parts to subtract from.
+3. For **Subtract**, click the **Targets** field and select the parts to subtract from. For **Intersect** with **Keep tools** on, select the parts to trim to the tools in the **Targets** field.
 4. Click ✓ (`Enter`).
 
 ## Options {#options}
@@ -23,7 +23,7 @@ The **Target** is the plate and the **Tool** is a 14 mm diameter cylinder. **Kee
 |---|---|
 | **Union** | All **Tools** (at least two) merge into one part — the first one selected. |
 | **Subtract** | The **Tools** are subtracted from each part in **Targets**. The tools are deleted unless the **Keep tools** checkbox is on. |
-| **Intersect** | Only the common volume of the **Tools** (at least two) remains — in the first part; if there is no common volume, the message "Parts do not intersect" appears. |
+| **Intersect** | Only the common volume of the **Tools** (at least two) remains — in the first part; if there is no common volume, the message "Parts do not intersect" appears. With **Keep tools** on, a **Targets** field appears: each part in it keeps only what lies inside all the tools, and the tools stay as they are. |
 
 ## Surfaces {#surfaces}
 

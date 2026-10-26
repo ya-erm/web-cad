@@ -57,6 +57,94 @@ describe('agent API', () => {
     expect(r.model!.parts.map((p) => [p.name, p.size])).toEqual([['Base', [40, 30, 15]]]);
   }, 60000);
 
+  it('finds the part a point lies in, else the one whose body is nearest — not the nearest box centre', async () => {
+    const s = await session();
+    const r = await s.run([
+      // a case open at the top (walls 2 thick: y 28…30), a board inside it (y 5…25, z 5…7)
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 100, h: 60 }] },
+      { op: 'extrude', depth: 30 },
+      { op: 'shell', faces: { normal: 'z', pick: '+z' }, thickness: 2 },
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, x: 0, y: 15, w: 40, h: 20 }] },
+      { op: 'extrude', depth: 2, start: 5, boolean: 'new' },
+      { op: 'part', part: 'Part 1', name: 'Case' },
+      { op: 'part', part: 'Part 2', name: 'Board' },
+    ]);
+    expect(r.error).toBeUndefined();
+    const near = async (pt: [number, number, number]) => ((await s.query({ parts: { near: pt } })) as { parts: string[] }).parts;
+    // in the case's wall, though the board's centre is nearer
+    expect(await near([0, 29, 10])).toEqual(['Case']);
+    // in the cavity beside the board: its body is 1 away, the case's floor 4 (the case's centre is the nearer one)
+    expect(await near([0, 4, 6])).toEqual(['Board']);
+    // outside the case: its wall is 10 away, the board 15
+    expect(await near([0, 40, 10])).toEqual(['Case']);
+    // faces and edges of the part found so
+    const top = (await s.query({ faces: { part: { near: [0, 29, 10] }, normal: 'z', pick: '+z' } })) as { faces: { part: string }[] };
+    expect(top.faces.map((f) => f.part)).toEqual(['Case']);
+  }, 60000);
+
+  it('finds a part by the name given to it earlier in the same run', async () => {
+    const s = await session();
+    const r = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+      { op: 'extrude', depth: 5 },
+      { op: 'sketch', shapes: [{ type: 'circle', c: [60, 0], d: 10 }] },
+      { op: 'extrude', depth: 20, boolean: 'new' },
+      { op: 'part', part: 'Part 1', name: 'Дно' },
+      { op: 'part', part: 'Дно', color: '#336699' },
+      { op: 'fillet', edges: { part: 'дно', dir: 'z' }, radius: 2 },
+      { op: 'part', part: 'Part 2', name: 'Pin' },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.failed).toEqual([]);
+    expect(r.model!.parts.map((p) => [p.name, p.faces])).toEqual([
+      ['Дно', 10],
+      ['Pin', 3],
+    ]);
+    // in later runs and queries too; a name no part has lists the names the parts have now
+    expect(await s.query({ parts: 'Pin' })).toEqual({ parts: ['Pin'] });
+    expect((await s.run([{ op: 'part', part: 'Part 1', hidden: true }])).error).toMatch(/No part "Part 1"\. Parts: Дно, Pin/);
+  }, 60000);
+
+  it('intersects targets with tools, keeping the tools or not', async () => {
+    const s = await session();
+    // a block (x −20…20) and a pin (Ø20 at x 20) that sticks halfway into it: they share a half-disc 10 high
+    const r1 = await s.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 40 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'sketch', shapes: [{ type: 'circle', c: [20, 0], d: 20 }] },
+      { op: 'extrude', depth: 20, boolean: 'new' },
+      { op: 'part', part: 'Part 1', name: 'Block' },
+      { op: 'part', part: 'Part 2', name: 'Pin' },
+      { op: 'boolean', name: 'Kept', type: 'intersect', targets: 'Block', tools: 'Pin', keepTools: true },
+    ]);
+    expect(r1.error).toBeUndefined();
+    expect(r1.failed).toEqual([]);
+    const common = (Math.PI * 100 * 10) / 2;
+    expect(r1.model!.parts.map((p) => p.name)).toEqual(['Block', 'Pin']);
+    expect(r1.model!.parts[0].volume).toBeCloseTo(common, 1);
+    expect(r1.model!.parts[0].size).toEqual([10, 20, 10]);
+    expect(r1.model!.parts[1].volume).toBeCloseTo(Math.PI * 100 * 20, 1);
+
+    // without keepTools: the targets and the tools in one part — the first target
+    const r2 = await s.run([
+      { op: 'delete', feature: 'Kept' },
+      { op: 'boolean', name: 'Merged', type: 'intersect', targets: 'Block', tools: 'Pin' },
+    ]);
+    expect(r2.error).toBeUndefined();
+    expect(r2.failed).toEqual([]);
+    expect(r2.model!.parts.map((p) => p.name)).toEqual(['Block']);
+    expect(r2.model!.parts[0].volume).toBeCloseTo(common, 1);
+
+    // nothing in common: the feature fails
+    const r3 = await s.run([
+      { op: 'delete', feature: 'Merged' },
+      { op: 'sketch', shapes: [{ type: 'circle', c: [-60, 0], d: 10 }] },
+      { op: 'extrude', depth: 10, boolean: 'new' },
+      { op: 'boolean', name: 'Apart', type: 'intersect', targets: 'Part 3', tools: 'Pin', keepTools: true },
+    ]);
+    expect(r3.failed).toEqual([{ feature: 'Apart', error: 'Parts do not intersect' }]);
+  }, 60000);
+
   it('hides a sketch and a curve in the graphics area and shows them again', async () => {
     const s = await session();
     const r1 = await s.run([

@@ -431,8 +431,9 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
       ],
     },
     { kind: 'sel', key: 'tools' },
-    { kind: 'sel', key: 'targets', when: (p) => p.op === 'subtract' },
-    { kind: 'check', key: 'keepTools', label: 'Keep tools', when: (p) => p.op === 'subtract' },
+    // intersect keeping its tools: the targets keep what lies inside them
+    { kind: 'sel', key: 'targets', when: (p) => p.op === 'subtract' || (p.op === 'intersect' && !!p.keepTools) },
+    { kind: 'check', key: 'keepTools', label: 'Keep tools', when: (p) => p.op !== 'union' },
   ],
   split: [
     { kind: 'sel', key: 'parts' },

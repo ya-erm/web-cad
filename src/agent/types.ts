@@ -16,7 +16,10 @@ export type AxisName = 'x' | 'y' | 'z' | '-x' | '-y' | '-z';
 export type Range = number | [number, number];
 export type Pick = 'largest' | 'smallest' | '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
 
-/** 'all', a part name ("Part 1"), a part id, a 0-based index, or the part nearest to a point. */
+/**
+ * 'all', a part name ("Part 1", or the one a `part` op gave it — earlier in the same run too), a part id, a 0-based
+ * index, or the part a point lies in (else the one whose body is nearest to it).
+ */
 export type PartQuery = 'all' | string | number | { near: Pt3 };
 
 export interface FaceQuery {
@@ -31,7 +34,7 @@ export interface FaceQuery {
   z?: Range;
   /** Cylinders / cones / spheres. */
   radius?: number;
-  /** Keep only the face nearest to this point. */
+  /** Keep only the face whose centre is nearest to this point. */
   near?: Pt3;
   /** Keep only the largest / smallest face or the extreme one along an axis. */
   pick?: Pick;
@@ -300,6 +303,10 @@ export type AgentOp =
     })
   /** Move parts so that mate connector `from` lands on `to` (Onshape "mate connector to mate connector"). */
   | (Named & { op: 'transform'; parts: Parts; from: string; to: string; copy?: boolean })
+  /**
+   * Union / intersect: the targets and the tools into one part (the first of them, targets first). Subtract: the tools cut from each
+   * target. Intersect with `keepTools`: each target keeps what lies inside all the tools, the tools stay.
+   */
   | (Named & { op: 'boolean'; type: 'union' | 'subtract' | 'intersect'; targets: Parts; tools: Parts; keepTools?: boolean })
   /** Delete parts; with `dissolve` (Dissolve composite parts) — the composites among them become their bodies again. */
   | (Named & { op: 'deletePart'; parts: Parts; dissolve?: boolean })

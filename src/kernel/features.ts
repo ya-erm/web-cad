@@ -1956,6 +1956,17 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
       else removePart(st, t.id);
     }
     if (!p.keepTools) tools.forEach((t) => removePart(st, t.id));
+  } else if (p.keepTools) {
+    // each target keeps what lies inside all the tools; the tools stay as they are
+    const targets = resolveParts(st, p.targets).filter((t) => !tools.some((x) => x.id === t.id));
+    if (!targets.length) fail('Select target parts');
+    if (targets.some((t) => isSurface(t.shape))) fail('Surfaces combine with surfaces and parts with parts');
+    for (const t of targets) {
+      let acc: Shape3D = t.shape;
+      for (const x of tools) acc = acc.intersect(x.shape);
+      if (isEmptyShape(acc)) fail('Parts do not intersect');
+      replacePart(st, t.id, simplified(acc), ctx.fid);
+    }
   } else {
     if (tools.length < 2) fail('Select at least two parts to intersect');
     let acc: Shape3D = tools[0].shape;

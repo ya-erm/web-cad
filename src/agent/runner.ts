@@ -140,6 +140,104 @@ const dist3 = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - 
 const round = (v: number) => Math.round(v * 1e4) / 1e4 + 0; // + 0: no "-0" in reports
 const round3 = (v: Vec3): Pt3 => [round(v[0]), round(v[1]), round(v[2])];
 
+/** Distance from `t` to a box (0 inside it). */
+function boxDistance(box: [Vec3, Vec3], t: Vec3): number {
+  const d = [0, 1, 2].map((i) => Math.max(box[0][i] - t[i], 0, t[i] - box[1][i]));
+  return Math.hypot(d[0], d[1], d[2]);
+}
+
+/** Squared distance from `p` to the triangle a b c (Ericson, Real-Time Collision Detection 5.1.5). */
+function triangleDistance2(p: Vec3, a: Vec3, b: Vec3, c: Vec3): number {
+  const sub = (u: Vec3, v: Vec3): Vec3 => [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+  const to = (q: Vec3) => {
+    const d = sub(p, q);
+    return dot3(d, d);
+  };
+  const ab = sub(b, a);
+  const ac = sub(c, a);
+  const ap = sub(p, a);
+  const d1 = dot3(ab, ap);
+  const d2 = dot3(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return to(a);
+  const bp = sub(p, b);
+  const d3 = dot3(ab, bp);
+  const d4 = dot3(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return to(b);
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return to([a[0] + v * ab[0], a[1] + v * ab[1], a[2] + v * ab[2]]);
+  }
+  const cp = sub(p, c);
+  const d5 = dot3(ab, cp);
+  const d6 = dot3(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return to(c);
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return to([a[0] + w * ac[0], a[1] + w * ac[1], a[2] + w * ac[2]]);
+  }
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / (d4 - d3 + (d5 - d6));
+    return to([b[0] + w * (c[0] - b[0]), b[1] + w * (c[1] - b[1]), b[2] + w * (c[2] - b[2])]);
+  }
+  const s = va + vb + vc;
+  // a degenerate triangle: its corners
+  if (!(s > 0)) return Math.min(to(a), to(b), to(c));
+  const v = vb / s;
+  const w = vc / s;
+  return to([a[0] + v * ab[0] + w * ac[0], a[1] + v * ab[1] + w * ac[1], a[2] + v * ab[2] + w * ac[2]]);
+}
+
+/**
+ * Distance from `t` to a part's body by its mesh: 0 inside a solid (its triangles wind around the point: the solid
+ * angles they span add up to a full turn, not to none), else to its nearest triangle; no mesh — to its box.
+ */
+function bodyDistance(p: PartMesh, t: Vec3): number {
+  const pos = p.positions;
+  const idx = p.indices;
+  if (!idx?.length) return boxDistance(p.bbox, t);
+  const at = (i: number): Vec3 => [pos[idx[i] * 3], pos[idx[i] * 3 + 1], pos[idx[i] * 3 + 2]];
+  if (!p.surface && boxDistance(p.bbox, t) === 0) {
+    let angle = 0;
+    for (let i = 0; i < idx.length; i += 3) {
+      // the triangle's solid angle seen from t (Van Oosterom & Strackee)
+      const [a, b, c] = [at(i), at(i + 1), at(i + 2)].map((q): Vec3 => [q[0] - t[0], q[1] - t[1], q[2] - t[2]]);
+      const [la, lb, lc] = [a, b, c].map((q) => Math.hypot(q[0], q[1], q[2]));
+      const cross: Vec3 = [b[1] * c[2] - b[2] * c[1], b[2] * c[0] - b[0] * c[2], b[0] * c[1] - b[1] * c[0]];
+      angle += 2 * Math.atan2(dot3(a, cross), la * lb * lc + dot3(a, b) * lc + dot3(a, c) * lb + dot3(b, c) * la);
+    }
+    if (Math.abs(angle) > 2 * Math.PI) return 0;
+  }
+  let best = Infinity;
+  for (let i = 0; i < idx.length; i += 3) best = Math.min(best, triangleDistance2(t, at(i), at(i + 1), at(i + 2)));
+  return Math.sqrt(best);
+}
+
+/**
+ * The part nearest to `t`: one it lies inside, else the one whose body comes closest. Even (a point on a face two
+ * parts share, a body of an open composite and the composite) — a part of its own, then the one whose box centre is
+ * nearer.
+ */
+function nearestPart(parts: PartMesh[], t: Vec3): PartMesh {
+  const center = (p: PartMesh): Vec3 => [0, 1, 2].map((i) => (p.bbox[0][i] + p.bbox[1][i]) / 2) as Vec3;
+  const tol = 1e-3;
+  // nearest boxes first: a box farther than the best body found cannot hold a nearer one
+  const order = parts.map((p) => ({ p, box: boxDistance(p.bbox, t), d: Infinity })).sort((a, b) => a.box - b.box);
+  let best = Infinity;
+  for (const o of order) {
+    if (o.box > best + tol) break;
+    o.d = bodyDistance(o.p, t);
+    best = Math.min(best, o.d);
+  }
+  const even = order.filter((o) => o.d <= best + tol).map((o) => o.p);
+  return even.reduce((a, b) => {
+    if (!!a.composite !== !!b.composite) return a.composite ? b : a;
+    return dist3(center(a), t) <= dist3(center(b), t) ? a : b;
+  });
+}
+
 /** OCCT type names for the query vocabulary. */
 const FACE_TYPES: Record<string, string> = { plane: 'PLANE', cylinder: 'CYLINDRE', cone: 'CONE', sphere: 'SPHERE', torus: 'TORUS', bspline: 'BSPLINE' };
 const EDGE_TYPES: Record<string, string> = { line: 'LINE', circle: 'CIRCLE', ellipse: 'ELLIPSE', bspline: 'BSPLINE' };
@@ -265,6 +363,11 @@ class Runner {
     return res;
   }
 
+  /** A part's name: the one given to it (by a `part` op of this run too), else the kernel's ("Part 2"). */
+  partName(p: PartMesh): string {
+    return this.s.parts[p.id]?.name || p.name;
+  }
+
   private async partsOf(q: PartQuery | undefined): Promise<PartMesh[]> {
     const parts = (await this.model()).parts;
     if (q === undefined || q === 'all') return parts;
@@ -274,14 +377,12 @@ class Runner {
       return [p];
     }
     if (typeof q === 'string') {
-      const p = parts.find((x) => x.name === q || x.id === q) ?? parts.find((x) => x.name.toLowerCase() === q.toLowerCase());
-      if (!p) throw new AgentError(`No part "${q}". Parts: ${parts.map((x) => x.name).join(', ') || '(none)'}`);
+      const p = parts.find((x) => this.partName(x) === q || x.id === q) ?? parts.find((x) => this.partName(x).toLowerCase() === q.toLowerCase());
+      if (!p) throw new AgentError(`No part "${q}". Parts: ${parts.map((x) => this.partName(x)).join(', ') || '(none)'}`);
       return [p];
     }
-    const t = q.near.map((c) => this.q(c)) as Vec3;
-    const center = (p: PartMesh): Vec3 => [0, 1, 2].map((i) => (p.bbox[0][i] + p.bbox[1][i]) / 2) as Vec3;
     if (!parts.length) throw new AgentError('The model has no parts yet');
-    return [parts.reduce((a, b) => (dist3(center(a), t) <= dist3(center(b), t) ? a : b))];
+    return [nearestPart(parts, q.near.map((c) => this.q(c)) as Vec3)];
   }
 
   async parts(q: Parts): Promise<SelRef[]> {
@@ -1115,8 +1216,9 @@ class Runner {
         p.op = op.type;
         p.targets = await this.parts(op.targets);
         p.tools = await this.parts(op.tools);
-        // The union feature merges its tool parts only: the targets join them.
-        if (op.type === 'union') {
+        // Union and intersect take their tool parts only: the targets join them (first — the part that stays). An
+        // intersect keeping its tools has targets of its own: each keeps what lies inside the tools.
+        if (op.type === 'union' || (op.type === 'intersect' && !op.keepTools)) {
           p.tools = [...p.targets, ...p.tools.filter((t) => !p.targets.some((r) => r.kind === 'part' && t.kind === 'part' && r.partId === t.partId))];
           p.targets = [];
         }
@@ -1404,11 +1506,11 @@ export async function summarize(studio: PartStudioTab, units: Units, kernel: Age
       faces: p.faces.length,
       edges: p.edges.filter((e) => !e.seam).length,
       ...(p.surface ? { surface: true as const } : {}),
-      ...(p.composite ? { composite: { closed: p.composite.closed, members: p.composite.members.map((m) => m.name) } } : {}),
+      ...(p.composite ? { composite: { closed: p.composite.closed, members: p.composite.members.map((m) => studio.parts[m.id]?.name || m.name) } } : {}),
     });
   }
   const vars = collectVariables(configured, rollback, units);
-  const partNames = new Map(res.parts.map((p) => [p.id, p.name]));
+  const partNames = new Map(res.parts.map((p) => [p.id, studio.parts[p.id]?.name || p.name]));
   // configured parameters by name: "Extrude 1.depth", "#w"
   const paramName = (key: string) => {
     const { featureId, param } = splitConfigKey(key);
@@ -1566,7 +1668,7 @@ export async function queryModel(
   if (q.faces !== undefined) {
     const list: FaceQuery[] = q.faces === 'all' ? [{}] : Array.isArray(q.faces) ? q.faces : [q.faces];
     out.faces = (await Promise.all(list.map((one) => r.faceMatchesOf(one)))).flat().map((m) => ({
-      part: m.part.name,
+      part: r.partName(m.part),
       index: m.index,
       type: m.info.type.toLowerCase().replace('cylindre', 'cylinder'),
       center: v(m.info.center),
@@ -1578,7 +1680,7 @@ export async function queryModel(
   if (q.edges !== undefined) {
     const list: EdgeQuery[] = q.edges === 'all' ? [{}] : Array.isArray(q.edges) ? q.edges : [q.edges];
     out.edges = (await Promise.all(list.map((one) => r.edgeMatchesOf(one)))).flat().map((m) => ({
-      part: m.part.name,
+      part: r.partName(m.part),
       index: m.index,
       type: m.info.type.toLowerCase(),
       start: v(m.info.start),
@@ -1592,7 +1694,7 @@ export async function queryModel(
   if (q.parts !== undefined) {
     const refs = await r.parts(q.parts);
     const res = await r.model();
-    out.parts = refs.map((ref) => res.parts.find((p) => ref.kind === 'part' && p.id === ref.partId)!.name);
+    out.parts = refs.map((ref) => r.partName(res.parts.find((p) => ref.kind === 'part' && p.id === ref.partId)!));
   }
   return out;
 }
