@@ -6,7 +6,7 @@
 
 import * as R from 'replicad';
 import type { Vec3 } from '../core/types';
-import type { Shape3D } from './geom';
+import { subShapes, type Shape3D } from './geom';
 import type { BuildState } from './state';
 
 export interface FaceOrigin {
@@ -113,7 +113,7 @@ function overlaps(a: [Vec3, Vec3], b: [Vec3, Vec3]): boolean {
 
 /** The faces of a shape with their surfaces and boxes, by the features `feature(i, key, box)` gives. */
 function facesOf(shape: Shape3D, feature: (i: number, key: string, box: [Vec3, Vec3]) => string): FaceOrigin[] {
-  return shape.faces.map((f, i) => {
+  return subShapes(shape, 'face').map((f, i) => {
     const key = surfaceKey(f);
     const box = boxOf(f);
     return { key, box, feature: feature(i, key, box) };

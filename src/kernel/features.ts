@@ -67,6 +67,7 @@ import type { HoleCallout } from './protocol';
 import { standardHole, type ThreadSpec } from '../core/holes';
 import { pathFrames } from './paths';
 import { wrapRegion } from './wrap';
+import { importStl } from './stlImport';
 import { allPlanar, deleteFaces, encloses, facePlane, moveFeature, movePlanarFace, offsetCylinder, reachOf, type Motion, type Plane as FacePlane } from './faceOps';
 
 export interface FeatureOutput {
@@ -2270,11 +2271,19 @@ function base64ToBytes(b64: string): Uint8Array {
 async function buildImport(ctx: Ctx, f: FeatureOf<'import'>): Promise<FeatureOutput> {
   const p = f.params;
   if (!p.data) fail('No file data');
-  const blob = new Blob([base64ToBytes(p.data) as BlobPart]);
-  const shape = p.format === 'step' ? await R.importSTEP(blob) : await R.importSTL(blob);
+  if (p.format === 'stl') {
+    // the bodies of the mesh: a closed one a part, an open one a surface
+    importStl(base64ToBytes(p.data)).forEach((b, i) => {
+      const id = newPartId(ctx.st, `${ctx.fid}.${i}`);
+      if (b.closed) setPart(ctx.st, id, b.shape);
+      else setSurface(ctx.st, id, b.shape);
+    });
+    return {};
+  }
+  const shape = await R.importSTEP(new Blob([base64ToBytes(p.data) as BlobPart]));
   let solids = solidsOf(shape);
   if (!solids.length) {
-    // STL imports produce shells: try to make a solid
+    // shells only: try to make a solid of them
     try {
       solids = [R.makeSolid([shape as R.Shell])];
     } catch {

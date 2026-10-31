@@ -61,7 +61,8 @@ export function errorMessage(e: unknown): string {
     if (/^\d+$/.test(e.message) || !e.message) return 'Geometry operation failed';
     return e.message;
   }
-  if (typeof e === 'number') return 'Geometry operation failed';
+  // a C++ exception of OpenCascade (no message of its own)
+  if (typeof e === 'number' || (typeof WebAssembly !== 'undefined' && 'Exception' in WebAssembly && e instanceof WebAssembly.Exception)) return 'Geometry operation failed';
   return String(e);
 }
 

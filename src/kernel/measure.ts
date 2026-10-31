@@ -6,6 +6,7 @@
 import * as R from 'replicad';
 import { v3 } from '../core/math';
 import type { Vec3 } from '../core/types';
+import { subShapes } from './geom';
 
 /** A centre to measure from: a point (a circle's, a sphere's) or an axis (a cylinder's). */
 export type Center = { kind: 'point'; p: Vec3 } | { kind: 'axis'; p: Vec3; dir: Vec3 };
@@ -18,7 +19,7 @@ export function samplePoints(shape: R.AnyShape, cap = 2500): Vec3[] {
   const out: Vec3[] = [];
   const [lo, hi] = shape.boundingBox.bounds as [Vec3, Vec3];
   const step = Math.max(v3.dist(lo, hi) / 96, 1e-6);
-  const edges = shape instanceof R.Edge ? [shape] : shape.edges;
+  const edges = shape instanceof R.Edge ? [shape] : subShapes(shape, 'edge');
   for (const e of edges) {
     const straight = e.geomType === 'LINE';
     const n = straight ? 1 : Math.max(8, Math.min(96, Math.ceil(e.length / step)));
@@ -28,7 +29,7 @@ export function samplePoints(shape: R.AnyShape, cap = 2500): Vec3[] {
       q.delete();
     }
   }
-  const faces = shape instanceof R.Face ? [shape] : shape instanceof R.Edge ? [] : shape.faces;
+  const faces = shape instanceof R.Face ? [shape] : shape instanceof R.Edge ? [] : subShapes(shape, 'face');
   for (const f of faces) {
     if (f.geomType === 'PLANE') continue;
     const tri = f.triangulation();

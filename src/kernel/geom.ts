@@ -41,9 +41,46 @@ export function solidsOf(s: R.AnyShape): R.Solid[] {
   return [...R.iterTopo(s.wrapped, 'solid')].map((x) => R.cast(x) as R.Solid);
 }
 
+type SubShape = { face: R.Face; edge: R.Edge; vertex: R.Vertex };
+
+/**
+ * The distinct faces / edges / vertices of a shape, in the order replicad's `faces` / `edges` (iterTopo) gives them
+ * (references count on it), found in linear time: iterTopo compares each with every one before it — half a minute
+ * for an imported mesh of thousands of faces.
+ */
+export function subShapes<K extends keyof SubShape>(s: R.AnyShape, kind: K): SubShape[K][] {
+  const oc = R.getOC();
+  const T = oc.TopAbs_ShapeEnum;
+  const ex = new oc.TopExp_Explorer(s.wrapped, kind === 'face' ? T.TopAbs_FACE : kind === 'edge' ? T.TopAbs_EDGE : T.TopAbs_VERTEX, T.TopAbs_SHAPE);
+  const seen = new Map<number, (typeof s.wrapped)[]>();
+  const out: SubShape[K][] = [];
+  try {
+    for (; ex.More(); ex.Next()) {
+      const item = ex.Current();
+      const h = oc.ReplicadShapeHasher.HashCode(item, 2147483647);
+      const same = seen.get(h);
+      if (same?.some((x) => x.IsSame(item))) {
+        item.delete();
+        continue;
+      }
+      if (same) same.push(item);
+      else seen.set(h, [item]);
+      out.push(R.cast(item) as SubShape[K]);
+    }
+  } finally {
+    ex.delete();
+  }
+  return out;
+}
+
 /** A surface body (Onshape surfaces): faces with no solid — open shells, sheets. */
 export function isSurface(s: R.AnyShape): boolean {
-  return solidsOf(s).length === 0 && [...R.iterTopo(s.wrapped, 'face')].length > 0;
+  if (solidsOf(s).length) return false;
+  const oc = R.getOC();
+  const ex = new oc.TopExp_Explorer(s.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  const any = ex.More();
+  ex.delete();
+  return any;
 }
 
 /** Faces sewn together into one shell (or the face itself) — a surface body. */
@@ -188,7 +225,7 @@ function exactBox(s: R.AnyShape): [Vec3, Vec3] | null {
       [hi.X(), hi.Y(), hi.Z()],
     ];
   };
-  const faces = [...R.iterTopo(s.wrapped, 'face')].map((f) => {
+  const faces = subShapes(s, 'face').map(({ wrapped: f }) => {
     const b = new oc.Bnd_Box();
     oc.BRepBndLib.Add(f, b, false);
     const quick = b.IsVoid() ? null : corners(b);

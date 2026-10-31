@@ -5,7 +5,7 @@ import * as R from 'replicad';
 import type { Vec3 } from '../core/types';
 import { v3 } from '../core/math';
 import type { EdgeInfo, FaceInfo, PartMesh } from './protocol';
-import { bboxDiag, bboxOf, type Shape3D } from './geom';
+import { bboxDiag, bboxOf, subShapes, type Shape3D } from './geom';
 
 export interface Topology {
   faces: R.Face[];
@@ -204,13 +204,9 @@ function edgeInfoOf(edge: R.Edge): EdgeInfo {
 export function topologyOf(shape: Shape3D): Topology {
   let t = topoCache.get(shape);
   if (t) return t;
-  const faces = shape.faces;
-  const edges = shape.edges;
-  const vertices: Vec3[] = [];
-  for (const v of R.iterTopo(shape.wrapped, 'vertex')) {
-    const vx = R.cast(v) as R.Vertex;
-    vertices.push(vx.asTuple());
-  }
+  const faces = subShapes(shape, 'face');
+  const edges = subShapes(shape, 'edge');
+  const vertices: Vec3[] = subShapes(shape, 'vertex').map((v) => v.asTuple());
   // Mesh first so that SurfaceProperties can use the triangulation.
   ensureMesh(shape, 1);
   t = {
