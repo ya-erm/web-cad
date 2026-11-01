@@ -169,18 +169,51 @@ export function compoundOf(shapes: R.AnyShape[]): Shape3D {
   return R.makeCompound(shapes.map((s) => s.clone())) as Shape3D;
 }
 
+/**
+ * The shapes as one: fused where their boxes meet, the groups apart put together as they are (a Boolean of each with
+ * all before it would take minutes for a sketch's text — each letter a solid of its own).
+ */
 export function fuseAll(shapes: Shape3D[]): Shape3D {
   if (shapes.length === 0) fail('Nothing to fuse');
-  let acc = shapes[0];
-  for (let i = 1; i < shapes.length; i++) acc = acc.fuse(shapes[i]);
-  if (shapes.length > 1) {
-    try {
-      acc = acc.simplify();
-    } catch {
-      /* keep unsimplified */
+  if (shapes.length === 1) return shapes[0];
+  const boxes = shapes.map((s) => bboxOf(s));
+  const size = Math.max(...boxes.map(([lo, hi]) => v3.dist(lo, hi)));
+  const gap = Math.max(size * 1e-6, 1e-7);
+  const boxesMeet = (a: [Vec3, Vec3], b: [Vec3, Vec3]) => [0, 1, 2].every((k) => a[0][k] <= b[1][k] + gap && b[0][k] <= a[1][k] + gap);
+  // (boxes of letters side by side meet; the letters do not)
+  const oc = R.getOC();
+  const meet = (i: number, j: number) => {
+    if (!boxesMeet(boxes[i], boxes[j])) return false;
+    const d = new oc.BRepExtrema_DistShapeShape(shapes[i].wrapped, shapes[j].wrapped);
+    const apart = d.IsDone() && d.Value() > gap;
+    d.delete();
+    return !apart;
+  };
+  const parent = shapes.map((_, i) => i);
+  const root = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  for (let i = 0; i < shapes.length; i++) for (let j = i + 1; j < shapes.length; j++) if (root(i) !== root(j) && meet(i, j)) parent[root(j)] = root(i);
+  const groups = new Map<number, Shape3D[]>();
+  shapes.forEach((s, i) => {
+    const g = groups.get(root(i));
+    if (g) g.push(s);
+    else groups.set(root(i), [s]);
+  });
+  const fused = [...groups.values()].map((group) => {
+    let acc = group[0];
+    for (let i = 1; i < group.length; i++) acc = acc.fuse(group[i]);
+    if (group.length > 1) {
+      try {
+        acc = acc.simplify();
+      } catch {
+        /* keep unsimplified */
+      }
     }
-  }
-  return acc;
+    return acc;
+  });
+  return compoundOf(fused);
 }
 
 /** The shape with coplanar / co-surface faces merged (as it is when that fails). */
