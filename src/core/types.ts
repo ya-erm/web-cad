@@ -663,6 +663,11 @@ export interface ImportParams {
   format: 'step' | 'stl';
   /** base64 encoded file content */
   data: string;
+  /**
+   * An STL's faces recognised — planes, cylinders, cones, spheres built as such instead of its triangles (on unless
+   * false).
+   */
+  recognize?: boolean;
 }
 
 /**

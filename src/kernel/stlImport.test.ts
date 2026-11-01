@@ -94,6 +94,53 @@ describe('Import feature: STL', () => {
   }, 60000);
 });
 
+describe('Import feature: STL faces recognized', () => {
+  /** A part built here, exported to STL and imported back (into a document of its own). */
+  const roundTrip = async (ops: unknown[], params: Record<string, unknown> = {}) => {
+    const src = await openHeadless(emptyDocument('Source'), wasm);
+    const made = await src.run(ops as never);
+    expect(made.error).toBeUndefined();
+    const stl = await src.exportStl();
+    const s = await openHeadless(emptyDocument('STL import'), wasm);
+    const r = await s.run([{ op: 'feature', type: 'import', params: { fileName: 'part.stl', format: 'stl', data: Buffer.from(stl).toString('base64'), ...params } }]);
+    expect(r.error).toBeUndefined();
+    expect(r.failed).toEqual([]);
+    const kinds = async (type: string) => ((await s.query({ faces: { type } } as never).catch(() => ({ faces: [] }))) as { faces: unknown[] }).faces.length;
+    return { source: made.model!.parts[0], part: r.model!.parts[0], kinds, warning: r.model!.features[0].message };
+  };
+  const plate = [
+    { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 40, h: 30 }] },
+    { op: 'extrude', depth: 10 },
+    { op: 'fillet', edges: { dir: 'z' }, radius: 4 },
+    { op: 'sketch', name: 'C', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'point', at: [0, 0] }] },
+    { op: 'hole', sketch: 'C', diameter: 8, through: true },
+    { op: 'chamfer', edges: { type: 'circle', radius: 4, z: 10, x: [-4, 4] }, distance: 1 },
+  ];
+
+  it('builds a part from its STL with its planes, cylinders and cones: as few faces, the same volume', async () => {
+    const { source, part, kinds, warning } = await roundTrip(plate);
+    // top, bottom, 4 sides; 4 rounded corners and the hole; the hole's chamfer — as the part has
+    expect([source.faces, part.faces]).toEqual([12, 12]);
+    expect([await kinds('plane'), await kinds('cylinder'), await kinds('cone')]).toEqual([6, 5, 1]);
+    expect(part.size).toEqual(source.size);
+    // the faces of the part, not of its tessellation: a little more than the triangles hold where they bulge
+    expect(Math.abs(part.volume! - source.volume!)).toBeLessThan(0.002 * source.volume!);
+    expect(warning).toBeUndefined();
+  }, 120000);
+
+  it('builds a ball as one sphere; keeps the triangles when asked to', async () => {
+    const ball = [
+      { op: 'sketch', name: 'Half', plane: 'front', shapes: [{ type: 'line', from: [0, -5], to: [0, 5] }, { type: 'arc', c: [0, 0], r: 5, start: -90, end: 90 }] },
+      { op: 'revolve', sketch: 'Half', axis: { sketch: 'Half', line: 0 } },
+    ];
+    const { part, kinds } = await roundTrip(ball);
+    expect([part.faces, await kinds('sphere')]).toEqual([1, 1]);
+    expect(part.volume!).toBeCloseTo((4 / 3) * Math.PI * 125, 0);
+    const kept = await roundTrip(plate, { recognize: false });
+    expect(kept.part.faces).toBeGreaterThan(100);
+  }, 120000);
+});
+
 describe('sub-shapes', () => {
   it('lists the faces, edges and vertices of a shape as replicad does', () => {
     const shape = R.makeBaseBox(10, 20, 30).fillet(2, (e) => e.inDirection('Z')) as R.Solid;

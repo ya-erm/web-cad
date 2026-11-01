@@ -4,6 +4,8 @@ import * as R from 'replicad';
 import { perpendicular, v3 } from '../core/math';
 import type { Vec3 } from '../core/types';
 import { fail, type Shape3D } from './geom';
+import { regionsSolid } from './meshBrep';
+import { meshRegions, type Mesh, type Tri } from './meshSurfaces';
 
 /** The triangles of an STL file, 9 coordinates each: binary (by its size) or text ("vertex x y z", three a facet). */
 export function parseStl(bytes: Uint8Array): Float32Array {
@@ -25,16 +27,14 @@ export function parseStl(bytes: Uint8Array): Float32Array {
 export interface StlBody {
   /** Its triangles (their indices in the file). */
   triangles: number[];
+  /** The same in the welded mesh (`weldStl`). */
+  faces: number[];
   /** Every edge of it between two of its triangles: it bounds a volume. */
   closed: boolean;
 }
 
-/**
- * The bodies of a mesh: its triangles joined across the edges they share. On an edge of more triangles (parts that
- * touch there) each is joined with its neighbour around the edge across the solid between them — by their winding
- * (outward normals); triangles with corners that meet (zero area) are left out.
- */
-export function stlBodies(tris: Float32Array): StlBody[] {
+/** An STL's triangles with their corners welded, the model's size (diagonal); triangles of zero area left out. */
+export function weldStl(tris: Float32Array): Mesh & { source: number[]; size: number } {
   const n = tris.length / 9;
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
@@ -42,8 +42,9 @@ export function stlBodies(tris: Float32Array): StlBody[] {
     lo[i % 3] = Math.min(lo[i % 3], tris[i]);
     hi[i % 3] = Math.max(hi[i % 3], tris[i]);
   }
+  const size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
   // corners nearer than a ten-millionth of the model's size are one point
-  const q = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 1e-7, 1e-9);
+  const q = Math.max(size * 1e-7, 1e-9);
   const ids = new Map<string, number>();
   const pts: Vec3[] = [];
   const corner = (o: number) => {
@@ -55,15 +56,25 @@ export function stlBodies(tris: Float32Array): StlBody[] {
     }
     return id;
   };
-  const faces: [number, number, number][] = [];
+  const faces: Tri[] = [];
   const source: number[] = [];
   for (let i = 0; i < n; i++) {
-    const f: [number, number, number] = [corner(i * 9), corner(i * 9 + 3), corner(i * 9 + 6)];
+    const f: Tri = [corner(i * 9), corner(i * 9 + 3), corner(i * 9 + 6)];
     if (f[0] === f[1] || f[1] === f[2] || f[0] === f[2]) continue;
     faces.push(f);
     source.push(i);
   }
-  const N = ids.size;
+  return { pts, faces, source, size };
+}
+
+/**
+ * The bodies of a mesh: its triangles joined across the edges they share. On an edge of more triangles (parts that
+ * touch there) each is joined with its neighbour around the edge across the solid between them — by their winding
+ * (outward normals).
+ */
+export function stlBodies(tris: Float32Array, mesh = weldStl(tris)): StlBody[] {
+  const { pts, faces, source } = mesh;
+  const N = pts.length;
   const edgeKey = (a: number, b: number) => (a < b ? a * N + b : b * N + a);
   const onEdge = new Map<number, number[]>();
   faces.forEach((f, i) => {
@@ -121,7 +132,7 @@ export function stlBodies(tris: Float32Array): StlBody[] {
       const e = edgeKey(faces[i][k], faces[i][(k + 1) % 3]);
       uses.set(e, (uses.get(e) ?? 0) + 1);
     }
-    return { triangles: g.map((i) => source[i]), closed: [...uses.values()].every((u) => u === 2) };
+    return { triangles: g.map((i) => source[i]), faces: g, closed: [...uses.values()].every((u) => u === 2) };
   });
 }
 
@@ -185,10 +196,48 @@ function bodyShape(data: Uint8Array, closed: boolean): Shape3D {
   return R.cast(merged) as Shape3D;
 }
 
-/** The bodies of an STL file as shapes: a closed one a solid, an open one a surface (in the file's order). */
-export function importStl(bytes: Uint8Array): { shape: Shape3D; closed: boolean }[] {
+/** The most triangles of a body whose faces are recognised, and the most faces recognised it is built of. */
+const MAX_RECOGNIZED = 30000;
+const MAX_FACES = 2000;
+
+/**
+ * A closed body's faces recognised (meshRegions) and built into a solid; the regions OpenCascade cannot take (a face
+ * it finds invalid, an edge left free) go back to the mesh's flat pieces, a few times over. Null: none could be built.
+ */
+export function recognizedSolid(mesh: Mesh, faces: number[], tol: number): { solid: Shape3D; tries: number } | null {
+  // a mesh this fine is a freeform shape's (a thread, a loft): kept as it is, not searched for minutes
+  if (faces.length > MAX_RECOGNIZED) return null;
+  let regions = meshRegions(mesh, faces, tol, true, MAX_FACES);
+  // little recognised: the mesh's own faces are as good (and quicker)
+  if (!regions || regions.length > MAX_FACES) return null;
+  for (let tries = 1; tries <= 5; tries++) {
+    const built = regionsSolid(mesh, faces, regions, tol);
+    if ('solid' in built) return { solid: built.solid, tries };
+    if (!built.demote?.length) return null;
+    const out = new Set(built.demote);
+    const back = [...out].flatMap((r) => regions![r].faces);
+    regions = [...regions.filter((_, i) => !out.has(i)), ...(meshRegions(mesh, back, tol, false) ?? [])];
+  }
+  return null;
+}
+
+/**
+ * The bodies of an STL file as shapes: a closed one a solid, an open one a surface (in the file's order). With
+ * `recognize` a closed body's faces are recognised (planes, cylinders, cones, spheres — see meshSurfaces) and built
+ * as such; a body that cannot be keeps its triangles.
+ */
+export function importStl(bytes: Uint8Array, recognize = true): { shape: Shape3D; closed: boolean; recognized: boolean }[] {
   const tris = parseStl(bytes);
-  const bodies = stlBodies(tris);
+  const mesh = weldStl(tris);
+  const bodies = stlBodies(tris, mesh);
   if (!bodies.length) fail('The STL file has no triangles');
-  return bodies.map((b) => ({ shape: bodyShape(binaryStl(tris, b.triangles), b.closed), closed: b.closed }));
+  // corners lie on their faces to a ten-thousandth of the model's size
+  const tol = Math.max(mesh.size * 1e-4, 1e-6);
+  return bodies.map((b) => {
+    if (recognize && b.closed) {
+      const built = recognizedSolid(mesh, b.faces, tol);
+      if (built) return { shape: built.solid, closed: true, recognized: true };
+    }
+    return { shape: bodyShape(binaryStl(tris, b.triangles), b.closed), closed: b.closed, recognized: false };
+  });
 }

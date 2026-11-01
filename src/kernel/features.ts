@@ -2272,13 +2272,14 @@ async function buildImport(ctx: Ctx, f: FeatureOf<'import'>): Promise<FeatureOut
   const p = f.params;
   if (!p.data) fail('No file data');
   if (p.format === 'stl') {
-    // the bodies of the mesh: a closed one a part, an open one a surface
-    importStl(base64ToBytes(p.data)).forEach((b, i) => {
+    // the bodies of the mesh: a closed one a part (its faces recognised), an open one a surface
+    const bodies = importStl(base64ToBytes(p.data), p.recognize !== false);
+    bodies.forEach((b, i) => {
       const id = newPartId(ctx.st, `${ctx.fid}.${i}`);
       if (b.closed) setPart(ctx.st, id, b.shape);
       else setSurface(ctx.st, id, b.shape);
     });
-    return {};
+    return p.recognize !== false && bodies.some((b) => b.closed && !b.recognized) ? { warning: 'Some parts keep their triangles: their surfaces were not recognized' } : {};
   }
   const shape = await R.importSTEP(new Blob([base64ToBytes(p.data) as BlobPart]));
   let solids = solidsOf(shape);

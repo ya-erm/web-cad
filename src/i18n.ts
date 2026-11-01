@@ -1211,6 +1211,8 @@ const RU: Record<string, string> = {
   'Not an STL file': 'Это не файл STL',
   'The STL file could not be read': 'Не удалось прочитать файл STL',
   'The STL file has no triangles': 'В файле STL нет треугольников',
+  'Recognize surfaces': 'Распознавать поверхности',
+  'Some parts keep their triangles: their surfaces were not recognized': 'Некоторые детали остались из треугольников: их поверхности не распознаны',
   'Geometry operation failed': 'Геометрическая операция не выполнена',
   'No file data': 'Нет данных файла',
   'No parts to export': 'Нет деталей для экспорта',

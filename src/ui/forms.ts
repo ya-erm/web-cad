@@ -509,7 +509,7 @@ export const FORMS: Partial<Record<FeatureType, Row[]>> = {
     { kind: 'expr', key: 'value', label: 'Value', unit: 'length', unitKey: 'varType' },
     { kind: 'text', key: 'description', label: 'Description' },
   ],
-  import: [{ kind: 'file' }],
+  import: [{ kind: 'file' }, { kind: 'check', key: 'recognize', label: 'Recognize surfaces', unsetOn: true, when: (p) => p.format === 'stl' }],
   derived: [{ kind: 'derivedSource' }, { kind: 'sel', key: 'placeTo' }, { kind: 'derivedPlaceFrom' }],
   helix: [
     { kind: 'sel', key: 'axis' },
