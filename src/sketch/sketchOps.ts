@@ -440,33 +440,46 @@ export function toggleConstruction(d: SketchData, ids: string[]) {
 // Fillet & trim
 // ---------------------------------------------------------------------------
 
-/** Lines meeting at the point `pid` (directly or via a coincident constraint). */
-function linesAtPoint(d: SketchData, map: EntityMap, pid: string): { line: SkLine; end: 'p1' | 'p2' }[] {
+type LineEnd = { line: SkLine; end: 'p1' | 'p2' };
+
+/**
+ * The corner at the point `pid`: the points coincident with it, directly or through others (a centre rectangle's
+ * corner — two sides' ends and its diagonal's), and the two lines a fillet there rounds — the only two lines ending
+ * there, or the only two of them not construction. Null when there are no such two (or one is a text's box).
+ */
+export function filletLines(d: SketchData, pid: string): { pts: Set<string>; lines: [LineEnd, LineEnd] } | null {
+  const map = entityMap(d.entities);
   const pts = new Set([pid]);
-  for (const c of d.constraints)
-    if (c.type === 'coincident' && c.refs.length === 2) {
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const c of d.constraints) {
+      if (c.type !== 'coincident' || c.refs.length !== 2) continue;
       const [a, b] = c.refs;
-      if (map.get(a)?.type === 'point' && map.get(b)?.type === 'point') {
-        if (a === pid) pts.add(b);
-        if (b === pid) pts.add(a);
-      }
+      if (pts.has(a) === pts.has(b) || map.get(a)?.type !== 'point' || map.get(b)?.type !== 'point') continue;
+      pts.add(a);
+      pts.add(b);
+      grew = true;
     }
-  const out: { line: SkLine; end: 'p1' | 'p2' }[] = [];
+  }
+  const all: LineEnd[] = [];
   for (const e of d.entities)
-    if (e.type === 'line') {
-      if (pts.has(e.p1)) out.push({ line: e, end: 'p1' });
-      else if (pts.has(e.p2)) out.push({ line: e, end: 'p2' });
-    }
-  return out;
+    if (e.type === 'line' && pts.has(e.p1) !== pts.has(e.p2)) all.push({ line: e, end: pts.has(e.p1) ? 'p1' : 'p2' });
+  // the corners of a text's box stay square
+  if (all.some((l) => isTextBox(l.line))) return null;
+  const real = all.filter((l) => !l.line.construction);
+  const two = all.length === 2 ? all : real.length === 2 ? real : null;
+  return two ? { pts, lines: [two[0], two[1]] } : null;
 }
 
-/** Replace the corner at point `pid` between two lines by a tangent arc of radius r. */
+/**
+ * Replace the corner at point `pid` between two lines by a tangent arc of radius r. The corner's other points (a
+ * construction line's end, a sketch point) stay at the sharp corner, on both lines.
+ */
 export function filletCorner(d: SketchData, pid: string, r: number): string | null {
   const map = entityMap(d.entities);
-  const ls = linesAtPoint(d, map, pid);
-  // the corners of a text's box stay square
-  if (ls.length !== 2 || ls.some((l) => isTextBox(l.line))) return null;
-  const [A, B] = ls;
+  const corner = filletLines(d, pid);
+  if (!corner) return null;
+  const [A, B] = corner.lines;
   const V = pointOf(map, A.line[A.end]);
   const otherA = pointOf(map, A.line[A.end === 'p1' ? 'p2' : 'p1']);
   const otherB = pointOf(map, B.line[B.end === 'p1' ? 'p2' : 'p1']);
@@ -483,12 +496,19 @@ export function filletCorner(d: SketchData, pid: string, r: number): string | nu
   const T2: Vec2 = [V[0] + u2[0] * tlen, V[1] + u2[1] * tlen];
   const bis = norm2([u1[0] + u2[0], u1[1] + u2[1]]);
   const C: Vec2 = [V[0] + (bis[0] * r) / Math.sin(theta), V[1] + (bis[1] * r) / Math.sin(theta)];
-  // remove coincidence between the two corner points
+  // the corner's points come apart; the others stay together at the sharp corner, on both lines
   const pa = A.line[A.end];
   const pb = B.line[B.end];
+  const { pts } = corner;
   d.constraints = d.constraints.filter(
-    (c) => !(c.type === 'coincident' && c.refs.length === 2 && c.refs.includes(pa) && c.refs.includes(pb)),
+    (c) => !(c.type === 'coincident' && c.refs.length === 2 && pts.has(c.refs[0]) && pts.has(c.refs[1])),
   );
+  const rest = [...pts].filter((p) => p !== pa && p !== pb);
+  for (const p of rest.slice(1)) addConstraint(d, 'coincident', [rest[0], p]);
+  if (rest.length) {
+    addConstraint(d, 'coincident', [rest[0], A.line.id]);
+    addConstraint(d, 'coincident', [rest[0], B.line.id]);
+  }
   // move the line endpoints to the tangent points
   for (const e of d.entities) {
     if (e.type !== 'point') continue;

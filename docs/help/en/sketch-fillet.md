@@ -22,7 +22,8 @@ width: 600
 - The initial radius is about one fifth of the length of the shorter of the two lines (rounded).
 - The lines are trimmed to the tangent points; the arc gets tangent constraints with both lines and a radius dimension.
 - The tool stays active, so you can fillet several corners in a row.
-- The message "Fillet is not possible at this corner" means that the radius does not fit or that the point is not where exactly two lines meet.
+- If a construction line also ends at the corner (for example, the diagonal of a center-point rectangle), the two regular lines are filleted. The construction line stays at the former sharp corner: its end is kept on the extensions of both lines.
+- The message "Fillet is not possible at this corner" means that the radius does not fit or that the point is not where exactly two lines meet (construction lines aside).
 
 > **Limitation.** Only corners between two lines can be filleted (not between a line and an arc).
 

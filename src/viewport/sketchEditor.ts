@@ -34,6 +34,7 @@ import {
   circumcircle,
   deleteItems,
   filletCorner,
+  filletLines,
   onCcwArc,
   toggleConstruction,
   trimEntity,
@@ -1561,14 +1562,13 @@ export class SketchEditor {
 
   private defaultFilletRadius(pid: string): number {
     const map = this.map();
+    const d = this.data();
     let minLen = Infinity;
-    for (const e of map.values()) {
-      if (e.type !== 'line') continue;
-      const a = pointOf(map, e.p1);
-      const b = pointOf(map, e.p2);
-      const pt = map.get(pid) as { x: number; y: number };
-      if (Math.hypot(a[0] - pt.x, a[1] - pt.y) < 1e-6 || Math.hypot(b[0] - pt.x, b[1] - pt.y) < 1e-6)
-        minLen = Math.min(minLen, Math.hypot(b[0] - a[0], b[1] - a[1]));
+    // a fifth of the shorter of the two lines it rounds
+    for (const { line } of (d && filletLines(d, pid)?.lines) || []) {
+      const a = pointOf(map, line.p1);
+      const b = pointOf(map, line.p2);
+      minLen = Math.min(minLen, Math.hypot(b[0] - a[0], b[1] - a[1]));
     }
     if (!Number.isFinite(minLen)) minLen = 10;
     const raw = minLen * 0.2;
