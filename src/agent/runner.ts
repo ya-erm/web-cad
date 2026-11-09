@@ -81,13 +81,13 @@ export interface AgentKernel {
   /**
    * Derived: another Part Studio of the document by name (not one that uses Part Studio `forStudio` — a cycle),
    * built, with its parts; or a Part Studio of a saved version (`from.version` by name, of this document or of
-   * `from.document`).
+   * `from.document`); or of `from.document` as it is now — copied (its id "tab@copy", the copy known as a source).
    */
   derivedSource?(
     name: string,
     forStudio: string,
     configuration?: Record<string, string | number>,
-    from?: { version: string; document?: string },
+    from?: { version?: string; document?: string },
   ): Promise<{
     studioId: string;
     name: string;
@@ -1297,8 +1297,9 @@ class Runner {
       }
       case 'derived': {
         if (!this.kernel.derivedSource) throw new AgentError('Derived needs the document: run it on a document');
-        if (op.document && !op.version) throw new AgentError('"document" needs "version": other documents are derived from their versions');
-        const src = await this.kernel.derivedSource(op.studio, this.s.id, op.configuration, op.version ? { version: op.version, document: op.document } : undefined);
+        // a version (of this document or another one), or another document as it is now (copied)
+        const from = op.version || op.document ? { ...(op.version ? { version: op.version } : {}), ...(op.document ? { document: op.document } : {}) } : undefined;
+        const src = await this.kernel.derivedSource(op.studio, this.s.id, op.configuration, from);
         // parts: [] — none (only its sketches)
         const parts = (op.parts ?? []).map((n) => {
           const p = src.parts.find((x) => x.name === n || x.id === n) ?? src.parts.find((x) => x.name.toLowerCase() === n.toLowerCase());

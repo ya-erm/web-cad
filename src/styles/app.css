@@ -1119,6 +1119,49 @@ textarea {
   border-radius: 50%;
   flex: none;
 }
+/* Derived from another document that has changed since it was copied: a click updates it */
+.tree-item .tree-update {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: -4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tree-item .tree-update:hover {
+  background: rgba(30, 50, 80, 0.08);
+}
+.tree-item .tree-update.off {
+  cursor: default;
+  opacity: 0.5;
+}
+/* over the feature list: the source documents of Derived features have changed */
+.link-updates {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #f0dc9b;
+  background: #fffaeb;
+  color: #8a6400;
+  font-size: 12px;
+}
+.link-updates-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fd-warning.derived-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fd-warning.derived-copy span {
+  flex: 1;
+}
 .status-dot.error {
   background: var(--danger);
 }

@@ -329,7 +329,10 @@ export type AgentOp =
   | (Named & {
       op: 'derived';
       studio: string;
-      /** A saved version (its name) to take the Part Studio from — of this document or of `document` (by name). */
+      /**
+       * A saved version (its name) to take the Part Studio from — of this document or of `document` (by name);
+       * `document` alone — that document as it is now, copied into this Part Studio (the browser only).
+       */
       version?: string;
       document?: string;
       parts?: string[];

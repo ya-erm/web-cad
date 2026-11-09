@@ -11,6 +11,8 @@ import { isTextCounter } from '../sketch/text';
 import { uid } from '../core/ids';
 import { useEditor, sameRef, type ContextMenuItem } from '../store/editorStore';
 import { activeStudio, effectiveRollback, useDoc, withStudio } from '../store/docStore';
+import { linkKey, updateLinks, useLinkStatus } from '../store/linkedSources';
+import { featureLink } from '../core/links';
 import { Icon } from './icons';
 import { featureIcon } from './FeatureDialog';
 import { t, tName } from '../i18n';
@@ -89,6 +91,9 @@ export function FeatureTree() {
   const statuses = useEditor((s) => s.build?.statuses);
   const editing = useEditor((s) => s.editing);
   const selection = useEditor((s) => s.selection);
+  // Derived from other documents: those whose source document has changed (an update offered; not in a version)
+  const linkStatus = useLinkStatus((s) => (s.docId === doc?.id ? s.byFeature : null));
+  const readOnly = useDoc((s) => s.readOnly);
   // the feature that made the face or edge under the cursor in the graphics area (Onshape): its row is marked;
   // an edge's — the later of its faces' features (the hole's rim: the hole); a sketch's curve, point or region — the
   // sketch (one a Derived feature brings, "derivedId.sketchId": that feature)
@@ -153,6 +158,14 @@ export function FeatureTree() {
     : null;
   const folders = studio.folders ?? [];
   const indexOf = (id: string) => features.findIndex((f) => f.id === id);
+  /** A Derived feature whose source document has changed since it was copied (its copy as checked): how it stands. */
+  const outdatedOf = (id: string) => {
+    const s = !readOnly ? linkStatus?.[linkKey(studio.id, id)] : undefined;
+    const f = s?.state === 'outdated' ? features.find((x) => x.id === id) : undefined;
+    return f && featureLink(studio, f)?.link.id === s!.linkId ? s : undefined;
+  };
+  const outdated = features.filter((f) => outdatedOf(f.id));
+  const updateFrom = (ids: string[]) => void updateLinks(ids.filter((id) => outdatedOf(id)).map((featureId) => ({ tabId: studio.id, featureId })));
 
   const setRollback = (n: number) =>
     studioUpdate((s) => {
@@ -305,9 +318,14 @@ export function FeatureTree() {
     const inFolder = ids.some((id) => folderOf(studio, id));
     const anySuppressed = features.some((x) => ids.includes(x.id) && x.suppressed);
     const visualIds = ids.filter((id) => canHide(features.find((x) => x.id === id)));
+    // Derived from documents changed since: a new copy of each
+    const update: ContextMenuItem[] = ids.some((id) => outdatedOf(id))
+      ? [{ label: t('Update from the source document'), icon: 'refresh', action: () => updateFrom(ids), disabled: !!editing }]
+      : [];
     const items: ContextMenuItem[] =
       ids.length > 1
         ? [
+            ...update,
             { label: t('Add to new folder'), icon: 'folder', action: () => addToNewFolder(ids) },
             ...(inFolder ? [{ label: t('Remove from folder'), icon: 'folder', action: () => removeFromFolder(ids) }] : []),
             { label: anySuppressed ? t('Unsuppress') : t('Suppress'), icon: anySuppressed ? 'unsuppress' : 'suppress', action: () => setSuppressed(ids, !anySuppressed) },
@@ -317,6 +335,7 @@ export function FeatureTree() {
           ]
         : [
             { label: t('Edit'), icon: 'edit', action: () => ed().editFeature(f.id), disabled: !!editing },
+            ...update,
             { label: t('Rename'), icon: 'rename', action: () => setRenaming(f.id) },
             { label: f.suppressed ? t('Unsuppress') : t('Suppress'), icon: f.suppressed ? 'unsuppress' : 'suppress', action: () => setSuppressed([f.id], !f.suppressed) },
             { label: t('Roll to here'), icon: 'rollback', action: () => setRollback(i + 1) },
@@ -519,6 +538,20 @@ export function FeatureTree() {
         )}
         {st && !st.ok && <span className="status-dot error" />}
         {st?.ok && st.warning && <span className="status-dot warn" />}
+        {outdatedOf(f.id) && (
+          // its source document has changed: a click updates it (a new copy)
+          <span
+            className={'tree-update' + (editing ? ' off' : '')}
+            data-tip={`${t('The source document has changed')}: «${outdatedOf(f.id)!.docName}». ${t('Click to update')}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!editing) updateFrom([f.id]);
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <Icon name="refresh" size={14} />
+          </span>
+        )}
         {canHide(f) && (
           <span
             className={'eye' + (hidden.has(f.id) ? ' off' : '')}
@@ -683,6 +716,18 @@ export function FeatureTree() {
               if (e.key === 'Escape') setFilter(null);
             }}
           />
+        </div>
+      )}
+      {outdated.length > 0 && (
+        // Derived from documents that have changed since they were copied: all of them updated at once
+        <div className="link-updates">
+          <Icon name="refresh" size={14} />
+          <span className="link-updates-text">
+            {t('The source documents have changed')}: {[...new Set(outdated.map((f) => `«${outdatedOf(f.id)!.docName}»`))].join(', ')}
+          </span>
+          <button className="btn small" disabled={!!editing} onClick={() => updateFrom(outdated.map((f) => f.id))}>
+            {t('Update')}
+          </button>
         </div>
       )}
       <ConfigChooser studio={studio} />

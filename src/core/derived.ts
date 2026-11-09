@@ -9,9 +9,12 @@
 // A source may also be a Part Studio of a saved version — of this document or of another one (Onshape derives from
 // other documents through their versions): "tab@version". A version does not change: its snapshot is loaded once
 // (`setVersionSnapshot`) before a build, and the Derived features of its Part Studios use its own Part Studios.
+//
+// Another document as it is now is derived from through a copy kept in the Part Studio that uses it
+// (`DocumentLink`, core/links.ts): "tab@copy" — a copy does not change either, it is known as a version's snapshot.
 
 import { configuredFeatures, parseSourceKey, sourceKey, variantStudio } from './config';
-import type { CadDocument, DocTab, Feature, PartStudioTab } from './types';
+import type { CadDocument, DocTab, DocumentLink, Feature, PartStudioTab } from './types';
 
 type Doc = Pick<CadDocument, 'tabs' | 'units'>;
 
@@ -35,9 +38,30 @@ const versionStudios = new Map<string, PartStudioTab>();
 export function setVersionSnapshot(versionId: string, doc: Doc) {
   if (snapshots.has(versionId)) return;
   snapshots.set(versionId, doc);
+  // the copies of other documents its Part Studios keep
+  registerLinks(doc.tabs);
 }
 
 export const versionSnapshot = (versionId: string) => snapshots.get(versionId);
+
+/** Copies of other documents known by now (`DocumentLink`, by id): kept in Part Studios, or just made for a feature being edited. */
+const links = new Map<string, DocumentLink>();
+
+/** Know a copy — and those its Part Studios keep in turn — as a source ("tab@copy"). */
+export function registerLink(l: DocumentLink) {
+  if (links.has(l.id)) return;
+  links.set(l.id, l);
+  snapshots.set(l.id, l);
+  registerLinks(l.tabs);
+}
+
+/** Know the copies these tabs keep (`registerLink`). */
+export function registerLinks(tabs: readonly DocTab[]) {
+  for (const t of tabs) if (t.type === 'partStudio' && t.links) for (const l of t.links) registerLink(l);
+}
+
+/** A copy of another document by id, if known (`registerLinks`). */
+export const knownLink = (id: string) => links.get(id);
 
 /**
  * A Part Studio of a loaded version (its id: "tab@version"): its Derived features use the version's own Part
@@ -60,10 +84,13 @@ function versionStudio(tabId: string, versionId: string): PartStudioTab | undefi
   return s;
 }
 
-/** A Part Studio by id: a tab of the document, or of a loaded version ("tab@version"). */
+/** A Part Studio by id: a tab of the document, of a loaded version ("tab@version") or of a copy the document keeps. */
 function tabOf(doc: Doc, studioId: string): PartStudioTab | undefined {
   const v = parseVersionStudio(studioId);
-  if (v) return versionStudio(v.tabId, v.versionId);
+  if (v) {
+    if (!snapshots.has(v.versionId)) registerLinks(doc.tabs);
+    return versionStudio(v.tabId, v.versionId);
+  }
   return doc.tabs.find((t): t is PartStudioTab => t.id === studioId && t.type === 'partStudio');
 }
 

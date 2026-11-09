@@ -3,11 +3,13 @@
 // documents through their versions).
 
 import * as db from './persistence';
-import { setVersionSnapshot, usedVersions, versionSnapshot } from '../core/derived';
+import { registerLinks, setVersionSnapshot, usedVersions, versionSnapshot } from '../core/derived';
 import type { CadDocument, DocumentVersion, Feature, PartStudioTab } from '../core/types';
 
 /** Load the snapshots of the versions these features (and the document's Part Studios) derive from, theirs too. */
 export async function loadVersionSources(doc: Pick<CadDocument, 'tabs'>, features: Feature[] = []): Promise<void> {
+  // the copies of other documents are in the document itself
+  registerLinks(doc.tabs);
   const all = [...features, ...doc.tabs.flatMap((t) => (t.type === 'partStudio' ? t.features : []))];
   for (;;) {
     let loaded = 0;

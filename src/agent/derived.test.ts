@@ -4,8 +4,9 @@
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { emptyDocument, openHeadless, type HeadlessSession } from './headless';
-import type { CadDocument, PartStudioTab } from '../core/types';
+import type { CadDocument, DocumentLink, PartStudioTab } from '../core/types';
 import type { ModelSummary } from './types';
+import { linkFingerprint, linkSourceId, makeLink } from '../core/links';
 
 const wasm = fileURLToPath(new URL('../../node_modules/replicad-opencascadejs/dist/replicad_single.wasm', import.meta.url));
 
@@ -249,5 +250,72 @@ describe('Derived', () => {
     const summary = (await s3.state()) as ModelSummary;
     expect(summary.features.find((f) => f.name === 'Old block')).toMatchObject({ status: 'error', message: expect.stringMatching(/source version is not available/) });
     expect(summary.parts).toHaveLength(3);
+  }, 90000);
+
+  it('derives from another document through a copy kept in the Part Studio: it builds by itself, an update follows the document', async () => {
+    // document B: a 20×20×10 block and "Mount" — the block derived, a plate on it
+    const b = await openHeadless(emptyDocument('Block'), wasm);
+    const rb = await b.run([
+      { op: 'sketch', shapes: [{ type: 'rect', center: true, w: 20, h: 20 }] },
+      { op: 'extrude', depth: 10 },
+      { op: 'studio', name: 'Mount' },
+      { op: 'derived', studio: 'Part Studio 1' },
+      { op: 'sketch', plane: { face: { normal: 'z', pick: '+z' } }, shapes: [{ type: 'rect', center: true, w: 30, h: 30 }] },
+      { op: 'extrude', depth: 2 },
+    ]);
+    expect(rb.error).toBeUndefined();
+    const mount = studio(b.doc, 'Mount');
+    // document A: B's Mount copied into its Part Studio (with B's Part Studio 1 that Mount derives from)
+    const userDoc = (link: DocumentLink) => {
+      const a = emptyDocument('User');
+      const w = a.tabs[0] as PartStudioTab;
+      w.features.push({ id: 'fd1', type: 'derived', name: 'Derived 1', params: { studioId: linkSourceId(mount.id, link), parts: [], placeTo: [] } });
+      w.links = [link];
+      // as a project file has it
+      return JSON.parse(JSON.stringify(a)) as CadDocument;
+    };
+    const link = makeLink(b.doc, mount.id);
+    expect(link.tabs.map((t) => t.name)).toEqual(['Mount', 'Part Studio 1']);
+    const a = await openHeadless(userDoc(link), wasm);
+    const sizes = async (s: HeadlessSession) => (await parts(s)).map((p) => [p.bboxMin, p.size]);
+    const before = [
+      [
+        [-10, -10, 0],
+        [20, 20, 10],
+      ],
+      [
+        [-15, -15, 10],
+        [30, 30, 2],
+      ],
+    ];
+    expect(await sizes(a)).toEqual(before);
+    // B goes on: the block is 40 tall — the copy stays as it was, and it tells
+    const rb2 = await b.run([
+      { op: 'studio', name: 'Part Studio 1' },
+      { op: 'set', feature: 'Extrude 1', params: { depth: '40 mm' } },
+    ]);
+    expect(rb2.error).toBeUndefined();
+    expect(linkFingerprint(b.doc, mount.id)).not.toBe(linkFingerprint(link, mount.id));
+    const again = await openHeadless(userDoc(link), wasm);
+    expect(await sizes(again)).toEqual(before);
+    // updated: a new copy of B as it is now — the block 40 tall, the plate on it
+    const updated = await openHeadless(userDoc(makeLink(b.doc, mount.id)), wasm);
+    expect(await sizes(updated)).toEqual([
+      [
+        [-10, -10, 0],
+        [20, 20, 40],
+      ],
+      [
+        [-15, -15, 40],
+        [30, 30, 2],
+      ],
+    ]);
+    // the feature deleted: its copy goes with it
+    const del = await updated.run([{ op: 'delete', feature: 'Derived 1' }]);
+    expect(del.error).toBeUndefined();
+    expect(updated.doc.tabs[0]).not.toHaveProperty('links');
+    // other documents are derived from in the browser only
+    const headless = await updated.run([{ op: 'derived', studio: 'Mount', document: 'Block' }]);
+    expect(headless.error).toMatch(/in the browser only/);
   }, 90000);
 });

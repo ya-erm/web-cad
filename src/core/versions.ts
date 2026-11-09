@@ -246,11 +246,14 @@ const MERGE_LISTS: Record<DocTab['type'], MergeList[]> = {
   ],
 };
 
-/** The keys of a tab itself (not its lists, id or type) — of a drawing: its name and its drawing's keys. */
+/**
+ * The keys of a tab itself (not its lists, id or type) — of a drawing: its name and its drawing's keys. A Part
+ * Studio's copies of other documents (`links`) are not: they follow the Derived features that use them.
+ */
 function ownOf(tab: DocTab): Record<string, unknown> {
   const lists = new Set(MERGE_LISTS[tab.type].map((l) => l.list));
   const src: object = tab.type === 'drawing' ? { name: tab.name, ...tab.drawing } : tab;
-  return Object.fromEntries(Object.entries(src).filter(([k]) => k !== 'id' && k !== 'type' && !lists.has(k)));
+  return Object.fromEntries(Object.entries(src).filter(([k]) => k !== 'id' && k !== 'type' && k !== 'links' && !lists.has(k)));
 }
 
 function setOwn(tab: DocTab, key: string, value: unknown) {

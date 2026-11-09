@@ -675,7 +675,10 @@ export interface ImportParams {
  * changes, where they stand in it (the common origin).
  */
 export interface DerivedParams {
-  /** The source Part Studio (a tab of this document). */
+  /**
+   * The source Part Studio: a tab of this document; of a saved version — "tab@version"; of another document as it
+   * was copied (`PartStudioTab.links`) — "tab@copy".
+   */
   studioId: string;
   /** Its parts to bring in (ids in its build); empty — all of them (none with `noParts`). */
   parts: string[];
@@ -953,6 +956,31 @@ export interface PartStudioTab {
   configuration?: ConfigInput[];
   /** The chosen option of each configuration input (by ids; the first option when missing; a variable input: its value). */
   configChoice?: Record<string, string>;
+  /**
+   * Copies of other documents' Part Studios its Derived features use (`DocumentLink`): they go with the tab —
+   * into versions, branches, project files — and are dropped once no feature uses them.
+   */
+  links?: DocumentLink[];
+}
+
+/**
+ * Derived from another document as it is now: a copy of its Part Studio — and of the Part Studios of that document
+ * it derives from in turn — kept in the Part Studio that uses it, so the document stands on its own (in a project
+ * file, in another browser, with the source deleted). A copy does not change; it remembers the document it came
+ * from, and when that document has changed an update is offered — a new copy. The features name a Part Studio of
+ * the copy as they name a version's: "tab@id".
+ */
+export interface DocumentLink {
+  /** Its id: new for every copy. */
+  id: string;
+  /** The document copied, and its name then. */
+  docId: string;
+  docName: string;
+  /** When it was copied. */
+  copied: number;
+  units: CadDocument['units'];
+  /** The Part Studios copied (their ids as in that document), with the copies they keep in turn. */
+  tabs: PartStudioTab[];
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Draft } from 'immer';
-import type { ConfigInput, Feature, FeatureType, HoleParams, PartStudioTab, SelRef } from '../core/types';
+import type { CadDocument, ConfigInput, DocumentLink, DocumentSummary, Feature, FeatureType, HoleParams, PartStudioTab, SelRef } from '../core/types';
 import { standardDefaultDepths, standardDefaultSize, standardHole, standardPitches, standardSizes } from '../core/holes';
 import { FIELD_SPECS, keepRefs } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
@@ -8,6 +8,8 @@ import { chosenLabel, configuredOf, configuredParams, inputName } from '../core/
 import { ConfigurationFields } from './ConfigurationFields';
 import { derivableStudios, derivedSourceKey, parseVersionStudio, sourceStudio, versionStudioId } from '../core/derived';
 import { derivableVersions, snapshotStudios, versionDocument, type VersionedDocument } from '../store/versionSources';
+import { linkableStudios, linkOf, linkSourceId, makeLink } from '../core/links';
+import { linkState, otherDocuments, sourceDocument } from '../store/linkedSources';
 import { sourceContents, type SourceContents } from '../store/rebuild';
 import { formatNumber, LENGTH_FACTOR, tryEvaluate } from '../core/expr';
 import { stepExpression } from './exprStep';
@@ -16,7 +18,7 @@ import { useEditor, refKey, FIRST_FIELD } from '../store/editorStore';
 import { activeStudio, useDoc } from '../store/docStore';
 import { FORMS, type Row } from './forms';
 import { Icon, type IconName } from './icons';
-import { t, tName } from '../i18n';
+import { getLang, t, tName } from '../i18n';
 import { openHelp } from '../help/context';
 import { FEATURE_HELP } from '../help/pages';
 
@@ -300,10 +302,46 @@ function DerivedPlaceFromField() {
   );
 }
 
+const copiedAt = (time: number) => new Date(time).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+
 /**
- * Derived: the source — another Part Studio of the document (not one that uses this one: a cycle), or a Part Studio
- * of a saved version of this document or another one — and which of its parts and sketches to bring in (all parts
- * by default). They are listed from the source's build.
+ * Derived from another document: when it was copied and how the copy stands with the document now (`source`;
+ * undefined — not loaded yet) — changed since: an update (a new copy) is offered.
+ */
+function DerivedCopyNote({ link, tabId, source, onUpdate }: { link: DocumentLink; tabId: string; source: CadDocument | null | undefined; onUpdate(): void }) {
+  const state = source === undefined ? null : linkState(link, tabId, source);
+  if (state === 'outdated')
+    return (
+      <div className="fd-warning derived-copy">
+        <span>
+          {t('The source document has changed since it was copied')} ({copiedAt(link.copied)})
+        </span>
+        <button className="btn small" onClick={onUpdate}>
+          {t('Update')}
+        </button>
+      </div>
+    );
+  const how =
+    state === 'current'
+      ? t('as the document is now')
+      : state === 'deleted'
+        ? t('the document is deleted, the copy is used')
+        : state === 'gone'
+          ? t('the document no longer has this Part Studio, the copy is used')
+          : '';
+  return (
+    <div className="fd-hint">
+      {t('Copied')} {copiedAt(link.copied)}
+      {how && ` — ${how}`}
+    </div>
+  );
+}
+
+/**
+ * Derived: the source — another Part Studio of the document (not one that uses this one: a cycle), a Part Studio of
+ * another document as it is now (copied into this Part Studio; an update offered once that document changes), or a
+ * Part Studio of a saved version of this document or another one — and which of its parts and sketches to bring in
+ * (all parts by default). They are listed from the source's build.
  */
 function DerivedSourceField() {
   const update = useEditor((s) => s.updateDraft);
@@ -311,27 +349,45 @@ function DerivedSourceField() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const studioId = draft?.type === 'derived' ? draft.params.studioId : '';
-  const versionId = parseVersionStudio(studioId)?.versionId ?? '';
+  // a copy of another document ("tab@copy"), or a saved version ("tab@version")
+  const linked = studio && studioId ? linkOf(studio, studioId) : null;
+  const versionId = linked ? '' : (parseVersionStudio(studioId)?.versionId ?? '');
   const [contents, setContents] = useState<SourceContents | null>(null);
   // documents with versions to derive from; the chosen version's Part Studios (null: loading, []: not available)
   const [versioned, setVersioned] = useState<VersionedDocument[]>([]);
   const [versionStudios, setVersionStudios] = useState<PartStudioTab[] | null>(null);
+  // the other documents to derive from as they are now; the one chosen (its document null: gone)
+  const [others, setOthers] = useState<DocumentSummary[]>([]);
+  const [fetched, setFetched] = useState<{ id: string; doc: CadDocument | null } | null>(null);
+  // a document chosen that has no Part Studio to give (nothing chosen from it)
+  const [picked, setPicked] = useState<string | null>(null);
   const parts = contents?.parts ?? null;
   const options = doc && studio ? derivableStudios(doc, studio.id) : [];
   // the first possible source to start with
   useEffect(() => {
-    if (draft?.type === 'derived' && !draft.params.studioId && options[0])
+    if (draft?.type === 'derived' && !draft.params.studioId && !picked && options[0])
       update((f) => {
         if (f.type === 'derived') f.params.studioId = options[0].id;
       });
-  }, [draft?.type, studioId, options[0]?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft?.type, studioId, options[0]?.id, picked]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let live = true;
     if (doc) void derivableVersions(doc.id, doc.name).then((list) => live && setVersioned(list), () => {});
+    if (doc) void otherDocuments(doc.id).then((list) => live && setOthers(list), () => {});
     return () => {
       live = false;
     };
   }, [doc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the document the copy came from, as it is now: to choose another of its Part Studios, to see whether it changed
+  const linkedDocId = picked ?? linked?.link.docId;
+  useEffect(() => {
+    let live = true;
+    if (linkedDocId && fetched?.id !== linkedDocId) void sourceDocument(linkedDocId).then((d) => live && setFetched({ id: linkedDocId, doc: d }));
+    return () => {
+      live = false;
+    };
+  }, [linkedDocId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sourceDoc = linkedDocId && fetched?.id === linkedDocId ? fetched.doc : undefined;
   useEffect(() => {
     let live = true;
     setVersionStudios(versionId ? null : []);
@@ -361,8 +417,15 @@ function DerivedSourceField() {
   const noParts = !!draft.params.noParts;
   const chosenSketches = draft.params.sketches ?? [];
   const gone = !!studioId && !loading && !source;
-  // Part Studios of the chosen source: this document's, or the version's
-  const studioOptions = versionId ? (versionStudios ?? []).map((s) => ({ id: versionStudioId(s.id, versionId), name: s.name })) : options;
+  // Part Studios of the chosen source: this document's, another document's (the copy's while that document is
+  // loading or when it is gone; not those that use a copy of this document), or the version's
+  const docStudios = sourceDoc ? linkableStudios(sourceDoc, doc!.id) : linked ? linked.link.tabs.filter((s) => s.id === linked.tabId) : [];
+  const studioOptions = linkedDocId
+    ? docStudios.map((s) => ({ id: s.id, name: s.name }))
+    : versionId
+      ? (versionStudios ?? []).map((s) => ({ id: versionStudioId(s.id, versionId), name: s.name }))
+      : options;
+  const studioValue = linkedDocId ? (linked?.tabId ?? '') : studioId;
   const chooseStudio = (id: string) =>
     update((f) => {
       if (f.type !== 'derived') return;
@@ -381,6 +444,34 @@ function DerivedSourceField() {
     const same = snap && snapshotStudios(snap).find((s) => s.id === parseVersionStudio(studioId)?.tabId || s.id === studioId);
     chooseStudio(versionStudioId((same ?? first)?.id ?? '', v));
   };
+  // a Part Studio of another document: a copy of it as it is now
+  const chooseLinked = (src: CadDocument, tabId: string) => {
+    setPicked(null);
+    chooseStudio(linkSourceId(tabId, makeLink(src, tabId)));
+  };
+  const chooseDocument = async (id: string) => {
+    const src = await sourceDocument(id);
+    if (!src || !doc) return;
+    setFetched({ id, doc: src });
+    const studios = linkableStudios(src, doc.id);
+    // the Part Studio of the same tab, if it has one
+    const same = studios.find((s) => s.id === linked?.tabId) ?? studios[0];
+    if (same) return chooseLinked(src, same.id);
+    setPicked(id);
+    chooseStudio('');
+  };
+  const chooseSource = (value: string) => {
+    if (value.startsWith('doc:')) return void chooseDocument(value.slice(4));
+    setPicked(null);
+    void chooseVersion(value);
+  };
+  // the copy again, of the document as it is now (the parts and sketches chosen stay)
+  const updateCopy = () =>
+    linked &&
+    sourceDoc &&
+    update((f) => {
+      if (f.type === 'derived') f.params.studioId = linkSourceId(linked.tabId, makeLink(sourceDoc, linked.tabId));
+    });
   const knownVersion = versioned.some((d) => d.versions.some((v) => v.id === versionId));
   // ids: those parts; none: all of them; null: no parts at all (only sketches)
   const setChosen = (ids: string[] | null) =>
@@ -399,13 +490,26 @@ function DerivedSourceField() {
   const partOn = (id: string) => !noParts && (!chosen.length || chosen.includes(id));
   return (
     <>
-      {(versioned.length > 0 || versionId) && (
-        // Onshape: the current state of this document, or a version — of this document or of another one
+      {(others.length > 0 || versioned.length > 0 || versionId || linkedDocId) && (
+        // the current state of this document or of another one (copied), or a version — of this document or of
+        // another one (Onshape)
         <div className="fd-row">
           <label>{t('Source')}</label>
           <div className="fd-control">
-            <select value={versionId} onChange={(e) => void chooseVersion(e.target.value)}>
+            <select value={linkedDocId ? `doc:${linkedDocId}` : versionId} onChange={(e) => chooseSource(e.target.value)}>
               <option value="">{t('This document (current)')}</option>
+              {(others.length > 0 || linked) && (
+                <optgroup label={t('Other documents (current)')}>
+                  {linked && !others.some((d) => d.id === linked.link.docId) && (
+                    <option value={`doc:${linked.link.docId}`}>{`${linked.link.docName} ${t('(document deleted)')}`}</option>
+                  )}
+                  {others.map((d) => (
+                    <option key={d.id} value={`doc:${d.id}`}>
+                      {d.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               {versionId && !knownVersion && <option value={versionId}>{t('(deleted version)')}</option>}
               {versioned.map((d) => (
                 <optgroup key={d.docId} label={d.docId === doc?.id ? t('Versions of this document') : d.name}>
@@ -424,21 +528,29 @@ function DerivedSourceField() {
         <label>{t('Part Studio')}</label>
         <div className="fd-control">
           {studioOptions.length || gone ? (
-            <select value={studioId} onChange={(e) => chooseStudio(e.target.value)}>
-              {gone && <option value={studioId}>{t('(deleted)')}</option>}
+            <select
+              value={studioValue}
+              // another document's: a copy of the one chosen (while that document is there)
+              disabled={!!linkedDocId && !sourceDoc}
+              onChange={(e) => (linkedDocId ? sourceDoc && chooseLinked(sourceDoc, e.target.value) : chooseStudio(e.target.value))}
+            >
+              {gone && <option value={studioValue}>{t('(deleted)')}</option>}
               {studioOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}
             </select>
-          ) : loading ? (
+          ) : loading || (linkedDocId && sourceDoc === undefined) ? (
             <span className="sel-empty">{t('Building the source…')}</span>
           ) : (
-            <span className="sel-empty">{versionId ? t('The version has no Part Studio') : t('No other Part Studio to derive from')}</span>
+            <span className="sel-empty">
+              {versionId ? t('The version has no Part Studio') : linkedDocId ? t('The document has no Part Studio to derive from') : t('No other Part Studio to derive from')}
+            </span>
           )}
         </div>
       </div>
+      {linked && <DerivedCopyNote link={linked.link} tabId={linked.tabId} source={sourceDoc} onUpdate={updateCopy} />}
       {source?.configuration?.length ? (
         // its configuration (Onshape): an input left as in the source follows the option chosen there
         <div className="fd-section">

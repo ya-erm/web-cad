@@ -12,6 +12,8 @@ import { addReport, isMain, isVersionOp, mergedSummary, sameName, stretches, tak
 import { branchFromVersion, createVersion, currentWorkspace, mergeWorkspace, planMerge, switchWorkspace, useVersions } from '../store/versions';
 import { buildDerivedSources, sourceUnits } from '../core/derived';
 import { derivableVersions, loadVersionSources, versionDocument } from '../store/versionSources';
+import { otherDocuments, sourceDocument } from '../store/linkedSources';
+import { linkableStudios, makeLink } from '../core/links';
 import { kernel } from '../kernel/client';
 import { LENGTH_FACTOR } from '../core/expr';
 import { activeAssembly, activeStudio, useDoc, withStudio } from '../store/docStore';
@@ -61,17 +63,34 @@ function agentKernel(studio: PartStudioTab, doc: CadDocument): AgentKernel {
       await kernel().ready();
       // a saved version: of this document, or of another one by name
       let versionId: string | undefined;
-      if (from) {
+      const lower = (x: string) => x.toLowerCase();
+      const version = from?.version;
+      const document = from?.document;
+      if (version) {
         const docs = await derivableVersions(doc.id, doc.name);
-        const lower = (x: string) => x.toLowerCase();
-        const d = from.document ? (docs.find((x) => x.name === from.document) ?? docs.find((x) => lower(x.name) === lower(from.document!))) : docs.find((x) => x.docId === doc.id);
-        if (!d) throw new AgentError(from.document ? `No document "${from.document}" with versions. Documents with versions: ${docs.map((x) => x.name).join(', ') || '(none)'}` : 'This document has no versions');
-        const v = d.versions.find((x) => x.name === from.version) ?? d.versions.find((x) => lower(x.name) === lower(from.version));
-        if (!v) throw new AgentError(`No version "${from.version}" of ${d.name}. Versions: ${d.versions.map((x) => x.name).join(', ')}`);
+        const d = document ? (docs.find((x) => x.name === document) ?? docs.find((x) => lower(x.name) === lower(document))) : docs.find((x) => x.docId === doc.id);
+        if (!d) throw new AgentError(document ? `No document "${document}" with versions. Documents with versions: ${docs.map((x) => x.name).join(', ') || '(none)'}` : 'This document has no versions');
+        const v = d.versions.find((x) => x.name === version) ?? d.versions.find((x) => lower(x.name) === lower(version));
+        if (!v) throw new AgentError(`No version "${version}" of ${d.name}. Versions: ${d.versions.map((x) => x.name).join(', ')}`);
         versionId = v.id;
         // with the versions it derives from in turn
         const snap = await versionDocument(v.id);
         if (snap) await loadVersionSources(snap);
+      } else if (document) {
+        // another document as it is now: its Part Studio copied (the copy goes into the Part Studio with the feature)
+        const docs = await otherDocuments(doc.id);
+        const d = docs.find((x) => x.name === document) ?? docs.find((x) => lower(x.name) === lower(document));
+        if (!d) throw new AgentError(`No other document "${document}". Documents: ${docs.map((x) => x.name).join(', ') || '(none)'}`);
+        const src = await sourceDocument(d.id);
+        if (!src) throw new AgentError(`The document "${d.name}" is not available`);
+        const studios = src.tabs.filter((x): x is PartStudioTab => x.type === 'partStudio');
+        const s = studios.find((x) => x.name === name || x.id === name) ?? studios.find((x) => lower(x.name) === lower(name));
+        if (!s) throw new AgentError(`No Part Studio "${name}" in ${d.name}. Part Studios: ${studios.map((x) => x.name).join(', ') || '(none)'}`);
+        if (!linkableStudios(src, doc.id).includes(s)) throw new AgentError(`"${s.name}" of ${d.name} uses a copy of this document: deriving from it would bring that copy back here`);
+        const link = makeLink(src, s.id);
+        await loadVersionSources({ tabs: link.tabs });
+        versionId = link.id;
+        name = s.id;
       }
       const base = findDerivedSource(doc, name, forStudio, versionId);
       // in the configuration chosen for it (its builder: the variant's)

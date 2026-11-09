@@ -15,6 +15,7 @@ import { addReport, applyVersionOp, stretches, summarizeVersions, type AnyOp, ty
 import { FONT_FILES, fontsLoaded, registerFont } from '../sketch/text';
 import { buildDerivedSources, setVersionSnapshot, sourceUnits } from '../core/derived';
 import { docId, uid } from '../core/ids';
+import { syncLinks } from '../core/links';
 import { StudioBuilder, assemblyStepOf, placedShape, stlOf } from '../kernel/build';
 import { addSubassemblies, applySolve } from '../assembly/mates';
 import { expandAssembly, stepAssemblies } from '../assembly/expand';
@@ -143,11 +144,12 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
       kernelOf(docNow, s).builder.build({ type: 'build', reqId: ++reqId, units, features: feats, partMeta: metaOf(s), upTo: feats.length, meshless: true }, builderOf),
     );
   /** A Part Studio by name (of the document or of a version it keeps), built (its sources first), as a source for another one. */
-  const source = async (name: string, forStudio: string, names?: Record<string, string | number>, from?: { version: string; document?: string }) => {
-    if (from?.document) throw new AgentError('Versions of other documents can be derived from in the browser only (`npm run agent -- run`)');
+  const source = async (name: string, forStudio: string, names?: Record<string, string | number>, from?: { version?: string; document?: string }) => {
+    if (from?.document) throw new AgentError('Other documents and their versions can be derived from in the browser only (`npm run agent -- run`)');
     const versions = versionsNow();
-    const version = from && (versions.find((v) => v.name === from.version) ?? versions.find((v) => v.name.toLowerCase() === from.version.toLowerCase()));
-    if (from && !version) throw new AgentError(`No version "${from.version}". Versions: ${versions.map((v) => v.name).join(', ') || '(none)'}`);
+    const wanted = from?.version;
+    const version = wanted ? (versions.find((v) => v.name === wanted) ?? versions.find((v) => v.name.toLowerCase() === wanted.toLowerCase())) : undefined;
+    if (wanted && !version) throw new AgentError(`No version "${wanted}". Versions: ${versions.map((v) => v.name).join(', ') || '(none)'}`);
     const base = findDerivedSource(docNow, name, forStudio, version?.id);
     // in the configuration chosen for it (its builder: the variant's)
     const { studio: s, configuration } = derivedVariant(base, names, docNow.units.length);
@@ -228,7 +230,8 @@ export async function openHeadless(doc: CadDocument, wasmPath: string): Promise<
         const { doc: next, report } = await runDocumentOps(session.doc, s.ops, host);
         addReport(out, report, s.at);
         if (!report.ok) return out;
-        session.doc = { ...next, modified: Date.now() };
+        // copies of other documents go with the Derived features that use them (as in the app)
+        session.doc = { ...next, tabs: syncLinks(next.tabs, session.doc.tabs), modified: Date.now() };
         out.applied = true;
       }
       if (versions) out.versions = { ...summarizeVersions(session.doc), ...(out.versions?.merged ? { merged: out.versions.merged } : {}) };

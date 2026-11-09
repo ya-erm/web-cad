@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import type { Draft } from 'immer';
 import type { CadDocument, DocumentVersion, ProjectVersion, Workspace } from '../core/types';
 import { uid } from '../core/ids';
-import { renameVersionSources } from '../core/derived';
+import { registerLinks, renameVersionSources } from '../core/derived';
 import {
   applyMerge,
   compareDocuments,
@@ -196,7 +196,9 @@ export async function mergeWorkspace(source: CadDocument, base: CadDocument | nu
   const doc = useDoc.getState().doc;
   if (!doc) return;
   await remember(doc, 'merge');
-  // of the document as it is (not a draft: merged tabs are cloned)
+  // of the document as it is (not a draft: merged tabs are cloned); Derived features merged in bring the copies of
+  // other documents they use with them (the update keeps the copies the features use)
+  registerLinks(source.tabs);
   const next = applyMerge(useDoc.getState().doc ?? doc, source, plan, take, units, base);
   useDoc.getState().update((d) => {
     d.tabs = next.tabs as Draft<CadDocument>['tabs'];

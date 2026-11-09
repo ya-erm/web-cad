@@ -6,6 +6,7 @@ import { requestPersistentStorage } from './store/persistence';
 import { startFolder } from './store/folderStore';
 import { startVersions } from './store/versions';
 import { startCompare } from './store/compare';
+import { startLinkChecks } from './store/linkedSources';
 import { TooltipLayer } from './ui/Tooltip';
 import { isHelpHash } from './help/toc';
 
@@ -32,6 +33,8 @@ export default function App() {
     // versions and history of the open document
     startVersions();
     startCompare();
+    // Derived from other documents: their copies compared with the documents now (an update offered)
+    startLinkChecks();
     const onHash = () => {
       setDocId(docIdFromHash());
       setHelp(isHelpHash(location.hash));

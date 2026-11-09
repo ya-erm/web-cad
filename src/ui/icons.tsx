@@ -1152,6 +1152,15 @@ const ICONS = {
       <rect x={8} y={8} width={12} height={12} rx={1.5} fill={WHITE} />
     </>
   ),
+  /** Update from the source (Derived from another document): two arrows going round. */
+  refresh: (
+    <>
+      <path d="M19 10.5 A7.2 7.2 0 0 0 5.6 8" stroke={BLUE} strokeWidth={1.75} />
+      <path d="M5.2 4.4 V8.4 H9.2" stroke={BLUE} strokeWidth={1.75} />
+      <path d="M5 13.5 A7.2 7.2 0 0 0 18.4 16" stroke={BLUE} strokeWidth={1.75} />
+      <path d="M18.8 19.6 V15.6 H14.8" stroke={BLUE} strokeWidth={1.75} />
+    </>
+  ),
   /** Versions and history: a clock with the arrow turning back. */
   history: (
     <>

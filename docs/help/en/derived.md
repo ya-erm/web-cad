@@ -1,6 +1,6 @@
 # Derived
 
-Brings the parts of **another Part Studio** of this document into the Part Studio, as Onshape's Derived does. The parts stand where they stand in the source (the common origin) and stay **linked** to it: when a source part changes, the derived part and everything built on its geometry rebuild by themselves.
+Brings the parts of **another Part Studio** of this document into the Part Studio, as Onshape's Derived does. The parts stand where they stand in the source (the common origin) and stay **linked** to it: when a source part changes, the derived part and everything built on its geometry rebuild by themselves. Parts can also come from [another document](#documents) — from a copy of it, updated when that document changes.
 
 Example: a motor is modelled in the first Part Studio and a mount is designed in the second one. Derive the motor into the second Part Studio, sketch on its face, project its holes with [Use](sketch-use) and extrude the mount — when the motor changes, the mount follows.
 
@@ -9,7 +9,7 @@ Example: a motor is modelled in the first Part Studio and a mount is designed in
 ## Steps {#steps}
 
 1. Open the Part Studio to build in and click **Derived**.
-2. If this document or another one has [versions](versions), choose where the parts come from in the **Source** field: **This document (current)** or one of the versions, see [below](#versions).
+2. If the browser has other documents or [versions](versions), choose where the parts come from in the **Source** field: **This document (current)**, another document under **Other documents (current)** (see [below](#documents)) or one of the versions (see [below](#versions)).
 3. In the **Part Studio** field, choose the source. For the current state the list has only the Part Studios that do not use the current one themselves (that would be a circular reference).
 4. If the source has a [configuration](configurations), choose an option for each input in the **Configuration** section: **As in the Part Studio (…)** — the one chosen in the source — or one of its own (a variable input: a value). The parts list is built in that variant.
 5. In the **Parts** list, keep **All parts** or tick the source parts you need. With every tick cleared, no parts come in — only sketches.
@@ -24,9 +24,26 @@ caption: The source is this document’s current state, Part Studio Motor. Check
 width: 350
 ```
 
-## Versions and other documents {#versions}
+## Other documents {#documents}
 
-Parts can come not only from the document's current state but from a saved [version](versions) — of this document or another one (as in Onshape: the parts of other documents are derived through their versions). In the **Source** field this document's versions are grouped under **Versions of this document**, other documents' versions under their names. When no document has versions, there is no **Source** field.
+To bring in the parts of another document as it is now, choose that document in the **Source** field (under **Other documents (current)**), then its Part Studio. The chosen Part Studio is **copied into the current one** — with the Part Studios of its document it derives parts from itself. So the document stands on its own: it builds after the source document is deleted, in a [project file](versions#file), on another computer and in [versions](versions).
+
+- The copy does not change by itself. Under the **Part Studio** field you see when it was made and whether it is the same as the document now.
+- When the source document has changed (its Part Studio, the Part Studios it derives from, its parts' names or colours), WebCAD offers to update the copy: in the dialog — the message **The source document has changed since it was copied** with an **Update** button; in the feature list — a ⟳ icon on the feature and a **The source documents have changed** bar over the list with an **Update** button (it updates all such features of this Part Studio); in the feature's context menu — **Update from the source document**. An update is one undo step; the parts, sketches, configuration and location chosen stay.
+- Changes are checked when the document is opened and when you come back to the app's window — after editing the source in another browser tab, for instance.
+- When the source document is deleted (or no longer has that Part Studio), the feature goes on with its copy, and the dialog says the copy is used.
+- The list leaves out the Part Studios that use a copy of the current document themselves: updates would go round in circles.
+
+```figure
+image: ../images/derived-document.png
+alt: Derived dialog with a source from another document
+caption: The source is another document, “Motor”; its Part Studio is copied into the current one. The document has changed since — Update makes a new copy.
+width: 310
+```
+
+## Versions {#versions}
+
+Parts can come not only from the document's current state but from a saved [version](versions) — of this document or another one (as in Onshape: the parts of other documents are derived through their versions). In the **Source** field this document's versions are grouped under **Versions of this document**, other documents' versions under their names.
 
 - A version does not change: its parts stay as they were when the version was saved, even after the source document changes. For the new state, save a new version in the source and choose it in the feature.
 - When a Part Studio of the version derives parts from other Part Studios itself, they come from the same version.
@@ -67,7 +84,7 @@ width: 700
 | **Select parts or sketches to derive** | Every part is cleared and no sketch is ticked. |
 | **The source version is not available: it was deleted or is in another browser** | The source version was deleted, or the document is open where the other document's version is not. Choose another source. |
 
-> **Limitation.** Other documents are derived from through their versions only, not their current state. Editing in the context of an assembly is not supported.
+> **Limitation.** Editing in the context of an assembly is not supported. When a Part Studio of another document derives parts from versions itself, its copy keeps references to those versions, not their content: such parts build in the browser that has the versions.
 
 ## See also {#see-also}
 

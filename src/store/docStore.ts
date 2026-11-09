@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
 import type { AssemblyTab, CadDocument, DocumentSummary, DrawingTab, Feature, PartStudioTab } from '../core/types';
 import { docId, uid } from '../core/ids';
+import { syncLinks } from '../core/links';
 import * as db from './persistence';
 
 const MAX_HISTORY = 200;
@@ -228,11 +229,14 @@ export const useDoc = create<DocState>()((set, get) => {
         if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('webcad:read-only'));
         return;
       }
-      const next = produce(doc, (d) => {
+      let next = produce(doc, (d) => {
         fn(d);
         if (!readOnly) d.modified = Date.now();
       });
       if (next === doc) return;
+      // the copies of other documents go with the Derived features that use them (core/links.ts)
+      const tabs = syncLinks(next.tabs, doc.tabs);
+      if (tabs !== next.tabs) next = { ...next, tabs };
       const coalesce = undoable && opts.key && opts.key === lastKey;
       set({
         doc: next,
