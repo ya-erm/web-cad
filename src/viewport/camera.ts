@@ -174,18 +174,26 @@ export class CameraController {
     return r.intersectPlane(plane, out) ?? through.clone();
   }
 
+  /**
+   * Turntable: the sign of the turn about Z for the drag under way, taken where it begins — reversed if the view is upside
+   * down (Z down the screen), so the near side follows the cursor; kept while the drag tilts over the pole. 0 — not yet.
+   */
+  private turnSign = 0;
+
+  /** A drag that rotates the view begins (turntable: the horizontal direction is taken from where it starts). */
+  beginRotate() {
+    this.turnSign = 0;
+  }
+
   rotate(dxPx: number, dyPx: number, pivot?: THREE.Vector3) {
     this.anim = null;
     const speed = 0.006;
     let q: THREE.Quaternion;
     if (this.rotationMode === 'turntable') {
-      // azimuth about world Z, elevation about the (horizontal) camera right axis
-      const qh = new THREE.Quaternion().setFromAxisAngle(Z_UP, -dxPx * speed);
-      let qv = new THREE.Quaternion().setFromAxisAngle(this.right, -dyPx * speed);
-      // no tilting over the pole; but away from it always (from the Top / Bottom view to the sides)
-      const back = new THREE.Vector3(0, 0, 1).applyQuaternion(this.quat);
-      const tilt = Math.abs(back.clone().applyQuaternion(qv).z);
-      if (tilt > 0.995 && tilt > Math.abs(back.z)) qv = new THREE.Quaternion();
+      // azimuth about world Z, elevation about the (horizontal) camera right axis — over the pole too (upside down)
+      if (!this.turnSign) this.turnSign = this.up.z < 0 ? -1 : 1;
+      const qh = new THREE.Quaternion().setFromAxisAngle(Z_UP, -dxPx * speed * this.turnSign);
+      const qv = new THREE.Quaternion().setFromAxisAngle(this.right, -dyPx * speed);
       q = qh.multiply(qv);
     } else {
       const qh = new THREE.Quaternion().setFromAxisAngle(this.up, -dxPx * speed);
@@ -201,7 +209,7 @@ export class CameraController {
     this.update();
   }
 
-  /** Keep the camera's right axis horizontal (Z up), except when looking straight down/up. */
+  /** Keep the camera's right axis horizontal (Z up, or down if upside down), except when looking straight down/up. */
   levelHorizon() {
     const back = new THREE.Vector3(0, 0, 1).applyQuaternion(this.quat);
     if (Math.abs(back.z) > 0.999) return;

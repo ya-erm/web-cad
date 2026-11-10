@@ -379,7 +379,10 @@ export class Engine {
       else this.cam.rotateAbout(axis(0, 0, 1), turn === 'cw' ? quarter : -quarter);
     };
     // dragging the cube turns the camera about the centre of the view
-    this.viewCube.onRotate = (dx, dy) => this.cam.rotate(dx, dy);
+    this.viewCube.onRotate = (dx, dy, start) => {
+      if (start) this.cam.beginRotate();
+      this.cam.rotate(dx, dy);
+    };
     this.viewCube.onMenu = (x, y) => this.viewCubeMenu(x, y);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
@@ -1894,6 +1897,7 @@ export class Engine {
     this.lastPos = { x, y };
     useEditor.setState({ contextMenu: null });
     if (e.button === 2 && !this.down.ctrl) {
+      this.cam.beginRotate();
       // pivot: point under cursor if on geometry, else target
       const hit = this.raycastParts(x, y);
       if (hit) this.down.pivot = hit;
@@ -2341,7 +2345,9 @@ export class Engine {
         this.cam.normalTo(cmd.normal, cmd.up, cmd.center);
         break;
       case 'rotate': {
-        const hAxis = this.cam.rotationMode === 'turntable' ? new THREE.Vector3(0, 0, 1) : this.cam.up;
+        // turntable: about Z pointing up the screen (down if the view ends upside down), like the screen's vertical
+        const upsideDown = new THREE.Vector3(0, 1, 0).applyQuaternion(this.cam.finalQuat).z < 0;
+        const hAxis = this.cam.rotationMode === 'turntable' ? new THREE.Vector3(0, 0, upsideDown ? -1 : 1) : this.cam.up;
         const axis = cmd.axis === 'h' ? hAxis : cmd.axis === 'v' ? this.cam.right : this.cam.viewDir;
         this.cam.rotateAbout(axis, THREE.MathUtils.degToRad(cmd.deg));
         break;

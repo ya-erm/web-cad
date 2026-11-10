@@ -93,8 +93,8 @@ export class ViewCube {
   private hoverFace = -1;
   private highlight: THREE.Mesh;
   onPick: (dir: THREE.Vector3, up: THREE.Vector3) => void = () => {};
-  /** Dragging the cube turns the camera (by the mouse motion in pixels, as dragging in the graphics area does). */
-  onRotate: (dx: number, dy: number) => void = () => {};
+  /** Dragging the cube turns the camera (by the mouse motion in pixels, as dragging in the graphics area does; `start` — its first move). */
+  onRotate: (dx: number, dy: number, start: boolean) => void = () => {};
   /** Right click on the cube: its menu (window coordinates). */
   onMenu: (x: number, y: number) => void = () => {};
   /** An arrow by the cube: a quarter turn of the view (Onshape — "lay the cube on its side"). */
@@ -251,12 +251,13 @@ export class ViewCube {
       const dy = e.clientY - p.y;
       if (!p.dragged && Math.hypot(dx, dy) < 3) return;
       // the cube is small: it turns the view twice as fast as the graphics area does
-      if (!p.dragged) this.setHover(-1, null);
+      const start = !p.dragged;
+      if (start) this.setHover(-1, null);
       p.dragged = true;
       p.x = e.clientX;
       p.y = e.clientY;
       this.canvas.style.cursor = 'grabbing';
-      this.onRotate(dx * 2, dy * 2);
+      this.onRotate(dx * 2, dy * 2, start);
       return;
     }
     const h = this.hit(e);

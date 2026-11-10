@@ -14,13 +14,13 @@
 The view rotates around the point on the part under the cursor (if there is no part under the cursor, around the center of the view). Choose the rotation mode in **Settings** → **Rotation**:
 
 - **Free rotation**: the model rotates around the screen axes (as in Onshape);
-- **Turntable (Z up)**: rotation around the Z axis; the horizon does not tilt.
+- **Turntable (Z up)**: rotation around the Z axis; the horizon does not tilt. Keep tilting over the top or the bottom of the model to look at its far side: the view turns upside down and the horizon stays level. Upside down, dragging sideways still pulls the side of the model nearest to you along with the pointer.
 
 ## View cube {#view-cube}
 
 The cube in the top-right corner of the graphics area rotates together with the model. Click a face of the cube (**Front**, **Top**, **Right**, and so on) to view the model from that side; click an edge or a corner to view it at an angle.
 
-- **Arrows by the cube** appear while the pointer is over it. The triangles at its sides turn the view 90° to the next face (▶ — the right face towards you, ▲ — the top one); the two curved arrows by the top right corner roll the view 90° about the line of sight: the upper one counterclockwise, the lower one clockwise. This lays the cube on its side. Quick clicks add up: two make a half turn. With the **Turntable (Z up)** rotation mode the next mouse rotation puts the Z axis up again.
+- **Arrows by the cube** appear while the pointer is over it. The triangles at its sides turn the view 90° to the next face (▶ — the right face towards you, ▲ — the top one); the two curved arrows by the top right corner roll the view 90° about the line of sight: the upper one counterclockwise, the lower one clockwise. This lays the cube on its side. Quick clicks add up: two make a half turn. With the **Turntable (Z up)** rotation mode the next mouse rotation lines the Z axis up with the screen's vertical again: up, or down if the view is upside down.
 - **Drag the cube** with the left or the right button to rotate the view, as right-dragging in the graphics area does (about the centre of the view; the rotation mode from **Settings** applies here too).
 - **Right-click the cube** (without dragging) for its menu: the standard views, isometric, dimetric, trimetric, **Zoom to fit** (`F`) and **Perspective**.
 
