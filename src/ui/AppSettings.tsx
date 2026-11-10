@@ -1,14 +1,18 @@
 // Settings that are not a document's: how the view rotates and the interface language (both kept in this
-// browser). The editor's Settings menu shows them under the document's units; the documents page has them alone.
+// browser), installing the app. The editor's Settings menu shows them under the document's units; the documents page
+// has them alone.
 
 import { useState } from 'react';
 import { setRotationMode, useEditor } from '../store/editorStore';
 import { getLang, setLang, t } from '../i18n';
+import { openHelp } from '../help/context';
+import { installApp, useInstallState } from '../pwa';
 import { Icon } from './icons';
 
-/** Rotation and Language items of a settings dropdown. */
+/** Rotation, Language and App items of a settings dropdown. */
 export function AppSettingsItems() {
   const rotationMode = useEditor((s) => s.rotationMode);
+  const install = useInstallState();
   return (
     <>
       <div className="dropdown-label">{t('Rotation')}</div>
@@ -38,6 +42,26 @@ export function AppSettingsItems() {
           {l === 'ru' ? 'Русский' : 'English'}
         </div>
       ))}
+      <div className="dropdown-sep" />
+      <div className="dropdown-label">{t('App')}</div>
+      {install === 'installed' ? (
+        <div className="dropdown-item disabled">
+          <span className="menu-icon">✓</span>
+          {t('Installed as an app')}
+        </div>
+      ) : install === 'available' ? (
+        <div className="dropdown-item" title={t('Opens in its own window and works offline')} onClick={() => void installApp()}>
+          <span className="menu-icon">
+            <Icon name="download" size={14} />
+          </span>
+          {t('Install app…')}
+        </div>
+      ) : (
+        <div className="dropdown-item" onClick={() => openHelp('offline#install')}>
+          <span className="menu-icon">?</span>
+          {t('How to install the app')}
+        </div>
+      )}
     </>
   );
 }

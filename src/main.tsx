@@ -4,9 +4,12 @@ import './styles/app.css';
 import App from './App';
 import { installAgentApi } from './agent/browser';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { initInstall } from './pwa';
 
 // window.webcad for agents (and the dev-server bridge used by `npm run agent`); help tabs stay out of it
 if (!location.hash.startsWith('#/help')) installAgentApi();
+// the browser's offer to install the app (Settings → Install app)
+initInstall();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
