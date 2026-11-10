@@ -49,6 +49,7 @@ import {
   setLineResolution,
 } from './sketchRender';
 import { SketchEditor } from './sketchEditor';
+import { editedFaceSketchFrame } from './sketchFrame';
 import { t, tName } from '../i18n';
 
 export type PickItem = { priority: number; radius?: number } & (
@@ -1669,12 +1670,17 @@ export class Engine {
       const pl = d.params.plane;
       if (pl.kind === 'std') return STD_PLANES[pl.name];
       if (pl.kind === 'feature') return this.planeFrames.get(pl.featureId)?.frame ?? sketchFrames.get(featureId) ?? null;
-      // the face as currently built (the plane may just have been changed in the sketch dialog)
-      if (pl.ref.kind === 'face') {
-        const info = this.parts.get(pl.ref.partId)?.data.faces[pl.ref.index];
-        if (info?.normal) return frameFromNormal(v3.scale(info.normal, v3.dot(info.center, info.normal)), info.normal);
-      }
       const cached = sketchFrames.get(featureId);
+      if (pl.ref.kind === 'face') {
+        const saved = activeStudio(useDoc.getState().doc)?.features.find((f) => f.id === featureId);
+        const frame = editedFaceSketchFrame(
+          pl,
+          saved?.type === 'sketch' ? saved.params.plane : undefined,
+          cached,
+          this.parts.get(pl.ref.partId)?.data.faces[pl.ref.index],
+        );
+        if (frame) return frame;
+      }
       if (cached) return cached;
       if (pl.ref.kind === 'face' && pl.ref.sig.normal) {
         const n = pl.ref.sig.normal;
