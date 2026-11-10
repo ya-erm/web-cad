@@ -39,7 +39,7 @@ alt: Sketch mode: sketch toolbar, sketch dialog, geometry with constraints and d
 1. Select a plane (**Top**, **Front**, **Right** in the [feature list](feature-list), or a [plane](plane)) or a planar face of a part.
 2. Click **Sketch** in the toolbar (`Shift+S`).
 
-If nothing is selected, the sketch dialog opens with the **Sketch plane** field active: click a plane or planar face in the graphics area, or a plane in the feature list. Until a plane is chosen, the drawing tools and **Finish sketch** are unavailable, and `Esc` closes the sketch. If you select anything other than a plane or planar face, the message "Select a plane or planar face" appears. You can also start a sketch by double-clicking a plane in the feature list, or with **New sketch** in the context menu of a planar face. The view automatically turns normal to the new sketch plane.
+If nothing is selected, the sketch dialog opens with the **Sketch plane** field active: click a plane or planar face in the graphics area, or a plane in the feature list. Until a plane is chosen, the drawing tools and **Finish sketch** are unavailable, and `Esc` closes the sketch. If you select anything other than a plane or planar face, the message "Select a plane or planar face" appears. You can also start a sketch by double-clicking a plane in the feature list, or with **New sketch** in the context menu of a planar face. The view stays as it is; to look perpendicular to the sketch plane, press **View normal to** (`N`).
 
 To open an existing sketch, double-click it in the feature list or choose **Edit** in the context menu of its region.
 
@@ -48,7 +48,7 @@ To open an existing sketch, double-click it in the feature list or choose **Edit
 | Item | Purpose |
 |---|---|
 | Name | The sketch name in the feature list. |
-| **Sketch plane** | Click the field, then another plane or planar face (in the graphics area, or a plane in the [feature list](feature-list#default-geometry)) to move the sketch there. The view turns to the new plane. |
+| **Sketch plane** | Click the field, then another plane or planar face (in the graphics area, or a plane in the [feature list](feature-list#default-geometry)) to move the sketch there. The view stays as it is — `N` turns it to the new plane. |
 | **Show constraints** (`Shift+C`) | Shows icons for all constraints. When cleared, only the constraints of selected entities and of the entity under the cursor are visible. |
 | **Show expressions** | Dimensions driven by expressions show the expression (`#width / 2`) instead of the value. |
 | **Under defined: N degrees of freedom** | How many geometry parameters are not yet fixed by constraints and dimensions. |

@@ -270,9 +270,9 @@ export class SketchEditor {
       if (this.active) this.deactivate();
       return;
     }
-    if (!this.active || this.featureId !== ed.editing!.featureId) this.activate(ed.editing!.featureId, ed.editing!.isNew);
+    if (!this.active || this.featureId !== ed.editing!.featureId) this.activate(ed.editing!.featureId);
     else if (JSON.stringify(this.data()?.plane ?? null) !== this.planeKey || (this.awaitingPlane && !ed.sketch!.planePending)) {
-      this.applyFrame(true);
+      this.applyFrame();
       this.renderSketch(true);
     }
     if (ed.sketch!.tool !== this.toolName) {
@@ -296,8 +296,11 @@ export class SketchEditor {
     this.updatePreview();
   }
 
-  /** Place the sketch on its plane (on activation and when the plane is changed in the dialog). */
-  private applyFrame(lookAt: boolean) {
+  /**
+   * Place the sketch on its plane (on activation and when the plane is changed in the dialog). The view stays as it
+   * is: View normal to (N) turns it to the plane.
+   */
+  private applyFrame() {
     this.planeKey = JSON.stringify(this.data()?.plane ?? null);
     // a new sketch without a plane yet: keep the view until the plane is picked
     this.awaitingPlane = !!useEditor.getState().sketch?.planePending;
@@ -307,17 +310,13 @@ export class SketchEditor {
     this.root.matrixWorldNeedsUpdate = true;
     this.pickRoot.matrix.copy(m);
     this.pickRoot.matrixWorldNeedsUpdate = true;
-    if (lookAt && !this.awaitingPlane) {
-      const f = this.frame;
-      useEditor.getState().view({ kind: 'normal', normal: f.normal, up: f.yDir, center: f.origin });
-    }
   }
 
-  private activate(featureId: string, isNew: boolean) {
+  private activate(featureId: string) {
     this.deactivate();
     this.active = true;
     this.featureId = featureId;
-    this.applyFrame(isNew);
+    this.applyFrame();
     this.engine.editGroup.add(this.root);
     this.engine.pickEdit.add(this.pickRoot);
     this.toolName = useEditor.getState().sketch?.tool ?? 'select';

@@ -11,7 +11,7 @@ Build a **40 × 30 × 10 mm** plate with **R3** fillets on its vertical edges. U
 ### 1. A 40 × 30 mm sketch {#first-sketch}
 
 1. On the **Documents** page, click **Create**. A new document opens with a **Part Studio** tab.
-2. Click **Sketch** on the toolbar (`Shift+S`), then click the **Top** plane in the graphics area or in the feature list. The view turns normal to it, and the **Line** tool is active.
+2. Click **Sketch** on the toolbar (`Shift+S`), then click the **Top** plane in the graphics area or in the feature list. The **Line** tool is active; to look straight at the plane, press `N` (**View normal to**).
 3. Select **Center rectangle** (`R`), click the origin, then click a corner point.
 4. Select **Dimension** (`D`). Click the top edge, click where to place the dimension, type `40`, and press `Enter`. Set the side edge to `30` the same way.
 5. Click **Finish sketch** (`Enter`).
