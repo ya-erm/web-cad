@@ -25,6 +25,8 @@ The **WebCAD project** tab of the same dialog saves the whole document instead o
 
 **Resolution** (**Coarse**, **Medium**, **Fine**) sets the mesh accuracy for STL, OBJ, and 3MF: the higher it is, the smoother the curved surfaces and the larger the file. **Units**: mm or inch. Several selected parts are saved to one file. The format, resolution, and units of the last export are remembered in this browser and picked in the dialog right away the next time.
 
+The file is named after the part when there is one, otherwise after the document. When the document is now one of its [versions](versions) — the version is open for viewing, or the document has not changed since it was made — the version's name is added: "Part v3.stl". When something changed after the latest version, the name has no version.
+
 ## Exporting an assembly {#export-assembly}
 
 On an [assembly](assembly) tab, **Export** opens **Export assembly**: the same formats, for the instances where they stand in the assembly — the selected ones, or every shown instance when nothing is selected.
@@ -33,6 +35,8 @@ On an [assembly](assembly) tab, **Export** opens **Export assembly**: the same f
 - **STL** — all instances as one mesh; **OBJ** and **3MF** — one object per instance.
 
 An open [exploded view](assembly-exploded#exploded) does not affect the export: the instances are written where the assembly places them.
+
+The file is named "Document — Assembly" (or after the instance when there is one), with the version's name as [for parts](#export-parts): "Document — Assembly 1 v3.step".
 
 ## Exporting a sketch to DXF {#export-dxf}
 

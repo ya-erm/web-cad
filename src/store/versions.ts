@@ -59,7 +59,7 @@ async function remember(doc: CadDocument, reason: NonNullable<DocumentVersion['r
   await refresh(doc.id);
 }
 
-/** A version of the workspace as it is now ("V3" when no name is given). */
+/** A version of the workspace as it is now ("v3" when no name is given). */
 export async function createVersion(name: string, description = '') {
   const { doc, readOnly } = useDoc.getState();
   if (!doc || readOnly) return;

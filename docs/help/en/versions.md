@@ -10,7 +10,7 @@ The **Versions** button (a clock icon) in the top bar next to the document name 
 
 | Action | How |
 |---|---|
-| Create a version | **Create version**, then a name (by default the next in order: **V1**, **V2**…) and an optional description; **Create** or `Enter` in the name field. The document is captured as it is now. |
+| Create a version | **Create version**, then a name (by default the next in order: **v1**, **v2**…) and an optional description; **Create** or `Enter` in the name field. The document is captured as it is now. |
 | Open for viewing | A click on the row or the eye icon — see [below](#view). |
 | Compare with the workspace | The **Compare with the workspace** icon — see [below](#compare). |
 | Restore | The **Restore this version** icon — see [below](#restore). |
@@ -31,7 +31,7 @@ A snapshot with the same content as the last one is not repeated. The history ke
 
 ## Viewing a version {#view}
 
-An opened version is shown instead of the workspace, with a yellow banner under the top bar: **Viewing: V1 · date — read only**. In it you can switch tabs, turn the model, measure, choose a [configuration](configurations) option and export, but not edit: an attempt to change something shows "A version is open for viewing: return to the workspace to edit". Nothing is saved while viewing.
+An opened version is shown instead of the workspace, with a yellow banner under the top bar: **Viewing: v1 · date — read only**. In it you can switch tabs, turn the model, measure, choose a [configuration](configurations) option and [export](import-export#export-parts) (the file name gets the version's name: "Part v3.stl"), but not edit: an attempt to change something shows "A version is open for viewing: return to the workspace to edit". Nothing is saved while viewing.
 
 **Return to the workspace** — the button on the banner or the **Workspace** row in the panel. The workspace comes back as it was, with its undo history.
 

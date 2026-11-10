@@ -12,15 +12,25 @@ export const HISTORY_KEEP = 30;
 /** A document's content as a snapshot compares it: units and tabs (not its name or the open tab). */
 export const contentHash = (doc: Pick<CadDocument, 'units' | 'tabs'>) => hash(JSON.stringify([doc.units, doc.tabs]));
 
-/** The name of the next version: "V1", "V2"… after the highest one. */
+/** The name of the next version: "v1", "v2"… after the highest one (the older "V3" counts too). */
 export function nextVersionName(versions: DocumentVersion[]): string {
   let n = 0;
   for (const v of versions) {
-    const m = v.kind === 'version' ? /^V(\d+)$/.exec(v.name) : null;
+    const m = v.kind === 'version' ? /^v(\d+)$/i.exec(v.name) : null;
     if (m) n = Math.max(n, Number(m[1]));
   }
-  return `V${n + 1}`;
+  return `v${n + 1}`;
 }
+
+/**
+ * The version the document is (`versions` newest first): the newest one with the same content — the one being
+ * viewed or the workspace unchanged since it was made. None when the workspace has changed after every version.
+ */
+export const versionOfContent = (versions: DocumentVersion[], contentHash: string): DocumentVersion | undefined =>
+  versions.find((v) => v.kind === 'version' && v.hash === contentHash);
+
+/** An exported file's name with the version it comes from: "Part v3". */
+export const withVersionName = (name: string, version: string | undefined) => (version ? `${name} ${version}` : name);
 
 /**
  * Whether the history saves the document now (`versions` newest first): not when the newest snapshot has the same

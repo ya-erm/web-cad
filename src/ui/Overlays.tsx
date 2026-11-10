@@ -7,6 +7,8 @@ import { formatNumber, LENGTH_FACTOR } from '../core/expr';
 import { download, exportAssembly, exportParts, safeName, type ExportKind } from './exporting';
 import { useAssembly } from '../assembly/sources';
 import { exportProjectText } from '../store/folderStore';
+import { useVersions } from '../store/versions';
+import { contentHash, versionOfContent, withVersionName } from '../core/versions';
 import { Icon, type IconName } from './icons';
 import { t } from '../i18n';
 import { getEngine } from '../viewport/engineRef';
@@ -267,7 +269,10 @@ export function ExportDialog() {
     setBusy(true);
     try {
       const [tol, ang] = RES[res];
-      const name = parts.length === 1 ? parts[0].name : asm ? `${doc.name} — ${asm.name}` : doc.name;
+      // with the version the document is ("Part v3"): the one being viewed, or the workspace unchanged since it
+      const { versions, viewing } = useVersions.getState();
+      const version = viewing?.version.kind === 'version' ? viewing.version : versionOfContent(versions, contentHash(doc));
+      const name = withVersionName(parts.length === 1 ? parts[0].name : asm ? `${doc.name} — ${asm.name}` : doc.name, version?.name);
       const opts = { tolerance: tol, angularTolerance: ang, unit, baseName: name };
       if (asm) await exportAssembly(asm, useAssembly.getState().sources, instances.map((i) => i.id), kind as ExportKind, opts);
       else if (studio) await exportParts(studio.id, parts.map((p) => p.id), kind as ExportKind, opts);

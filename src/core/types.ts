@@ -1195,7 +1195,7 @@ export interface DocumentVersion {
   docId: string;
   /** Made by the user, by the history, a workspace not open now (its state, kept until switched to). */
   kind: 'version' | 'auto' | 'workspace';
-  /** A version's name ("V1"), a workspace's ("Main", "Branch 1"); the history's entries have none. */
+  /** A version's name ("v1"), a workspace's ("Main", "Branch 1"); the history's entries have none. */
   name: string;
   /** A workspace: the version it was branched from. */
   base?: string;

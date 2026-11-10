@@ -14,7 +14,9 @@ import {
   mergeNeeds,
   mergePlan,
   nextVersionName,
+  versionOfContent,
   withVersionContent,
+  withVersionName,
 } from './versions';
 
 const v = (over: Partial<DocumentVersion>): DocumentVersion => ({ id: 'x', docId: 'd', kind: 'version', name: '', created: 0, hash: 'h', ...over });
@@ -23,9 +25,20 @@ const doc = (tabs: CadDocument['tabs'], over: Partial<CadDocument> = {}): CadDoc
 const studio = (id: string, n = 0) => ({ id, type: 'partStudio' as const, name: id, features: Array.from({ length: n }, (_, i) => ({ id: `f${i}`, type: 'variable', name: `V${i}`, params: { name: `v${i}`, value: '1', description: '' } })), rollback: null, parts: {} });
 
 describe('versions', () => {
-  it('names versions V1, V2… after the highest one; the history and other names do not count', () => {
-    expect(nextVersionName([])).toBe('V1');
-    expect(nextVersionName([v({ name: 'V2' }), v({ name: 'Release' }), v({ name: 'V7', kind: 'auto' })])).toBe('V3');
+  it('names versions v1, v2… after the highest one (the older V3 too); the history and other names do not count', () => {
+    expect(nextVersionName([])).toBe('v1');
+    expect(nextVersionName([v({ name: 'v2' }), v({ name: 'Release' }), v({ name: 'v7', kind: 'auto' })])).toBe('v3');
+    expect(nextVersionName([v({ name: 'v1' }), v({ name: 'V4' })])).toBe('v5');
+  });
+
+  it('the version the document is: the newest one with its content, for an exported file name', () => {
+    const list = [v({ name: 'Auto', kind: 'auto', hash: 'b' }), v({ name: 'v3', hash: 'b' }), v({ name: 'v2', hash: 'b' }), v({ name: 'v1', hash: 'a' })];
+    expect(versionOfContent(list, 'b')?.name).toBe('v3');
+    expect(versionOfContent(list, 'a')?.name).toBe('v1');
+    // changed after every version
+    expect(versionOfContent(list, 'c')).toBeUndefined();
+    expect(withVersionName('Part', 'v3')).toBe('Part v3');
+    expect(withVersionName('Part', undefined)).toBe('Part');
   });
 
   it('the history saves a changed document: when opened at once, while editing every while', () => {

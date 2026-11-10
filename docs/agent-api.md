@@ -396,16 +396,16 @@ npm run agent -- export pdf /tmp/plate.pdf     # активный чертёж; 
 
 | op | Поля |
 | --- | --- |
-| `version` | `name?` (по умолчанию V1, V2…), `description?` — версия документа как он есть |
-| `branch` | `from` — версия (по имени), `name?` (по умолчанию «Ветвь N» / «Branch N»): новая ветвь с содержимым версии; текущее пространство сохраняется, чтобы вернуться |
+| `version` | `name?` (по умолчанию v1, v2…), `description?` — версия документа как он есть |
+| `branch` | `from` — версия (по имени, регистр не важен), `name?` (по умолчанию «Ветвь N» / «Branch N»): новая ветвь с содержимым версии; текущее пространство сохраняется, чтобы вернуться |
 | `workspace` | `name` — перейти в другое пространство («Main» тоже); текущее сохраняется |
 | `merge` | `from` — пространство, чьи изменения с версии-основы влить в текущее (по фичам, экземплярам, видам — где изменили обе стороны, берутся его изменения) |
 
 ```jsonc
 [{"op":"version","description":"До доработки"},
- {"op":"branch","from":"V1","name":"Шире"}, {"op":"setVariable","name":"w","value":60},
+ {"op":"branch","from":"v1","name":"Шире"}, {"op":"setVariable","name":"w","value":60},
  {"op":"workspace","name":"Main"}, {"op":"merge","from":"Шире"}]
-// отчёт: "versions": {"workspace":"Main","versions":[{"name":"V1",…}],"workspaces":[{"name":"Шире","base":"V1"}],
+// отчёт: "versions": {"workspace":"Main","versions":[{"name":"v1",…}],"workspaces":[{"name":"Шире","base":"v1"}],
 //                     "merged":{"from":"Шире","tabs":[{"name":"Part Studio 1","change":"changed","conflict":false,"items":1}]}}
 ```
 

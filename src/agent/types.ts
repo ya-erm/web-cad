@@ -648,7 +648,7 @@ export type DrawingOp =
  * version is a record of its own, a branch switch replaces the document's content): an error later does not undo them.
  */
 export type VersionOp =
-  /** Save a version of the document as it is now: `name` (default V1, V2 …), `description`. */
+  /** Save a version of the document as it is now: `name` (default v1, v2 …), `description`. */
   | { op: 'version'; name?: string; description?: string }
   /** A new branch (workspace) from version `from` (by name): the document as the version has it; the workspace it was in is kept to switch back to. */
   | { op: 'branch'; from: string; name?: string }
