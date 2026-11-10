@@ -3,12 +3,25 @@
 
 import { useDoc } from './docStore';
 import { useEditor, type Editing, type SketchTool } from './editorStore';
+import { knownLink, parseVersionStudio, registerLink } from '../core/derived';
+import type { CadDocument, DocumentLink } from '../core/types';
 
 interface Stored {
   docId: string;
   tabId: string;
   editing: Editing;
   sketch?: { tool: SketchTool; construction: boolean };
+  /** The copy of another document a Derived draft has just been given (the document keeps it once committed). */
+  links?: DocumentLink[];
+}
+
+/** The copy the draft uses that only the memory has as yet: lost on a reload otherwise (the source "not available"). */
+function draftLinks(doc: CadDocument, editing: Editing): DocumentLink[] {
+  const d = editing.draft;
+  const v = d.type === 'derived' ? parseVersionStudio(d.params.studioId) : null;
+  const link = v && knownLink(v.versionId);
+  if (!link || doc.tabs.some((t) => t.type === 'partStudio' && t.links?.some((l) => l.id === link.id))) return [];
+  return [link];
 }
 
 const KEY = 'webcad.draft';
@@ -23,15 +36,22 @@ function save() {
       sessionStorage.removeItem(KEY);
       return;
     }
+    const links = draftLinks(doc, editing);
     const data: Stored = {
       docId: doc.id,
       tabId: doc.activeTab,
       editing,
       sketch: sketch ? { tool: sketch.tool, construction: sketch.construction } : undefined,
+      ...(links.length ? { links } : {}),
     };
     sessionStorage.setItem(KEY, JSON.stringify(data));
   } catch {
-    /* storage full or unavailable: ignore */
+    // storage full or unavailable: no draft rather than an older one
+    try {
+      sessionStorage.removeItem(KEY);
+    } catch {
+      /* unavailable: ignore */
+    }
   }
 }
 
@@ -60,6 +80,8 @@ export function restoreDraft(): boolean {
   if (!tab || tab.type !== 'partStudio') return false;
   const exists = tab.features.some((f) => f.id === data!.editing.featureId);
   if (!data.editing.isNew && !exists) return false;
+  // its copy of another document known again: the draft builds, the document keeps it once committed
+  for (const l of data.links ?? []) registerLink(l);
   useEditor.setState({
     editing: { ...data.editing, index: Math.min(data.editing.index, tab.features.length) },
     activeField: null,

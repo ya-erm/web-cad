@@ -2305,6 +2305,7 @@ function buildDerived(ctx: Ctx, f: FeatureOf<'derived'>): FeatureOutput {
   if (!p.studioId) fail('Select a Part Studio');
   if (p.sourceError === 'missing') fail('The source Part Studio no longer exists');
   if (p.sourceError === 'version') fail('The source version is not available: it was deleted or is in another browser');
+  if (p.sourceError === 'copy') fail('The copy of the source document is lost: choose the document again');
   if (p.sourceError === 'cycle') fail('Circular reference: the source Part Studio uses this one');
   const src = p.sourceKey ? ctx.sources?.(p.sourceKey) : undefined;
   if (!src) fail('The source Part Studio is not built');

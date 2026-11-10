@@ -5,7 +5,7 @@
 // that document's Part Studio has changed (`linkFingerprint` differs), an update is offered, which is a new copy.
 
 import { uid } from './ids';
-import { hash, knownLink, parseVersionStudio, registerLink, versionStudioId } from './derived';
+import { hash, knownLink, LINK_PREFIX, parseVersionStudio, registerLink, versionStudioId } from './derived';
 import type { CadDocument, DocTab, DocumentLink, Feature, PartStudioTab } from './types';
 
 type Source = Pick<CadDocument, 'tabs' | 'units'>;
@@ -58,7 +58,7 @@ export function linkableStudios(src: Pick<CadDocument, 'tabs'>, forDoc: string):
 /** A new copy of Part Studio `tabId` of document `src` (with those it derives from), known at once as a source. */
 export function makeLink(src: Pick<CadDocument, 'id' | 'name' | 'tabs' | 'units'>, tabId: string, now = Date.now()): DocumentLink {
   const link: DocumentLink = {
-    id: uid('lk'),
+    id: uid(LINK_PREFIX),
     docId: src.id,
     docName: src.name,
     copied: now,

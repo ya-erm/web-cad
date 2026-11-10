@@ -6,7 +6,7 @@ import { FIELD_SPECS, keepRefs } from '../core/fieldSpecs';
 import { FEATURE_LABELS, collectVariables, makeEvalContext } from '../core/features';
 import { chosenLabel, configuredOf, configuredParams, inputName } from '../core/config';
 import { ConfigurationFields } from './ConfigurationFields';
-import { derivableStudios, derivedSourceKey, parseVersionStudio, sourceStudio, versionStudioId } from '../core/derived';
+import { derivableStudios, derivedSourceKey, isLinkId, parseVersionStudio, sourceStudio, versionStudioId } from '../core/derived';
 import { derivableVersions, snapshotStudios, versionDocument, type VersionedDocument } from '../store/versionSources';
 import { linkableStudios, linkOf, linkSourceId, makeLink } from '../core/links';
 import { linkState, otherDocuments, sourceDocument } from '../store/linkedSources';
@@ -510,7 +510,7 @@ function DerivedSourceField() {
                   ))}
                 </optgroup>
               )}
-              {versionId && !knownVersion && <option value={versionId}>{t('(deleted version)')}</option>}
+              {versionId && !knownVersion && <option value={versionId}>{isLinkId(versionId) ? t('(copy lost)') : t('(deleted version)')}</option>}
               {versioned.map((d) => (
                 <optgroup key={d.docId} label={d.docId === doc?.id ? t('Versions of this document') : d.name}>
                   {d.versions.map((v) => (

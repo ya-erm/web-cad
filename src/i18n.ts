@@ -346,6 +346,8 @@ const RU: Record<string, string> = {
   '(deleted version)': '(удалённая версия)',
   'The version has no Part Studio': 'В версии нет Part Studio',
   'The source version is not available: it was deleted or is in another browser': 'Исходная версия недоступна: её удалили или она в другом браузере',
+  'The copy of the source document is lost: choose the document again': 'Копия документа-источника потеряна: выберите документ заново',
+  '(copy lost)': '(копия потеряна)',
   'Other documents (current)': 'Другие документы (текущее состояние)',
   '(document deleted)': '(удалён)',
   'The document has no Part Studio to derive from': 'В документе нет Part Studio, из которой можно взять детали',

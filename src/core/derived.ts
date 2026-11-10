@@ -63,6 +63,10 @@ export function registerLinks(tabs: readonly DocTab[]) {
 /** A copy of another document by id, if known (`registerLinks`). */
 export const knownLink = (id: string) => links.get(id);
 
+/** The ids of copies of other documents begin so (`makeLink`), not those of versions: a lost copy is told apart. */
+export const LINK_PREFIX = 'lk';
+export const isLinkId = (id: string) => id.startsWith(LINK_PREFIX);
+
 /**
  * A Part Studio of a loaded version (its id: "tab@version"): its Derived features use the version's own Part
  * Studios (or the versions they name). The same object every time — a rebuild compares its inputs by identity.
@@ -208,7 +212,9 @@ export function prepareDerived(doc: Doc, studioId: string, features: Feature[], 
     const v = parseVersionStudio(tabIdOf(src));
     const error = !studioOf(doc, src)
       ? v && !snapshots.has(v.versionId)
-        ? 'version'
+        ? isLinkId(v.versionId)
+          ? 'copy'
+          : 'version'
         : 'missing'
       : tabIdOf(src) === studioId || derivesFrom(doc, src, studioId)
         ? 'cycle'

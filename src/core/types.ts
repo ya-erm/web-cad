@@ -701,7 +701,7 @@ export interface DerivedParams {
    */
   sourceKey?: string;
   sourceVersion?: string;
-  sourceError?: 'missing' | 'cycle' | 'version';
+  sourceError?: 'missing' | 'cycle' | 'version' | 'copy';
 }
 
 export interface HelixParams {

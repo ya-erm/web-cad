@@ -83,6 +83,7 @@ width: 700
 | **The selected parts and sketches no longer exist in the source Part Studio** | The same with sketches ticked: nothing of the chosen is left in the source. When only some sketches are gone — the warning **Some of the selected sketches no longer exist in the source Part Studio**. |
 | **Select parts or sketches to derive** | Every part is cleared and no sketch is ticked. |
 | **The source version is not available: it was deleted or is in another browser** | The source version was deleted, or the document is open where the other document's version is not. Choose another source. |
+| **The copy of the source document is lost: choose the document again** | The feature refers to a copy of another document that this document does not have. Edit the feature and choose the document in the **Source** field again — a new copy is made. |
 
 > **Limitation.** Editing in the context of an assembly is not supported. When a Part Studio of another document derives parts from versions itself, its copy keeps references to those versions, not their content: such parts build in the browser that has the versions.
 
