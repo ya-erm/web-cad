@@ -400,6 +400,7 @@ const RU: Record<string, string> = {
   'Rebuild': 'Перестроить',
   'Rebuilding…': 'Перестроение…',
   'Loading geometry kernel…': 'Загрузка геометрического ядра…',
+  'Building the model…': 'Построение модели…',
   // dialog fields
   New: 'Новая',
   Add: 'Добавить',

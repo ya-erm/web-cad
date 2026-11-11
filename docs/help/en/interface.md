@@ -72,4 +72,4 @@ The cursor shape shows what a click will do:
 
 ## Messages {#messages}
 
-Errors and hints appear at the bottom of the graphics area for a few seconds. While the geometry kernel is loading (the first time you open a document), the graphics area shows **Loading geometry kernel…**.
+Errors and hints appear at the bottom of the graphics area for a few seconds. While the geometry kernel is loading (the first time you open a document), the middle of the graphics area shows a spinner with **Loading geometry kernel…**, and while the model of the opened document or tab is being built for the first time — **Building the model…**: the graphics area is not empty, the model is on its way. A model that builds in a moment shows no spinner.

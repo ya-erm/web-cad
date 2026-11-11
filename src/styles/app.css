@@ -2063,16 +2063,46 @@ textarea {
   background: #b33a3a;
 }
 
+/* the kernel loading or the tab's first build: in the middle of the graphics area */
 .loading-overlay {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: end center;
-  padding-bottom: 24px;
-  background: rgba(255, 255, 255, 0.6);
+  place-items: center;
+  background: rgba(255, 255, 255, 0.45);
   z-index: 40;
   color: var(--text-2);
-  gap: 8px;
+  animation: loading-in 0.15s ease-out;
+}
+/* the build: the view and its buttons stay usable */
+.loading-overlay.building {
+  pointer-events: none;
+}
+.loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 180px;
+  padding: 18px 26px 16px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(30, 50, 80, 0.12);
+  font-size: 13px;
+}
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #d3dde8;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes loading-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .measure-panel {

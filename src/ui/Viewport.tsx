@@ -113,6 +113,19 @@ function SectionPanel({ s }: { s: SectionState }) {
 export function Viewport() {
   const ref = useRef<HTMLDivElement>(null);
   const kernelReady = useEditor((s) => s.kernelReady);
+  // the tab's first build (the document just opened, another tab): nothing to show yet — not an empty model
+  const firstBuild = useEditor((s) => !s.build && s.building);
+  // shown after a moment (a fast build does not blink it), counted from the build's start: not by a CSS delay,
+  // which would start only with the first frame — late on opening, while the 3D view is being set up
+  const [slowBuild, setSlowBuild] = useState(false);
+  useEffect(() => {
+    if (!firstBuild) return;
+    const id = setTimeout(() => setSlowBuild(true), 150);
+    return () => {
+      clearTimeout(id);
+      setSlowBuild(false);
+    };
+  }, [firstBuild]);
   const perspective = useEditor((s) => s.perspective);
   const section = useEditor((s) => s.section);
   const [menu, setMenu] = useState(false);
@@ -214,10 +227,12 @@ export function Viewport() {
         </div>
       </div>
       {section && <SectionPanel s={section} />}
-      {!kernelReady && (
-        <div className="loading-overlay">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div className="spinner" /> {t('Loading geometry kernel…')}
+      {(!kernelReady || (firstBuild && slowBuild)) && (
+        // one overlay for both: the kernel loaded, its text changes to the build without blinking
+        <div className={'loading-overlay' + (kernelReady ? ' building' : '')} role="status" aria-live="polite">
+          <div className="loading-card">
+            <div className="loading-spinner" />
+            {t(kernelReady ? 'Building the model…' : 'Loading geometry kernel…')}
           </div>
         </div>
       )}
