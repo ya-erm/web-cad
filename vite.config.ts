@@ -193,6 +193,8 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
         .then((res) => {
+          // the site has moved (e.g. to a custom domain): a followed redirect can't answer a navigation, send the browser there
+          if (res.redirected) return Response.redirect(res.url, 301);
           if (res.ok && res.type === 'basic') {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put('./index.html', copy));
