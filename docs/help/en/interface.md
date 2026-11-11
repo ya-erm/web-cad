@@ -32,6 +32,13 @@ While you create or edit a feature, its **dialog** is open in the top-left corne
 
 > **Note.** The screenshots in this help are taken in the Russian UI.
 
+## Left panel size {#left-panel}
+
+- **Width.** Drag the right edge of the panel with the lists to make it wider or narrower; the graphics area adjusts. Part Studios and [assemblies](assembly) share one width.
+- **List heights.** Drag the line between **Features** and **Parts** up to give the parts more room, or down to give it to the features. In an assembly, **Instances** and **Mates** share the height the same way.
+
+The edge and the line light up in blue when you can grab them. Double-click either to restore the usual size. The sizes are remembered in this browser.
+
 ## Settings {#settings}
 
 The **Settings** menu in the top bar of a document (on the documents page — only **Rotation** and **Language**):

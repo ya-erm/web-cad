@@ -406,7 +406,14 @@ export class Engine {
 
     this.bindEvents();
     this.resize();
-    const ro = new ResizeObserver(() => this.resize());
+    // drawn again before the browser paints: a new size clears the canvas, and waiting for the next frame would
+    // flash it empty on every step of dragging the left panel's edge or the window's
+    const ro = new ResizeObserver(() => {
+      if (this.disposed) return;
+      this.resize();
+      this.needsRender = false;
+      this.render();
+    });
     ro.observe(container);
     this.unsub.push(() => ro.disconnect());
 

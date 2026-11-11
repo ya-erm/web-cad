@@ -4,7 +4,7 @@ A part is a separate solid body in the Part Studio. Parts are created by feature
 
 ## Parts list {#parts-list}
 
-The **Parts** list is below the feature list. The header shows the number of parts.
+The **Parts** list is below the feature list. The header shows the number of parts. With many parts, drag the line between the lists up to give them more room (see [Left panel size](interface#left-panel)).
 
 - Click to select a part (click again to deselect it). For a single selected part, the [measure panel](measure) shows the volume, surface area, mass, and center of mass.
 - When you hover over a part, it is highlighted in the graphics area.

@@ -1095,12 +1095,77 @@ textarea {
   flex-direction: column;
   min-height: 0;
 }
-.panel-section.features {
-  flex: 1 1 60%;
+/* the two lists share the panel's height as the line between them was dragged (LeftPanel sets the shares) */
+.panel-section.features,
+.panel-section.instances {
+  flex: var(--split-top, 0.65) 1 0px;
 }
-.panel-section.parts {
-  flex: 0 1 35%;
+.panel-section.parts,
+.panel-section.mates {
+  flex: var(--split-bottom, 0.35) 1 0px;
   border-top: 1px solid var(--border);
+}
+/* the line between the lists: it takes no room, its 7 px grip lies over the border */
+.panel-splitter {
+  flex: none;
+  position: relative;
+  z-index: 5;
+  height: 7px;
+  margin: -3px 0 -4px;
+  cursor: row-resize;
+  touch-action: none;
+}
+/* the panel's right edge, half over the graphics area (dialogs there stand 8 px off it) */
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  z-index: 15;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+/* the edge being grabbed lights up: on hover after a moment, at once while dragged */
+.panel-splitter::after,
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.panel-splitter::after {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 2px;
+}
+.panel-resizer::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+}
+.panel-splitter:hover::after,
+.panel-resizer:hover::after {
+  opacity: 1;
+  transition-delay: 0.2s;
+}
+.panel-splitter.dragging::after,
+.panel-resizer.dragging::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+body.panel-resizing-x,
+body.panel-resizing-x * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.panel-resizing-y,
+body.panel-resizing-y * {
+  cursor: row-resize !important;
+  user-select: none;
 }
 .panel-header {
   display: flex;
@@ -3522,14 +3587,7 @@ textarea {
   }
 }
 
-/* Assemblies */
-.panel-section.instances {
-  flex: 1 1 60%;
-}
-.panel-section.mates {
-  flex: 0 1 40%;
-  border-top: 1px solid var(--border);
-}
+/* Assemblies (the instances and mates share the left panel's height: see .panel-section.features) */
 .mate-type {
   margin-left: auto;
   color: var(--text-3);

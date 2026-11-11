@@ -17,6 +17,7 @@ import { getEngine } from '../viewport/engineRef';
 import { Toolbar } from './Toolbar';
 import { FeatureTree } from './FeatureTree';
 import { PartsList } from './PartsList';
+import { LeftPanel } from './LeftPanel';
 import { FeatureDialog } from './FeatureDialog';
 import { SketchPatternPanel } from './SketchPatternPanel';
 import { SketchTransformPanel } from './SketchTransformPanel';
@@ -382,13 +383,21 @@ export function Editor({ onBack }: { onBack: () => void }) {
         {/* a part that fails to draw shows a card in its place; the model and the rest keep working */}
         {tab.type === 'assembly' ? (
           <>
-            <div className="left-panel">
-              <ErrorBoundary scope="panel" name="Assembly lists">
-                <InstanceList />
-                <MateList />
-                <ExplodedViewList />
-              </ErrorBoundary>
-            </div>
+            <LeftPanel
+              key="assembly"
+              kind="assembly"
+              top={
+                <ErrorBoundary scope="panel" name="Instance list">
+                  <InstanceList />
+                </ErrorBoundary>
+              }
+              bottom={
+                <ErrorBoundary scope="panel" name="Assembly lists">
+                  <MateList />
+                  <ExplodedViewList />
+                </ErrorBoundary>
+              }
+            />
             <div className="graphics">
               <ErrorBoundary scope="panel" name="Graphics area">
                 <Viewport />
@@ -407,14 +416,20 @@ export function Editor({ onBack }: { onBack: () => void }) {
           </>
         ) : tab.type === 'partStudio' ? (
           <>
-            <div className="left-panel">
-              <ErrorBoundary scope="panel" name="Feature list">
-                <FeatureTree />
-              </ErrorBoundary>
-              <ErrorBoundary scope="panel" name="Parts list">
-                <PartsList />
-              </ErrorBoundary>
-            </div>
+            <LeftPanel
+              key="partStudio"
+              kind="partStudio"
+              top={
+                <ErrorBoundary scope="panel" name="Feature list">
+                  <FeatureTree />
+                </ErrorBoundary>
+              }
+              bottom={
+                <ErrorBoundary scope="panel" name="Parts list">
+                  <PartsList />
+                </ErrorBoundary>
+              }
+            />
             <div className="graphics">
               <ErrorBoundary scope="panel" name="Graphics area">
                 <Viewport />

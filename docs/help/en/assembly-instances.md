@@ -17,7 +17,7 @@ width: 600
 
 ## Instances {#instances}
 
-The **Instances** list on the left shows all instances; their names are the part name with a number: "Part 1 <1>", "Part 1 <2>".
+The **Instances** list on the left shows all instances; their names are the part name with a number: "Part 1 <1>", "Part 1 <2>". To give the list more room, drag the line between it and **Mates**, or the panel's right edge — see [Left panel size](interface#left-panel).
 
 - **Select:** click a row in the list or the part in the graphics area; `Shift` adds to the selection.
 - **Rename:** double-click the name or choose **Rename** in the menu (right-click).
