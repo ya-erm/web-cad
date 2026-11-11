@@ -75,6 +75,21 @@ In Chrome and Edge, WebCAD can work right in a folder on your computer: its docu
 
 You can add several folders: they are listed at the left under **Folders on this computer**, and **Add folder…** adds one more. **Remove folder from the list** on a folder's page turns it off — the files and the documents stay, but are no longer linked.
 
+### Subfolders {#subfolders}
+
+A folder can have subfolders nested to any depth — WebCAD finds `*.webcad.json` files at every level (up to 16). Hidden folders (`.git`, `.vscode` and the like) and `node_modules` are not looked into.
+
+- At the left, each folder shows its tree: an arrow opens and closes a branch, a click on a name opens that subfolder. The open branches are remembered.
+- An open subfolder shows the way to it at the top (**Folder › Parts › Fasteners**): a click on any step goes back to that level. Below are the subfolders as tiles with the number of documents in each (nested ones included) and the cards of the documents of this level. A click on a tile opens the subfolder.
+- **New folder** makes a subfolder at the current level and lets you type its name right away. **New document in the folder** creates a document in the subfolder that is open.
+- A subfolder tile's menu (**⋯** or a right click) has **Open**, **Rename** and **Move to folder…**. A subfolder is renamed and moved with everything in it; its documents stay linked to their files.
+- **Move to folder…** in the menu of a file card or a subfolder tile opens a window with the tree: choose a place and click **Move** (or double-click the place). A file can also go into another added folder, a subfolder only within its own folder. The place where the file or subfolder already is, and the subfolder itself with what is inside it, cannot be chosen.
+- You can also just drag a file card or a subfolder tile onto a subfolder tile, onto a step of the way at the top, or onto a branch of the tree at the left — the place that takes it is highlighted. A card of a browser document in **Documents** can be dragged onto a branch of the tree too: the document is saved into that subfolder as a file (one that is a file of a folder already — its file moves there).
+- **Show in the folder** in the card menu of a linked document in **Documents** opens the subfolder with its file.
+- Coming back from the editor, the documents page opens at the same subfolder.
+
+Where the browser cannot move folders on the disk, a subfolder is moved by copying everything in it and removing the old one; if the copy fails, the incomplete copy is removed and the original subfolder stays where it was.
+
 How it works:
 
 - a document opened from the folder is linked to its file: every autosave writes the file too (the file name is shown next to **Saved**), and its card in **Documents** has a folder icon;
@@ -84,4 +99,4 @@ How it works:
 - a file with the same document under another name (a copy) opens as a separate document;
 - the folders are remembered. After the browser restarts it asks for permission again (such a folder has a lock icon at the left): click **Allow access** on the folder page or **Allow writing to the folder** in the open document — the changes made meanwhile are written to the file.
 
-> **Limitation.** Deleting or trashing a document in the browser does not touch its file. New files added to the folder by other programs appear after **Refresh** (it reads the list of files again). Folders are not available in Firefox and Safari — use project **Export** and **Import project**.
+> **Limitation.** Deleting or trashing a document in the browser does not touch its file; WebCAD does not delete files or subfolders — use Explorer or Finder for that. New files and subfolders added by other programs appear after **Refresh** (it reads the folder again with all its subfolders). Folders are not available in Firefox and Safari — use project **Export** and **Import project**.

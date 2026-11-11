@@ -12,6 +12,7 @@ import { requestRebuild, startRebuildLoop } from '../store/rebuild';
 import { restoreDraft, startDraftPersistence } from '../store/draftPersistence';
 import { saveThumbnail } from '../store/persistence';
 import { allowFolder, syncThumbnail, useFolder } from '../store/folderStore';
+import { baseOf } from '../store/localFolder';
 import { getEngine } from '../viewport/engineRef';
 import { Toolbar } from './Toolbar';
 import { FeatureTree } from './FeatureTree';
@@ -47,7 +48,7 @@ function FolderState({ docId }: { docId: string }) {
     </button>
   ) : (
     <span className="save-state folder-file" title={`${t('A file of the folder on this computer')}: ${folder.dir.name}/${link.name}`}>
-      <Icon name="folder" size={13} /> {link.name}
+      <Icon name="folder" size={13} /> {baseOf(link.name)}
     </span>
   );
 }

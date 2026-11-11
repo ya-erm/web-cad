@@ -1,6 +1,7 @@
-// Documents in folders on the computer (Chrome / Edge): a folder's project files open as documents linked to their
-// files; every save of a linked document writes its file too. The file is the document's main copy — opened from
-// the folder, the newer of the file and the copy in the browser wins. Several folders can be added.
+// Documents in folders on the computer (Chrome / Edge): a folder's project files — at every level of its
+// subfolders — open as documents linked to their files; every save of a linked document writes its file too. The
+// file is the document's main copy — opened from the folder, the newer of the file and the copy in the browser
+// wins. Several folders can be added; subfolders are made, renamed and moved, files are moved between them.
 
 import { create } from 'zustand';
 import type { CadDocument, ProjectVersion } from '../core/types';
@@ -12,19 +13,27 @@ import { useEditor } from './editorStore';
 import { getEngine } from '../viewport/engineRef';
 import { t } from '../i18n';
 import {
+  baseOf,
+  dirOf,
   fileStamp,
   folderAccess,
   folderLinks,
   folderSupported,
   forgetFolder,
   freeFileName,
+  freeFolderName,
+  joinPath,
   linkFile,
   listFolder,
+  makeSubfolder,
+  moveFolderFile,
+  movedPath,
+  moveSubfolder,
   pickFolder,
   readFolderFile,
-  renameFolderFile,
   sameStamp,
   savedFolders,
+  within,
   writeFolderFile,
   type FileLink,
   type FileStamp,
@@ -36,8 +45,19 @@ export interface Folder {
   dir: FileSystemDirectoryHandle;
   /** Whether it may be read and written now (after a browser restart it has to be allowed again). */
   access: boolean;
+  /** Its project files at every level (`name` — the path in the folder). */
   files: FolderFile[];
+  /** Its subfolders at every level (paths), a parent before its children. */
+  dirs: string[];
 }
+
+/** The names of what is right in a subfolder of a folder: its project files and subfolders. */
+export function namesIn(f: Pick<Folder, 'files' | 'dirs'>, dir: string): string[] {
+  return [...f.files.map((x) => x.name), ...f.dirs].flatMap((name) => (dirOf(name) === dir ? [baseOf(name)] : []));
+}
+
+/** The subfolders right inside a subfolder (paths). */
+export const subfoldersOf = (f: Pick<Folder, 'dirs'>, dir: string) => f.dirs.filter((d) => dirOf(d) === dir);
 
 interface FolderState {
   folders: Folder[];
@@ -45,9 +65,11 @@ interface FolderState {
   links: Record<string, FileLink>;
   /** The document whose last write to its file failed (no access, the file is busy…). */
   writeError: string | null;
+  /** The folders added before are in `folders` (until then a folder of the list may still be missing). */
+  ready: boolean;
 }
 
-export const useFolder = create<FolderState>(() => ({ folders: [], links: {}, writeError: null }));
+export const useFolder = create<FolderState>(() => ({ folders: [], links: {}, writeError: null, ready: false }));
 
 const folderOf = (id: string) => useFolder.getState().folders.find((f) => f.id === id);
 const setFolder = (id: string, patch: Partial<Folder>) => useFolder.setState((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, ...patch } : f)) }));
@@ -96,25 +118,33 @@ export async function exportProjectText(doc: CadDocument): Promise<string> {
   return fileText(doc);
 }
 
-/** The pictures of a folder's files by `name|modified|size` (a file read again only when it changed). */
+/** The pictures of a folder's files by `path|modified|size` (a file read again only when it changed). */
 const fileThumbs = new Map<string, string | null>();
+
+const thumbKey = (f: FolderFile) => `${f.name}|${f.modified}|${f.size}`;
+
+/** A folder's files with the pictures read before (those not read yet — without). */
+const withKnownThumbnails = (files: FolderFile[]) =>
+  files.map((f) => {
+    const thumbnail = fileThumbs.get(thumbKey(f));
+    return thumbnail ? { ...f, thumbnail } : f;
+  });
 
 /** A folder's files with their pictures (read from the files: their documents may not be in the browser yet). */
 async function withThumbnails(dir: FileSystemDirectoryHandle, files: FolderFile[]): Promise<FolderFile[]> {
-  return Promise.all(
-    files.map(async (f) => {
-      const key = `${f.name}|${f.modified}|${f.size}`;
-      if (!fileThumbs.has(key)) {
-        try {
-          fileThumbs.set(key, readProject(JSON.parse(await readFolderFile(dir, f.name)), f.title).thumbnail ?? null);
-        } catch {
-          fileThumbs.set(key, null);
-        }
+  // a few files at a time: a folder with many subfolders is not read all at once
+  const queue = files.filter((f) => !fileThumbs.has(thumbKey(f)));
+  const read = async () => {
+    for (let f = queue.shift(); f; f = queue.shift()) {
+      try {
+        fileThumbs.set(thumbKey(f), readProject(JSON.parse(await readFolderFile(dir, f.name)), f.title).thumbnail ?? null);
+      } catch {
+        fileThumbs.set(thumbKey(f), null);
       }
-      const thumbnail = fileThumbs.get(key);
-      return thumbnail ? { ...f, thumbnail } : f;
-    }),
-  );
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, read));
+  return withKnownThumbnails(files);
 }
 
 /** A document from the text of a project file (without its versions); throws on anything else. */
@@ -175,16 +205,28 @@ export async function checkLinked() {
   }
 }
 
-/** Read a folder's file list again. */
+/** The last reading of each folder's list: an earlier one that ends later does not put back what it read. */
+const readings = new Map<string, number>();
+
+/** Read a folder's files and subfolders again: the list at once, then the pictures of the files not read before. */
 export async function refreshFolder(id: string) {
   const f = folderOf(id);
   if (!f) return;
-  if (!f.access) return setFolder(id, { files: [] });
+  if (!f.access) return setFolder(id, { files: [], dirs: [] });
+  const reading = (readings.get(id) ?? 0) + 1;
+  readings.set(id, reading);
+  const latest = () => readings.get(id) === reading;
   try {
-    setFolder(id, { files: await withThumbnails(f.dir, await listFolder(f.dir)) });
+    const { files, dirs } = await listFolder(f.dir);
+    if (!latest()) return;
+    setFolder(id, { files: withKnownThumbnails(files), dirs });
+    if (files.some((x) => !fileThumbs.has(thumbKey(x)))) {
+      const pictured = await withThumbnails(f.dir, files);
+      if (latest()) setFolder(id, { files: pictured });
+    }
   } catch {
     // the folder was moved or deleted
-    setFolder(id, { access: false, files: [] });
+    if (latest()) setFolder(id, { access: false, files: [], dirs: [] });
   }
 }
 
@@ -195,8 +237,8 @@ export async function startFolder() {
   if (started || !folderSupported()) return;
   started = true;
   const saved = await savedFolders();
-  const folders = await Promise.all(saved.map(async ({ id, dir }) => ({ id, dir, access: await folderAccess(dir).catch(() => false), files: [] })));
-  useFolder.setState({ folders, links: await folderLinks() });
+  const folders = await Promise.all(saved.map(async ({ id, dir }) => ({ id, dir, access: await folderAccess(dir).catch(() => false), files: [], dirs: [] })));
+  useFolder.setState({ folders, links: await folderLinks(), ready: true });
   await Promise.all(folders.map((f) => refreshFolder(f.id)));
   // after every save of the open document in the browser: its file too
   useDoc.subscribe((s, prev) => {
@@ -219,7 +261,7 @@ export async function addFolder(): Promise<string | null> {
   if (!picked) return null;
   const known = folderOf(picked.id);
   if (known) setFolder(picked.id, { dir: picked.dir, access: true });
-  else useFolder.setState((s) => ({ folders: [...s.folders, { ...picked, access: true, files: [] }] }));
+  else useFolder.setState((s) => ({ folders: [...s.folders, { ...picked, access: true, files: [], dirs: [] }] }));
   await refreshFolder(picked.id);
   return picked.id;
 }
@@ -258,14 +300,17 @@ export async function writeLinked(doc: CadDocument) {
     // that file is kept beside this one, not overwritten
     const was = stamps.get(doc.id);
     const now = was && (await fileStamp(f.dir, l.name).catch(() => undefined));
+    // beside its file: in the same subfolder
+    const dir = dirOf(l.name);
     let kept = '';
     if (was && now && !sameStamp(was, now)) {
-      kept = freeFileName(`${l.title ?? doc.name} (${t('changed outside')})`, f.files.map((x) => x.name));
-      await writeFolderFile(f.dir, kept, await readFolderFile(f.dir, l.name));
+      kept = freeFileName(`${l.title ?? doc.name} (${t('changed outside')})`, namesIn(f, dir));
+      await writeFolderFile(f.dir, joinPath(dir, kept), await readFolderFile(f.dir, l.name));
     }
     let name = l.name;
     if (l.title !== doc.name) {
-      if (l.title !== undefined) name = await renameFolderFile(f.dir, l.name, freeFileName(doc.name, f.files.map((x) => x.name).filter((n) => n !== l.name)));
+      if (l.title !== undefined)
+        name = await moveFolderFile(f.dir, l.name, joinPath(dir, freeFileName(doc.name, namesIn(f, dir).filter((n) => n !== baseOf(l.name)))));
       await link(doc.id, { ...l, name, title: doc.name });
     }
     const thumbnail = await db.getThumbnail(doc.id);
@@ -303,6 +348,12 @@ async function link(docId: string, l: FileLink) {
   useFolder.setState((s) => ({ links: { ...s.links, [docId]: l } }));
 }
 
+/** The document linked to a file of a folder (by its path), if there is one. */
+const linkedTo = (folderId: string, name: string) => {
+  const { links } = useFolder.getState();
+  return Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
+};
+
 /**
  * Rename a project file of a folder: the file and the document in it get the new name (its document in the
  * browser too). Its content comes from the newer of the file and the browser's copy.
@@ -311,13 +362,13 @@ export async function renameFolderDoc(folderId: string, name: string, title: str
   const f = folderOf(folderId);
   title = title.trim();
   if (!f?.access || !title) return;
-  const { links } = useFolder.getState();
-  const docId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
+  const docId = linkedTo(folderId, name);
   const { doc: fromFile, versions, thumbnail } = readProject(JSON.parse(await readFolderFile(f.dir, name)), title);
   const local = docId ? await db.loadDocument(docId) : undefined;
   const file = f.files.find((x) => x.name === name);
   const doc = { ...(local && file && local.modified > file.modified ? local : fromFile), name: title };
-  const to = await renameFolderFile(f.dir, name, freeFileName(title, f.files.map((x) => x.name).filter((n) => n !== name)));
+  const dir = dirOf(name);
+  const to = await moveFolderFile(f.dir, name, joinPath(dir, freeFileName(title, namesIn(f, dir).filter((n) => n !== baseOf(name)))));
   // its versions and picture: the browser's (with the file's versions), or the file's own when it is not open here
   if (docId) await importVersions(docId, versions, true);
   await writeFolderFile(f.dir, to, docId ? await fileText({ ...doc, id: docId }) : projectText(doc, versions, thumbnail));
@@ -338,8 +389,8 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   if (!f) throw new Error('No folder');
   const { links } = useFolder.getState();
   const file = f.files.find((x) => x.name === name);
-  const { doc: fromFile, versions, thumbnail } = readProject(JSON.parse(await readFolderFile(f.dir, name)), name.replace(/\.webcad\.json$/i, ''));
-  const linkedId = Object.keys(links).find((id) => links[id].folder === folderId && links[id].name === name);
+  const { doc: fromFile, versions, thumbnail } = readProject(JSON.parse(await readFolderFile(f.dir, name)), baseOf(name).replace(/\.webcad\.json$/i, ''));
+  const linkedId = linkedTo(folderId, name);
   const local = linkedId ? await db.loadDocument(linkedId) : undefined;
   let doc: CadDocument;
   if (local && file && local.modified > file.modified + 1000) {
@@ -366,12 +417,15 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   return doc.id;
 }
 
-/** Save a browser document into a folder as a new file and link them. The file name, or null. */
-export async function saveToFolder(docId: string, folderId: string): Promise<string | null> {
+/**
+ * Save a browser document into a folder (at its top, or into the subfolder `dir`) as a new file and link them. The
+ * file's path, or null.
+ */
+export async function saveToFolder(docId: string, folderId: string, dir = ''): Promise<string | null> {
   const f = folderOf(folderId);
   const doc = await db.loadDocument(docId);
   if (!f?.access || !doc) return null;
-  const name = freeFileName(doc.name, f.files.map((x) => x.name));
+  const name = joinPath(dir, freeFileName(doc.name, namesIn(f, dir)));
   await writeFolderFile(f.dir, name, await fileText(doc));
   await link(doc.id, { folder: folderId, name, title: doc.name });
   await remember(doc.id, f.dir, name);
@@ -379,8 +433,67 @@ export async function saveToFolder(docId: string, folderId: string): Promise<str
   return name;
 }
 
-/** A new document as a file of a folder. Returns its id. */
-export async function createInFolder(folderId: string, name: string): Promise<string | null> {
+/** A new document as a file of a folder (of its subfolder `dir`). Returns its id. */
+export async function createInFolder(folderId: string, name: string, dir = ''): Promise<string | null> {
   const id = await useDoc.getState().createDocument(name);
-  return (await saveToFolder(id, folderId)) ? id : null;
+  return (await saveToFolder(id, folderId, dir)) ? id : null;
+}
+
+/** A new subfolder in the subfolder `parent` of a folder ("New folder", "New folder (2)"… when taken). Its path. */
+export async function createSubfolder(folderId: string, parent: string, name: string): Promise<string | null> {
+  const f = folderOf(folderId);
+  if (!f?.access) return null;
+  const path = joinPath(parent, freeFolderName(name, namesIn(f, parent), t('New folder')));
+  await makeSubfolder(f.dir, path);
+  await refreshFolder(folderId);
+  return path;
+}
+
+/** The documents linked to the files under `from` (a file or a subfolder of a folder) now under `to`: their links. */
+async function relink(folderId: string, from: string, to: string, toFolderId = folderId) {
+  const g = folderOf(toFolderId);
+  const { links } = useFolder.getState();
+  for (const [id, l] of Object.entries(links))
+    if (l.folder === folderId && within(l.name, from)) {
+      const name = movedPath(l.name, from, to);
+      await link(id, { ...l, folder: toFolderId, name });
+      // its stamp anew: a copy (where the browser cannot move files) is a file of another time, not another program's change
+      if (g) await remember(id, g.dir, name);
+    }
+}
+
+/**
+ * Move a subfolder of a folder (with everything in it) into another subfolder of it (`toDir`, "" — the top) and,
+ * with `name`, rename it. Its documents stay linked to their files. The path it has now.
+ */
+export async function moveFolderDir(folderId: string, path: string, toDir: string, name = baseOf(path)): Promise<string> {
+  const f = folderOf(folderId);
+  name = name.trim();
+  if (!f?.access || !path || !name) return path;
+  if (within(toDir, path)) throw new Error(t('A folder cannot be moved into itself'));
+  if (toDir === dirOf(path) && name === baseOf(path)) return path;
+  const sameName = (n: string) => n.toLowerCase() === baseOf(path).toLowerCase();
+  // only the letter case of its name changes: not a name taken by itself
+  const others = namesIn(f, toDir).filter((n) => !(toDir === dirOf(path) && sameName(n)));
+  const to = await moveSubfolder(f.dir, path, joinPath(toDir, freeFolderName(name, others, t('New folder'))));
+  await relink(folderId, path, to);
+  await refreshFolder(folderId);
+  return to;
+}
+
+/**
+ * Move a project file of a folder into a subfolder (`toDir`, "" — the top) of this folder or of another one
+ * (`toFolderId`); a name taken there gets a number. Its document stays linked to it. The path it has now.
+ */
+export async function moveFolderDoc(folderId: string, name: string, toFolderId: string, toDir: string): Promise<string> {
+  const f = folderOf(folderId);
+  const g = folderOf(toFolderId);
+  if (!f?.access || !g?.access) return name;
+  if (toFolderId === folderId && dirOf(name) === toDir) return name;
+  const file = f.files.find((x) => x.name === name);
+  const to = await moveFolderFile(f.dir, name, joinPath(toDir, freeFileName(file?.title ?? baseOf(name).replace(/\.webcad\.json$/i, ''), namesIn(g, toDir))), g.dir);
+  await relink(folderId, name, to, toFolderId);
+  await refreshFolder(folderId);
+  if (toFolderId !== folderId) await refreshFolder(toFolderId);
+  return to;
 }

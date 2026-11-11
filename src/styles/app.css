@@ -222,6 +222,117 @@ textarea {
   font-weight: 600;
   color: var(--text);
 }
+/* the way to the subfolder shown: the folder › subfolder › … (each one opens it and takes what is dropped on it) */
+.folder-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+.folder-crumb {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-crumb:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.folder-crumb.current {
+  font-weight: 600;
+  color: var(--text);
+}
+/* subfolders: a row of small cards above the documents */
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.doc-card.folder-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  min-height: 52px;
+}
+.folder-card .doc-meta {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-top: none;
+}
+.folder-card .doc-actions {
+  top: 50%;
+  transform: translateY(-50%);
+}
+/* a subfolder (a card, a step of the way, a branch of the side list) that takes what is dragged over it */
+.drop-over,
+.doc-card.drop-over,
+.docs-nav-item.drop-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+/* the folders' tree in the side list */
+.docs-nav-item.folder-nav {
+  gap: 6px;
+}
+.folder-nav .tree-toggle {
+  width: 14px;
+  margin-right: 0;
+  cursor: pointer;
+}
+/* "Move to folder": every folder and subfolder to choose from */
+.move-what {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.move-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+.move-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.move-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+.move-row.on {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.move-row:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
 .folder-hint {
   max-width: 520px;
   margin: 0 auto;
