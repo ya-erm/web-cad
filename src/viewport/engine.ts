@@ -14,7 +14,7 @@ import { edgeGeometry, type WorldGeom } from '../sketch/useGeometry';
 import type { BuildResult, PartMesh, SketchResult, ThreadResult } from '../kernel/protocol';
 import { edgeSig, faceSig, vertexSig } from '../kernel/sigs';
 import { useEditor, refKey, sameRef, type EditorState } from '../store/editorStore';
-import { activeAssembly, activeStudio, activeTab, useDoc } from '../store/docStore';
+import { activeAssembly, activeStudio, activeTab, hiddenIn, useDoc } from '../store/docStore';
 import { assemblyDragEnd, assemblyDragMove, assemblyDragStart, dragInstance } from '../assembly/drag';
 import { mateDialogOpen, selectedInstances, selectedUnits } from '../assembly/AssemblyUI';
 import { angleAbout, closestOnAxis, placedTriad, rayPlane, TRIAD, TRIAD_AXES, triadStep, wrapAngle, type TriadFrame, type TriadHandle } from '../assembly/triad';
@@ -446,9 +446,9 @@ export class Engine {
         }
       }),
       useDoc.subscribe((s, p) => {
-        const a = activeStudio(s.doc);
-        const b = activeStudio(p.doc);
-        if (a?.hidden !== b?.hidden || a?.id !== b?.id) this.syncBuild();
+        const a = activeTab(s.doc);
+        const b = activeTab(p.doc);
+        if (hiddenIn(a) !== hiddenIn(b) || a?.id !== b?.id) this.syncBuild();
       }),
     );
     this.syncBuild();
@@ -659,7 +659,8 @@ export class Engine {
     const ed = useEditor.getState();
     const build = ed.build;
     const studio = activeStudio(useDoc.getState().doc);
-    const hidden = new Set(studio?.hidden ?? []);
+    // (an assembly: its default geometry — the planes until shown)
+    const hidden = new Set(hiddenIn(activeTab(useDoc.getState().doc)));
     this.registry.clear();
     // origin keeps id 1
     this.registry.alloc({ t: 'origin', priority: PRIORITY.origin, radius: 7 });

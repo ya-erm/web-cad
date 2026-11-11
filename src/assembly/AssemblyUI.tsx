@@ -5,8 +5,8 @@ import { create } from 'zustand';
 import { ConfigurationFields } from '../ui/ConfigurationFields';
 import type { AssemblyInstance, AssemblyTab, CadDocument, PartStudioTab, SelRef, Vec3 } from '../core/types';
 import type { PartMesh } from '../kernel/protocol';
-import { activeAssembly, useDoc, withAssembly } from '../store/docStore';
-import { useEditor } from '../store/editorStore';
+import { activeAssembly, hiddenIn, useDoc, withAssembly } from '../store/docStore';
+import { sameRef, useEditor } from '../store/editorStore';
 import { uid } from '../core/ids';
 import { LENGTH_FACTOR, formatNumber } from '../core/expr';
 import { Icon } from '../ui/icons';
@@ -257,6 +257,71 @@ function SubRows({ sub, path, depth, acting, open, toggle }: { sub: AssemblyTab;
   );
 }
 
+/** The assembly's origin or a default plane shown / hidden in the graphics area. */
+function toggleDefaultGeometry(id: string) {
+  useDoc.getState().update(
+    (d) =>
+      withAssembly(d, (a) => {
+        const h = new Set(hiddenIn(a));
+        if (!h.delete(id)) h.add(id);
+        a.hidden = [...h];
+      }),
+    { undoable: false },
+  );
+}
+
+const DEFAULT_GEOMETRY = [
+  ['origin', 'Origin', 'origin'],
+  ['top', 'Top', 'planeItem'],
+  ['front', 'Front', 'planeItem'],
+  ['right', 'Right', 'planeItem'],
+] as const;
+
+/** The assembly's origin and default planes, with their eyes: the planes are hidden until shown. */
+function DefaultGeometry({ asm }: { asm: AssemblyTab }) {
+  const [open, setOpen] = useState(false);
+  const selection = useEditor((s) => s.selection);
+  const hidden = new Set(hiddenIn(asm));
+  const ed = useEditor.getState;
+  return (
+    <>
+      <div className="tree-group" onClick={() => setOpen(!open)}>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} /> {t('Default geometry')}
+      </div>
+      {open &&
+        DEFAULT_GEOMETRY.map(([id, label, icon]) => {
+          const ref: SelRef = id === 'origin' ? { kind: 'origin' } : { kind: 'plane', planeId: id };
+          const off = hidden.has(id);
+          return (
+            <div
+              key={id}
+              className={'tree-item' + (off ? ' hidden-item' : '') + (selection.some((r) => sameRef(r, ref)) ? ' selected' : '')}
+              style={{ paddingLeft: 22 }}
+              onClick={() => ed().select(ref)}
+              onMouseEnter={() => ed().setHover(ref)}
+              onMouseLeave={() => ed().setHover(null)}
+            >
+              <span className="tree-icon">
+                <Icon name={icon} size={16} />
+              </span>
+              <span className="tree-name">{t(label)}</span>
+              <span
+                className={'eye' + (off ? ' off' : '')}
+                title={off ? t('Show') : t('Hide')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleDefaultGeometry(id);
+                }}
+              >
+                <Icon name={off ? 'eyeOff' : 'eye'} size={14} />
+              </span>
+            </div>
+          );
+        })}
+    </>
+  );
+}
+
 export function InstanceList() {
   const doc = useDoc((s) => s.doc);
   const asm = activeAssembly(doc);
@@ -329,6 +394,7 @@ export function InstanceList() {
         {t('Instances')} <span className="count">({asm.instances.length})</span>
       </div>
       <div className="panel-body">
+        <DefaultGeometry asm={asm} />
         {!asm.instances.length && <div className="panel-empty">{t('Insert parts from a Part Studio with the Insert button.')}</div>}
         {asm.instances.map((inst) => {
           const ref = { kind: 'part' as const, partId: inst.id };

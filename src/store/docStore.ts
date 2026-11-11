@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
-import type { AssemblyTab, CadDocument, DocumentSummary, DrawingTab, Feature, PartStudioTab } from '../core/types';
+import type { AssemblyTab, CadDocument, DocTab, DocumentSummary, DrawingTab, Feature, PartStudioTab } from '../core/types';
 import { docId, uid } from '../core/ids';
 import { syncLinks } from '../core/links';
 import * as db from './persistence';
@@ -287,6 +287,20 @@ export function studioById(doc: CadDocument | null, id: string): PartStudioTab |
 export function activeAssembly(doc: CadDocument | null): AssemblyTab | null {
   const t = activeTab(doc);
   return t && t.type === 'assembly' ? t : null;
+}
+
+/** An assembly's default planes are hidden until shown (only its origin is seen): the parts are what matters there. */
+const ASSEMBLY_HIDDEN: readonly string[] = ['top', 'front', 'right'];
+const NONE_HIDDEN: readonly string[] = [];
+
+/**
+ * What a tab hides in the graphics area (the same array while it does not change): a Part Studio — its default
+ * geometry and features hidden by their eyes, an assembly — its default geometry.
+ */
+export function hiddenIn(tab: DocTab | null | undefined): readonly string[] {
+  if (tab?.type === 'partStudio') return tab.hidden ?? NONE_HIDDEN;
+  if (tab?.type === 'assembly') return tab.hidden ?? ASSEMBLY_HIDDEN;
+  return NONE_HIDDEN;
 }
 
 /** Mutate the active assembly inside an update(). */

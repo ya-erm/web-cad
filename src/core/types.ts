@@ -1093,6 +1093,8 @@ export interface AssemblyTab {
   groups?: AssemblyGroup[];
   relations?: MateRelation[];
   explodedViews?: ExplodedView[];
+  /** Default geometry (`origin`, `top`, `front`, `right`) hidden in the graphics area; not set: the planes. */
+  hidden?: string[];
 }
 
 /** An exploded view (Onshape): steps that move instances apart, shown without changing the assembly. */

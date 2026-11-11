@@ -25,6 +25,8 @@ The **Instances** list on the left shows all instances; their names are the part
 - **Edit source Part Studio:** the menu item switches to the tab where the part is built.
 - **Delete:** the trash button in the toolbar, the `Del` key or the menu item.
 
+At the top of the list, the **Default geometry** group (collapsed; click its header to open it) holds the assembly's **Origin** and its planes **Top**, **Front**, **Right**. In an assembly the planes are hidden at first — only the origin is shown, so they do not get in the way of the parts; the eye in a row shows or hides it in the graphics area (the origin too). The assembly keeps this choice. The planes and the origin are only references to look at: mates are made between the instances' faces, edges and connectors.
+
 If the part was deleted from its Part Studio (or the Part Studio itself was deleted), its instance stays in the list with a warning icon and is not shown.
 
 ## Instance position {#position}
