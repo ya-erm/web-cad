@@ -271,29 +271,43 @@ textarea {
   font-weight: 600;
   color: var(--text);
 }
-/* subfolders: a row of small cards above the documents */
+/* subfolders: cards above the documents, with the pictures of what is in them */
 .folder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px;
+  gap: 16px;
   margin-bottom: 16px;
 }
-.doc-card.folder-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  min-height: 52px;
+.folder-card .doc-name svg {
+  vertical-align: -2px;
+  color: var(--text-2);
 }
-.folder-card .doc-meta {
-  flex: 1;
+/* two to four documents: a 2 × 2 grid; more — three and "+N" */
+.doc-thumb.folder-mosaic {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  place-items: stretch;
+  gap: 3px;
+  padding: 3px;
+}
+.folder-tile {
   min-width: 0;
-  padding: 0;
-  border-top: none;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.6);
 }
-.folder-card .doc-actions {
-  top: 50%;
-  transform: translateY(-50%);
+.folder-mosaic .folder-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.folder-tile.folder-more {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-2);
 }
 /* a subfolder (a card, a step of the way, a branch of the side list) that takes what is dragged over it */
 .drop-over,

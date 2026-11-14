@@ -20,6 +20,7 @@ import {
 } from '../store/folderStore';
 import { copiedVersionIds, importVersions, withCopiedVersions } from '../store/versions';
 import { baseOf, dirOf, folderSupported, within, type FileLink } from '../store/localFolder';
+import { folderPreview } from './folderPreview';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
 import { Icon } from './icons';
 import { ContextMenu } from './Overlays';
@@ -332,10 +333,11 @@ function FolderView({
       const p = await createSubfolder(folderId, path, t('New folder'));
       if (p) setRenaming(`dir:${p}`);
     });
-  // the picture of its document in the browser, else the one the file keeps (a file not opened here yet)
+  // the picture of its document in the browser, else the one the file keeps (a file not opened here yet); of any
+  // level (a subfolder's card shows its documents)
   const thumb = (name: string) => {
     const id = Object.keys(links).find((k) => links[k].folder === folderId && links[k].name === name);
-    return (id ? docs.find((d) => d.id === id)?.thumbnail : undefined) ?? files.find((f) => f.name === name)?.thumbnail;
+    return (id ? docs.find((d) => d.id === id)?.thumbnail : undefined) ?? folder.files.find((f) => f.name === name)?.thumbnail;
   };
   const levels = path ? path.split('/') : [];
   const crumbs = ['', ...levels.map((_, i) => levels.slice(0, i + 1).join('/'))];
@@ -404,7 +406,8 @@ function FolderView({
             <div className="folder-grid">
               {subs.map((p) => {
                 const key = `dir:${p}`;
-                const count = folder.files.filter((f) => within(f.name, p)).length;
+                const preview = folderPreview(folder.files, p);
+                const { count } = preview;
                 const menu = (): ContextMenuItem[] => [
                   { label: t('Open'), icon: 'folder', action: () => onGo(p) },
                   { label: t('Rename'), icon: 'rename', action: () => setRenaming(key) },
@@ -422,7 +425,7 @@ function FolderView({
                     onContextMenu={(e) => renaming !== key && openCardMenu(e, `${folderId}:${key}`, menu())}
                     {...drop.props(folder, p)}
                   >
-                    <Icon name="folder" size={24} />
+                    <FolderPreview shown={preview.shown.map((f) => thumb(f.name))} more={preview.more} />
                     <div className="doc-meta">
                       {renaming === key ? (
                         // everything in it stays, its documents stay linked to their files
@@ -434,7 +437,9 @@ function FolderView({
                           }}
                         />
                       ) : (
-                        <div className="doc-name">{baseOf(p)}</div>
+                        <div className="doc-name">
+                          <Icon name="folder" size={14} /> {baseOf(p)}
+                        </div>
                       )}
                       <div className="doc-date">{count ? `${t('Documents')}: ${count}` : t('Empty folder')}</div>
                     </div>
@@ -491,6 +496,31 @@ function FolderView({
         </>
       )}
     </>
+  );
+}
+
+/**
+ * A subfolder card's picture (`shown` — pictures of its documents, see folderPreview): the only document's picture
+ * whole, a 2 × 2 grid of up to four, three and "+N" for the rest; an empty folder — its icon.
+ */
+function FolderPreview({ shown, more }: { shown: (string | undefined)[]; more: number }) {
+  const pic = (src: string | undefined, size: number) => (src ? <img src={src} alt="" draggable={false} /> : <Icon name="partStudio" size={size} />);
+  if (shown.length === 0)
+    return (
+      <div className="doc-thumb">
+        <Icon name="folder" size={40} />
+      </div>
+    );
+  if (shown.length === 1) return <div className="doc-thumb">{pic(shown[0], 40)}</div>;
+  return (
+    <div className="doc-thumb folder-mosaic">
+      {shown.map((src, i) => (
+        <div key={i} className="folder-tile">
+          {pic(src, 22)}
+        </div>
+      ))}
+      {more > 0 && <div className="folder-tile folder-more">+{more}</div>}
+    </div>
   );
 }
 
