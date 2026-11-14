@@ -168,6 +168,26 @@ textarea {
   gap: 8px;
   background: var(--panel);
 }
+/* many folders: the buttons, Documents / Trash and the note keep their size — the folders' list scrolls (its title
+   stays on top; 2 px around its rows for their focus ring) */
+.docs-side > *,
+.docs-side > .folders-nav > * {
+  flex-shrink: 0;
+}
+.docs-side > .folders-nav {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-left: -2px;
+  margin-right: -2px;
+  padding: 0 2px 2px;
+}
+.folders-nav .docs-nav-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
 .docs-main {
   flex: 1;
   overflow: auto;
