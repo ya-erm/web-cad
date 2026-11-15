@@ -3,7 +3,8 @@
 // documents of this browser, nothing saved (see embed/mode.ts).
 
 import { useEffect, useMemo, useState } from 'react';
-import { useDoc } from '../store/docStore';
+import { activeTab, useDoc } from '../store/docStore';
+import { SheetView } from './SheetView';
 import { setRotationMode, useEditor } from '../store/editorStore';
 import { startRebuildLoop } from '../store/rebuild';
 import { Viewport } from '../ui/Viewport';
@@ -37,6 +38,7 @@ function ControlsHint({ onClose }: { onClose: () => void }) {
         <li>{t('The whole model: the Zoom to fit button or F; standard views: the cube and the Views menu')}</li>
         <li>{t('The turntable button keeps the Z axis upright while turning')}</li>
         <li>{t('The ruler button measures: click faces, edges and vertices')}</li>
+        <li>{t('Drawings: drag or two fingers move the sheet, the wheel or a pinch zooms it, a double click shows it whole')}</li>
       </ul>
     </div>
   );
@@ -102,7 +104,7 @@ function TabPicker() {
     <select className="embed-tabs" value={doc.activeTab} title={t('Tab')} aria-label={t('Tab')} onChange={(e) => void showTab(e.target.value)}>
       {tabs.map((x) => (
         <option key={x.id} value={x.id}>
-          {`${tName(x.name)} · ${t(x.type === 'assembly' ? 'Assembly' : 'Part Studio')}`}
+          {`${tName(x.name)} · ${t(x.type === 'assembly' ? 'Assembly' : x.type === 'drawing' ? 'Drawing' : 'Part Studio')}`}
         </option>
       ))}
     </select>
@@ -139,6 +141,7 @@ export default function EmbedApp() {
   const v = useViewer();
   const kernelReady = useEditor((s) => s.kernelReady);
   const turntable = useEditor((s) => s.rotationMode === 'turntable');
+  const drawing = useDoc((s) => activeTab(s.doc)?.type === 'drawing');
   const [hint, setHint] = useState(false);
 
   useEffect(() => {
@@ -187,6 +190,8 @@ export default function EmbedApp() {
     );
 
   const graphics = v.phase === 'loading' || v.phase === 'shown';
+  // a drawing: its sheet instead of the 3D view (no turning, measuring is the model's)
+  const measuring = v.measuring && !drawing;
   return (
     <div className="embed">
       <div className="embed-bar">
@@ -202,15 +207,16 @@ export default function EmbedApp() {
           className={'icon-btn' + (turntable ? ' active' : '')}
           title={t(turntable ? 'Rotation about the vertical (Z up): click for free rotation' : 'Free rotation: click to keep the Z axis upright')}
           aria-pressed={turntable}
+          disabled={drawing}
           onClick={() => setRotationMode(turntable ? 'free' : 'turntable')}
         >
           <Icon name="rotateLeft" size={16} />
         </button>
         <button
-          className={'icon-btn' + (v.measuring ? ' active' : '')}
+          className={'icon-btn' + (measuring ? ' active' : '')}
           title={t('Measure')}
-          aria-pressed={v.measuring}
-          disabled={!graphics}
+          aria-pressed={measuring}
+          disabled={!graphics || drawing}
           onClick={() => {
             // measuring ends with its selection
             if (v.measuring) useEditor.getState().clearSelection();
@@ -224,12 +230,13 @@ export default function EmbedApp() {
         </button>
       </div>
       <div className="graphics">
-        {graphics && <Viewport key={v.key} />}
+        {graphics &&
+          (!drawing ? <Viewport key={v.key} /> : v.sheet ? <SheetView key={v.key} sheet={v.sheet} viewKey={v.key} /> : <Message title={t('Drawing the sheet…')} />)}
         <div className="embed-corner">
-          {v.phase === 'shown' && v.measuring && <MeasureHint />}
+          {v.phase === 'shown' && measuring && <MeasureHint />}
           {hint && <ControlsHint onClose={() => setHint(false)} />}
         </div>
-        {v.phase === 'shown' && v.measuring && <MeasureResults />}
+        {v.phase === 'shown' && measuring && <MeasureResults />}
         {v.phase === 'waiting' && <Message title={t(kernelReady ? 'Waiting for the model…' : 'Loading geometry kernel…')} />}
         {v.phase === 'error' && <Message icon="warning" title={t('The model could not be opened')} text={v.error} />}
         {v.phase === 'shown' && v.empty && <EmptyNote />}

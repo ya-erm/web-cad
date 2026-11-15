@@ -18,8 +18,14 @@ export interface ViewModel {
   importId?: string;
 }
 
-/** The tabs the viewer shows: Part Studios and assemblies (not drawings). */
-export const viewableTabs = (doc: Pick<CadDocument, 'tabs'>): DocTab[] => doc.tabs.filter((x) => x.type === 'partStudio' || x.type === 'assembly');
+/** The tabs the viewer shows: Part Studios, assemblies and drawings (their sheets). */
+export const viewableTabs = (doc: Pick<CadDocument, 'tabs'>): DocTab[] => doc.tabs.filter((x) => x.type === 'partStudio' || x.type === 'assembly' || x.type === 'drawing');
+
+/** The tab a project opens at: its active one when it is a model, else its first model; a drawing only without models. */
+export function openingTab(doc: Pick<CadDocument, 'tabs' | 'activeTab'>): DocTab | undefined {
+  const models = doc.tabs.filter((x) => x.type === 'partStudio' || x.type === 'assembly');
+  return models.find((x) => x.id === doc.activeTab) ?? models[0] ?? doc.tabs.find((x) => x.type === 'drawing');
+}
 
 /** A file's name without its extension and characters that are not shown (a fallback when nothing is left). */
 export function modelTitle(fileName: string): string {
@@ -95,7 +101,7 @@ function wellFormed(doc: CadDocument): boolean {
   });
 }
 
-/** A project file's document, opened at its active tab (or its first Part Studio / assembly when that is a drawing). */
+/** A project file's document, opened at a model (`openingTab`). */
 function projectModel(bytes: Uint8Array, title: string): ViewModel {
   let read: ReturnType<typeof readProject>;
   try {
@@ -105,8 +111,7 @@ function projectModel(bytes: Uint8Array, title: string): ViewModel {
   }
   const { doc, versions } = read;
   if (!wellFormed(doc)) throw invalid('The WebCAD project is damaged');
-  const shown = viewableTabs(doc);
-  if (!shown.length) throw new EmbedError('UNSUPPORTED_FORMAT', t('The document has no Part Studios or assemblies: drawings are not shown in the viewer'));
-  const active = shown.find((x) => x.id === doc.activeTab) ?? shown[0];
+  const active = openingTab(doc);
+  if (!active) throw new EmbedError('UNSUPPORTED_FORMAT', t('The document has no Part Studios, assemblies or drawings to show'));
   return { doc: { ...doc, activeTab: active.id }, versions: versions.filter((v) => isRecord(v) && typeof v.id === 'string' && Array.isArray(v.tabs)) };
 }

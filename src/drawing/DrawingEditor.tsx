@@ -137,6 +137,13 @@ type SourceTab = PartStudioTab | AssemblyTab;
 /** Assemblies placed in the kernel for drawings: builder key → the version placed. */
 const placedAssemblies = new Map<string, string>();
 
+/** The kernel forgot its builders (another model shown): what was built and placed for drawings is built anew. */
+export function forgetDrawingSources() {
+  builtStudios.clear();
+  placedAssemblies.clear();
+  projCache.clear();
+}
+
 function tabSource(doc: CadDocument, tab: DocTab | undefined, configuration?: Record<string, string>): ViewSource | undefined {
   if (tab?.type === 'partStudio') {
     const studio = variantStudio(tab, configuration);

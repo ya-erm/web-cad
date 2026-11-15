@@ -166,11 +166,11 @@ describe('STL', () => {
 });
 
 describe('WebCAD project', () => {
-  it('opens the document as it is, at a Part Studio or an assembly (not its drawing)', async () => {
+  it('opens the document as it is, at a Part Studio or an assembly (its drawing is a tab to pick)', async () => {
     expect(rig.tabs.find((x) => x.id === rig.activeTab)?.type).toBe('drawing');
     const m = viewModel(file('Rig.webcad.json', 'webcad', projectText(rig)));
     expect(m.doc.name).toBe('Rig');
-    expect(viewableTabs(m.doc).map((x) => x.type)).toEqual(['partStudio', 'assembly']);
+    expect(viewableTabs(m.doc).map((x) => x.type)).toEqual(['partStudio', 'assembly', 'drawing']);
     expect(m.doc.tabs.find((x) => x.id === m.doc.activeTab)?.type).toBe('partStudio');
     expect(m.importId).toBeUndefined();
     // its assembly, built as the viewer shows it
@@ -189,11 +189,14 @@ describe('WebCAD project', () => {
     expect(m.versions.map((v) => v.id)).toEqual(['v-1']);
   });
 
-  it('refuses a document of drawings only, a damaged or cut short file and one that is not a project', () => {
+  it('opens a document of drawings only at its drawing; refuses one with nothing to show', () => {
     const drawings = { ...rig, tabs: rig.tabs.filter((x) => x.type === 'drawing') };
-    expect(refusal(() => viewModel(file('d.webcad.json', 'webcad', projectText(drawings))))).toBe(
-      'UNSUPPORTED_FORMAT: В документе нет Part Studio и сборок: чертежи во встроенном просмотре не показываются',
-    );
+    const m = viewModel(file('d.webcad.json', 'webcad', projectText(drawings)));
+    expect(m.doc.tabs.find((x) => x.id === m.doc.activeTab)?.type).toBe('drawing');
+    expect(refusal(() => viewModel(file('e.webcad.json', 'webcad', projectText({ ...rig, tabs: [] }))))).toBe('UNSUPPORTED_FORMAT: В документе нет ни Part Studio, ни сборок, ни чертежей');
+  });
+
+  it('refuses a damaged or cut short file and one that is not a project', () => {
     const text = projectText(rig);
     expect(refusal(() => viewModel(file('x.webcad.json', 'webcad', text.slice(0, text.length / 2))))).toBe('INVALID_FILE: Это не проект WebCAD');
     expect(refusal(() => viewModel(file('x.webcad.json', 'webcad', '[1, 2, 3]')))).toBe('INVALID_FILE: Это не проект WebCAD');

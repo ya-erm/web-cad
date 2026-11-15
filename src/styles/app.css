@@ -3921,6 +3921,27 @@ body.panel-resizing-y * {
 .embed .viewcube {
   touch-action: none;
 }
+/* a drawing's sheet: white paper on grey, moved and zoomed as a whole */
+.embed-sheet {
+  position: absolute;
+  inset: 0;
+  background: #dfe4ea;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  overflow: hidden;
+}
+.embed-sheet:active {
+  cursor: grabbing;
+}
+.embed-sheet-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.embed .embed-sheet-tools {
+  top: 10px;
+}
 .embed-message {
   position: absolute;
   inset: 0;

@@ -4,7 +4,9 @@
 
 import { create } from 'zustand';
 import type { BuildResult } from '../kernel/protocol';
-import type { LengthUnit } from '../core/types';
+import type { CadDocument, DrawingTab, LengthUnit } from '../core/types';
+import { drawSheet, sheetFile } from '../drawing/drawingModel';
+import { browserSourceOf, forgetDrawingSources } from '../drawing/DrawingEditor';
 import { kernel, SupersededError } from '../kernel/client';
 import { setVersionSnapshot } from '../core/derived';
 import { activeTab, useDoc } from '../store/docStore';
@@ -31,9 +33,38 @@ export interface ViewerState {
   error: string;
   /** Measuring: what is selected is measured (nothing selected — the model's overall size). */
   measuring: boolean;
+  /** A drawing tab: its sheet as drawn now (none while it is being drawn). */
+  sheet: SheetImage | null;
+  /** The key of the sheet on the screen (its view says so once the SVG is in the page). */
+  sheetShown: string;
 }
 
-export const useViewer = create<ViewerState>(() => ({ phase: 'waiting', title: '', units: 'mm', key: '', empty: false, failedFeatures: 0, error: '', measuring: false }));
+/** A drawing's sheet: SVG (millimetres, Y up as the SVG writer makes it) and its size, mm. */
+export interface SheetImage {
+  svg: string;
+  width: number;
+  height: number;
+}
+
+export const useViewer = create<ViewerState>(() => ({
+  phase: 'waiting',
+  title: '',
+  units: 'mm',
+  key: '',
+  empty: false,
+  failedFeatures: 0,
+  error: '',
+  measuring: false,
+  sheet: null,
+  sheetShown: '',
+}));
+
+/** A drawing's sheet as it is now: its views projected by the kernel (their Part Studios and assemblies built first). */
+async function drawTab(doc: CadDocument, tab: DrawingTab): Promise<SheetImage> {
+  const sheet = await guarded(drawSheet(doc, tab, browserSourceOf(doc)));
+  const file = sheetFile(sheet, 'svg', tab.drawing.title || tab.name);
+  return { svg: String(file.data), width: sheet.width, height: sheet.height };
+}
 
 /** A model is to be built this fast (the page around the viewer waits two minutes for it, the download included). */
 export const BUILD_TIMEOUT_MS = 110_000;
@@ -94,7 +125,10 @@ function clearModel() {
   dropRebuilds();
   useEditor.setState({ build: null, building: false, selection: [], hover: null, hoverList: null, section: null, editing: null, sketch: null, contextMenu: null, measure: null });
   if (useDoc.getState().doc) useDoc.setState({ doc: null, past: [], future: [], lastKey: null, readOnly: true });
+  useViewer.setState({ sheet: null });
   void kernel().reset().catch(() => undefined);
+  // the drawings' sources built in the kernel are gone with it
+  forgetDrawingSources();
 }
 
 /** The messages of the Import feature that mean the file itself cannot be read. */
@@ -159,6 +193,13 @@ async function showStl(file: EmbedFile, n: number) {
 async function showDocument(model: ViewModel) {
   // the versions its Derived features take parts from: from the file, not from this browser's storage
   for (const v of model.versions) setVersionSnapshot(v.id, { tabs: v.tabs, units: v.units });
+  const tab = activeTab(model.doc);
+  if (tab?.type === 'drawing') {
+    // a document of drawings only: its sheet (nothing is rebuilt for a drawing tab)
+    useDoc.setState({ doc: model.doc, past: [], future: [], lastKey: null, readOnly: true, saving: false, saveError: null });
+    useViewer.setState({ units: model.doc.units.length, sheet: await drawTab(model.doc, tab) });
+    return;
+  }
   const built = nextRebuild();
   useDoc.setState({ doc: model.doc, past: [], future: [], lastKey: null, readOnly: true, saving: false, saveError: null });
   useViewer.setState({ units: model.doc.units.length });
@@ -170,19 +211,25 @@ async function showDocument(model: ViewModel) {
   }
 }
 
-/** Another tab of the document shown (a Part Studio or an assembly). */
+/** Another tab of the document shown: a Part Studio, an assembly or a drawing's sheet. */
 export async function showTab(tabId: string) {
   const doc = useDoc.getState().doc;
-  if (!doc || activeTab(doc)?.id === tabId) return;
+  const tab = doc?.tabs.find((x) => x.id === tabId);
+  if (!doc || !tab || activeTab(doc)?.id === tabId) return;
   const n = ++loads;
   dropRebuilds();
   useEditor.setState({ build: null, selection: [], hover: null, hoverList: null, section: null });
-  const built = nextRebuild();
+  // a model rebuilds as its tab opens; a drawing has nothing to rebuild (its sheet is drawn here)
+  const built = tab.type === 'drawing' ? null : nextRebuild();
   useDoc.getState().update((d) => void (d.activeTab = tabId), { undoable: false });
   const key = `m${loads}:${tabId}`;
-  useViewer.setState({ phase: 'loading', key, empty: false, failedFeatures: 0, error: '' });
+  useViewer.setState({ phase: 'loading', key, sheet: null, empty: false, failedFeatures: 0, error: '' });
   try {
-    await built;
+    if (tab.type === 'drawing') {
+      const sheet = await drawTab(useDoc.getState().doc ?? doc, tab);
+      if (n !== loads) return;
+      useViewer.setState({ sheet });
+    } else await built;
     await drawn(key);
   } catch (e) {
     if (n === loads) useViewer.setState({ phase: 'error', error: kernelFailure(e).message });
@@ -196,6 +243,14 @@ const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * on the canvas — then a frame (or a moment, when the frame is hidden and gets no frames).
  */
 async function drawn(key: string) {
+  if (useViewer.getState().sheet) {
+    // a drawing: its sheet in the page (its view says so), fitted
+    for (let i = 0; i < 100 && useViewer.getState().sheetShown !== key; i++) await later(20);
+    if (useViewer.getState().sheetShown !== key) throw new EmbedError('BUILD_FAILED', t('The model could not be shown'));
+    await Promise.race([new Promise((r) => requestAnimationFrame(r)), later(100)]);
+    useViewer.setState({ phase: 'shown', empty: false, failedFeatures: 0 });
+    return;
+  }
   for (let i = 0; i < 100 && !(useViewer.getState().key === key && getEngine()); i++) await later(20);
   const engine = getEngine();
   if (useViewer.getState().key !== key || !engine) throw new EmbedError('BUILD_FAILED', t('The model could not be shown'));

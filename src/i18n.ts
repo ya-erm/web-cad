@@ -1338,8 +1338,10 @@ const RU: Record<string, string> = {
   'The STL file is damaged or incomplete': 'Файл STL повреждён или загружен не полностью',
   'The file is not a WebCAD project': 'Это не проект WebCAD',
   'The WebCAD project is damaged': 'Проект WebCAD повреждён',
-  'The document has no Part Studios or assemblies: drawings are not shown in the viewer':
-    'В документе нет Part Studio и сборок: чертежи во встроенном просмотре не показываются',
+  'The document has no Part Studios, assemblies or drawings to show': 'В документе нет ни Part Studio, ни сборок, ни чертежей',
+  'Drawing the sheet…': 'Построение чертежа…',
+  'Drawings: drag or two fingers move the sheet, the wheel or a pinch zooms it, a double click shows it whole':
+    'Чертёж: перетаскивание или два пальца сдвигают лист, колесо или щипок — масштаб, двойной щелчок — лист целиком',
   'This tab has no parts or sketches to show': 'На этой вкладке нет деталей и эскизов',
   'This assembly has no parts to show': 'В этой сборке нет деталей',
   'Some features of the document could not be built: the model may be incomplete':
