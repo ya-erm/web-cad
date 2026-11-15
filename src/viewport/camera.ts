@@ -282,6 +282,12 @@ export class CameraController {
     return !!this.anim;
   }
 
+  /** Jump to the end of a turn under way: a page in the background gets no animation frames to play it. */
+  finishAnimation() {
+    const a = this.anim;
+    if (a) this.tick(a.t0 + a.dur);
+  }
+
   setStdView(v: StdView, box?: THREE.Box3) {
     const { dir, up } = stdViewAxes(v);
     this.viewFrom(dir, up, box);

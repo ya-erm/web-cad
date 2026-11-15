@@ -30,6 +30,25 @@ function tilted(steps: number) {
   return c;
 }
 
+describe('view animation', () => {
+  it('finishes a turn under way at once (a background tab gets no animation frames)', () => {
+    const c = new CameraController();
+    c.setStdView('front');
+    c.finishAnimation();
+    expect(c.animating).toBe(false);
+    c.setStdView('top');
+    // no frame has run: still the Front view
+    expect(back(c).y).toBeCloseTo(-1, 6);
+    expect(c.animating).toBe(true);
+    c.finishAnimation();
+    expect(c.animating).toBe(false);
+    expect(back(c).z).toBeCloseTo(1, 6);
+    // nothing under way: nothing changes
+    c.finishAnimation();
+    expect(back(c).z).toBeCloseTo(1, 6);
+  });
+});
+
 describe('turntable rotation', () => {
   it('turns from the Top view down to the sides with small mouse moves', () => {
     for (const v of ['top', 'bottom'] as const) {

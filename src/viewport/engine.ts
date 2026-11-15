@@ -557,6 +557,8 @@ export class Engine {
 
   /** PNG data URL of the graphics area as it is now (agent API screenshots; no HTML labels). */
   snapshot(): string {
+    // the view asked for just before: in a background tab its turn never plays, so finish it here
+    this.cam.finishAnimation();
     this.render();
     return this.renderer.domElement.toDataURL('image/png');
   }
