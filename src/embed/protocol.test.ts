@@ -3,7 +3,7 @@
 // request repeated gets its answer again and is never shown twice; one file at a time.
 
 import { describe, expect, it, vi } from 'vitest';
-import { allowedParentOrigin, embedParams, MAX_FILE_BYTES, PARENT_ORIGINS, readIncoming, type EmbedFile, type OutgoingMessage } from './protocol';
+import { allowedParentOrigin, embedParams, MAX_FILE_BYTES, PARENT_ORIGINS, readIncoming, type EmbedFile, type EmbedStage, type OutgoingMessage } from './protocol';
 import { EmbedError, EmbedSession } from './session';
 import { isEmbedHash } from './mode';
 
@@ -127,20 +127,39 @@ describe('the viewer session', () => {
     const shown: EmbedFile[] = [];
     let release: () => void = () => {};
     let fail: (e: unknown) => void = () => {};
+    let stage: (s: EmbedStage) => void = () => {};
     const host = {
       post: (m: OutgoingMessage) => sent.push(m),
       show: vi.fn(
-        (f: EmbedFile) =>
+        (f: EmbedFile, onStage: (s: EmbedStage) => void) =>
           new Promise<void>((res, rej) => {
             shown.push(f);
+            stage = onStage;
             release = res;
             fail = rej;
           }),
       ),
     };
     const s = new EmbedSession(params, parent, host);
-    return { s, sent, shown, host, release: () => release(), fail: (e: unknown) => fail(e) };
+    return { s, sent, shown, host, release: () => release(), fail: (e: unknown) => fail(e), stage: (x: EmbedStage) => stage(x) };
   }
+
+  it('tells the page each stage of the file being shown, once, before its answer — never after', async () => {
+    const { s, sent, release, stage } = session();
+    s.receive(event(load()));
+    stage('kernel');
+    stage('kernel');
+    stage('building');
+    release();
+    await flush();
+    stage('building');
+    expect(sent.map((m) => (m.type === 'webcad:progress' ? `${m.type} ${m.stage} ${m.message}` : m.type))).toEqual([
+      'webcad:progress kernel Загрузка геометрического ядра…',
+      'webcad:progress building Построение модели…',
+      'webcad:loaded',
+    ]);
+    expect(sent[0]).toMatchObject({ version: 1, channel: CHANNEL, requestId: REQUEST });
+  });
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
   it('says it is ready on its channel', () => {

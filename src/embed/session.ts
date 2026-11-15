@@ -2,7 +2,18 @@
 // answer sent when it is drawn (or why it is not), a repeated request answered again without showing it twice.
 
 import { t } from '../i18n';
-import { errorMessage, loadedMessage, readIncoming, readyMessage, type EmbedErrorCode, type EmbedFile, type EmbedParams, type OutgoingMessage } from './protocol';
+import {
+  errorMessage,
+  loadedMessage,
+  progressMessage,
+  readIncoming,
+  readyMessage,
+  type EmbedErrorCode,
+  type EmbedFile,
+  type EmbedParams,
+  type EmbedStage,
+  type OutgoingMessage,
+} from './protocol';
 
 /** Why a file is not shown, for the page: its code and a message for people (in the interface language). */
 export class EmbedError extends Error {
@@ -16,9 +27,15 @@ export class EmbedError extends Error {
 export interface EmbedHost {
   /** To the page around the viewer (its origin exactly). */
   post(msg: OutgoingMessage): void;
-  /** Show the file: resolves once its model is drawn; an `EmbedError` says why not (anything else: it failed to build). */
-  show(file: EmbedFile): Promise<void>;
+  /**
+   * Show the file: resolves once its model is drawn; an `EmbedError` says why not (anything else: it failed to
+   * build). `stage` tells the page what it is doing meanwhile.
+   */
+  show(file: EmbedFile, stage: (s: EmbedStage) => void): Promise<void>;
 }
+
+/** What the page is told of each stage (in the interface language). */
+const STAGE_TEXT: Record<EmbedStage, string> = { kernel: 'Loading geometry kernel…', building: 'Building the model…' };
 
 /** What became of a message (for tests and the console). */
 export type Received = 'ignored' | 'waiting' | 'repeated' | 'answered' | 'busy' | 'started';
@@ -69,8 +86,15 @@ export class EmbedSession {
 
   private async show(requestId: string, file: EmbedFile) {
     let msg: OutgoingMessage;
+    // each stage once, and only while the file is being shown (never after its answer)
+    let last: EmbedStage | null = null;
+    const stage = (s: EmbedStage) => {
+      if (this.busy !== requestId || s === last) return;
+      last = s;
+      this.host.post(progressMessage(this.params.channel, requestId, s, t(STAGE_TEXT[s])));
+    };
     try {
-      await this.host.show(file);
+      await this.host.show(file, stage);
       msg = loadedMessage(this.params.channel, requestId);
     } catch (e) {
       if (e instanceof EmbedError) msg = errorMessage(this.params.channel, requestId, e.code, e.message);

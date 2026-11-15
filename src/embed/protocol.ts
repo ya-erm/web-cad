@@ -65,13 +65,28 @@ export interface EmbedFile {
 
 export type EmbedErrorCode = 'INVALID_FILE' | 'UNSUPPORTED_FORMAT' | 'BUILD_FAILED' | 'BUSY';
 
+/**
+ * What the viewer is doing with a file it took (before its answer): loading the geometry kernel (the first time,
+ * when the file came before it was ready), building the model. Neither has a percentage to show.
+ */
+export type EmbedStage = 'kernel' | 'building';
+
 /** What the viewer sends to the page. */
 export type OutgoingMessage =
   | { type: 'webcad:ready'; version: 1; channel: string }
+  | { type: 'webcad:progress'; version: 1; channel: string; requestId: string; stage: EmbedStage; message: string }
   | { type: 'webcad:loaded'; version: 1; channel: string; requestId: string }
   | { type: 'webcad:error'; version: 1; channel: string; requestId: string; error: { code: EmbedErrorCode; message: string } };
 
 export const readyMessage = (channel: string): OutgoingMessage => ({ type: 'webcad:ready', version: PROTOCOL_VERSION, channel });
+export const progressMessage = (channel: string, requestId: string, stage: EmbedStage, message: string): OutgoingMessage => ({
+  type: 'webcad:progress',
+  version: PROTOCOL_VERSION,
+  channel,
+  requestId,
+  stage,
+  message,
+});
 export const loadedMessage = (channel: string, requestId: string): OutgoingMessage => ({ type: 'webcad:loaded', version: PROTOCOL_VERSION, channel, requestId });
 export const errorMessage = (channel: string, requestId: string, code: EmbedErrorCode, message: string): OutgoingMessage => ({
   type: 'webcad:error',

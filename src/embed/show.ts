@@ -12,7 +12,7 @@ import { useEditor } from '../store/editorStore';
 import { dropRebuilds, paletteColor, rebuildListeners, type Rebuilt } from '../store/rebuild';
 import { getEngine } from '../viewport/engineRef';
 import { t } from '../i18n';
-import type { EmbedFile } from './protocol';
+import type { EmbedFile, EmbedStage } from './protocol';
 import { EmbedError } from './session';
 import { checkStl, modelTitle, viewModel, type ViewModel } from './model';
 
@@ -100,12 +100,21 @@ function clearModel() {
 /** The messages of the Import feature that mean the file itself cannot be read. */
 const UNREADABLE = ['Failed to load STEP file', 'Not an STL file', 'The STL file could not be read', 'The STL file has no triangles', 'No file data'];
 
-/** Show a file sent to the viewer: resolves once it is drawn; an `EmbedError` says why it is not. */
-export async function showFile(file: EmbedFile): Promise<void> {
+/**
+ * Show a file sent to the viewer: resolves once it is drawn; an `EmbedError` says why it is not. `stage` hears what
+ * it is doing: waiting for the geometry kernel (still loading), then building the model.
+ */
+export async function showFile(file: EmbedFile, stage: (s: EmbedStage) => void = () => {}): Promise<void> {
   const n = ++loads;
   clearModel();
   useViewer.setState({ phase: 'loading', title: modelTitle(file.name), key: `m${n}`, empty: false, failedFeatures: 0, error: '' });
   try {
+    const k = kernel();
+    if (!k.isReady) {
+      stage('kernel');
+      await guarded(k.ready());
+    }
+    stage('building');
     if (file.format === 'stl') await showStl(file, n);
     else await showDocument(viewModel(file));
     await drawn(`m${n}`);
