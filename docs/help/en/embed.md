@@ -28,7 +28,7 @@ Once loaded, the whole model is shown in the isometric view. If the chosen tab h
 
 ## Measuring {#measure}
 
-The ruler button in the bar above the model turns measuring on. With nothing selected, the panel at the bottom right shows the **overall size of the model** along X, Y and Z. Click faces, edges and vertices, and the panel shows their sizes:
+Measuring is on as soon as the model opens; the ruler button in the bar above the model turns it off and on again. With nothing selected, the panel at the bottom right shows the **overall size of the model** along X, Y and Z. Click faces, edges and vertices, and the panel shows their sizes:
 
 | Selected | Values |
 |---|---|

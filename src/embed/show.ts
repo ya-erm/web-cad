@@ -31,7 +31,7 @@ export interface ViewerState {
   /** Some features of the document failed: the model may be incomplete. */
   failedFeatures: number;
   error: string;
-  /** Measuring: what is selected is measured (nothing selected — the model's overall size). */
+  /** Measuring (on from the start): what is selected is measured (nothing selected — the model's overall size). */
   measuring: boolean;
   /** A drawing tab: its sheet as drawn now (none while it is being drawn). */
   sheet: SheetImage | null;
@@ -54,7 +54,7 @@ export const useViewer = create<ViewerState>(() => ({
   empty: false,
   failedFeatures: 0,
   error: '',
-  measuring: false,
+  measuring: true,
   sheet: null,
   sheetShown: '',
 }));
