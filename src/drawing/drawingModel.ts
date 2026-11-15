@@ -4,7 +4,7 @@
 
 import type { CadDocument, DocTab, DrawingBalloon, DrawingData, DrawingDimension, DrawingTab, DrawingView, Vec2, Vec3, ViewRef } from '../core/types';
 import type { ProjectionRequest, ProjectionResult, ViewAnchorRequest, ViewCut, ViewRefsRequest, ViewRefsResult } from '../kernel/protocol';
-import { isPictorial, parentView, sectionCut, smoothOutline, viewAxes } from '../core/drawingViews';
+import { isDerivedView, isPictorial, parentView, sectionCut, smoothOutline, viewAxes, type ViewAxes } from '../core/drawingViews';
 import { v3 } from '../core/math';
 import { uid } from '../core/ids';
 import { shownParts } from '../assembly/expand';
@@ -30,6 +30,7 @@ import {
   titleBlockPrims,
   titleBlockRect,
   toSheet,
+  viewCenter,
   viewPrims,
   type BomTableRow,
   type ProjectionData,
@@ -73,6 +74,47 @@ export function projectedView(v: DrawingView, views: DrawingView[]): DrawingView
   let cur = v;
   for (let i = 0; i < 16 && cur.detail; i++) cur = parentView(cur, views) ?? cur;
   return cur;
+}
+
+/** The view a projected view is kept on its line of projection with (none: a free view, a section or detail view). */
+export function alignedParent(v: DrawingView, views: DrawingView[]): DrawingView | undefined {
+  return v.parent && !isDerivedView(v) && !v.unaligned ? parentView(v, views) : undefined;
+}
+
+const samePartIds = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+const alignedCache = new WeakMap<ProjectionData, { pp: ProjectionData; tag: string; out: ProjectionData }>();
+
+/**
+ * A view's projection as it sits on the sheet. A projected view showing other parts than its parent (the agent's
+ * `parts`) has bounds of its own: across its line of projection it is centred where the parent is, so its geometry
+ * stays in line with the parent's as the model changes. Any other view — as the kernel gives it (`raw`).
+ */
+export function alignedProjection(
+  v: DrawingView,
+  views: DrawingView[],
+  raw: (v: DrawingView) => ProjectionData | undefined,
+  depth = 0,
+): ProjectionData | undefined {
+  const p = raw(v);
+  const parent = depth < 16 ? alignedParent(v, views) : undefined;
+  if (!p?.bounds || !parent || samePartIds(v.partIds, parent.partIds)) return p;
+  const pp = alignedProjection(parent, views, raw, depth + 1);
+  if (!pp?.bounds) return p;
+  // a view above or below its parent shares the parent's horizontal axis, one beside it — the vertical one
+  const i = Math.abs(parent.x - v.x) < Math.abs(parent.y - v.y) ? 0 : 1;
+  const tag = `${i}|${v.orientation}|${parent.orientation}`;
+  const known = alignedCache.get(p);
+  if (known && known.pp === pp && known.tag === tag) return known.out;
+  const axis = (a: ViewAxes, k: number) => (k === 0 ? a.x : v3.cross(a.n, a.x));
+  const w = axis(viewAxes(parent, views), i);
+  const own = viewAxes(v, views);
+  const k = [0, 1].find((j) => Math.abs(v3.dot(axis(own, j), w)) > 0.5);
+  if (k === undefined) return p;
+  const center = viewCenter(v, p);
+  center[k] = viewCenter(parent, pp)[i] * Math.sign(v3.dot(axis(own, k), w));
+  const out = { ...p, center };
+  alignedCache.set(p, { pp, tag, out });
+  return out;
 }
 
 /** What a view cuts away (a section, a local section; a detail view — as its parent): none for a plain view. */
@@ -328,7 +370,7 @@ export async function drawSheet(doc: CadDocument, tab: DrawingTab, sourceOf: Sou
     const res = await src.projection({ partIds: v.partIds, orientation: v.orientation, hidden: true, ...projectionRequest(v, views) });
     projs.set(v.id, { ...res, key: v.id });
   }
-  const proj = (v: DrawingView) => projs.get(projectedView(v, views).id);
+  const proj = (v: DrawingView) => alignedProjection(projectedView(v, views), views, (x) => projs.get(x.id));
   // the dimensions' anchors where the model has them now
   const lives = new Map<string, DrawingDimension>();
   for (const dm of d.dimensions) {

@@ -9,6 +9,7 @@ import { uid } from '../core/ids';
 import { cuttingLine, isDerivedView, isPictorial, nextViewLetter, parentView, smoothOutline, stepPoint, viewAxes, type ViewAxes } from '../core/drawingViews';
 import type { PlacedPart, ViewCut } from '../kernel/protocol';
 import {
+  alignedProjection,
   balloonDot as dotOfBalloon,
   balloonItem as itemOfBalloon,
   detailScale,
@@ -307,8 +308,7 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
       }
     })();
   }, [sources, drawing.views]);
-  return (view: DrawingView): ProjectionData | undefined => {
-    const v = projectedView(view, drawing.views);
+  const raw = (v: DrawingView): ProjectionData | undefined => {
     const src = sources.get(v.id);
     if (!src) return undefined;
     const exact = projCache.get(viewKey(v, drawing.views, src));
@@ -318,6 +318,7 @@ function useProjections(doc: CadDocument, drawing: DrawingData) {
     for (const p of projCache.values()) if (p.key.startsWith(`${src.key}:`) && p.key.endsWith(geometry)) return p;
     return undefined;
   };
+  return (view: DrawingView): ProjectionData | undefined => alignedProjection(projectedView(view, drawing.views), drawing.views, raw);
 }
 
 // ---------------------------------------------------------------------------

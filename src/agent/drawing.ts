@@ -14,6 +14,8 @@ import { sourceKey } from '../assembly/compose';
 import { storedBom } from '../assembly/bom';
 import { getLang } from '../i18n';
 import {
+  alignedParent,
+  alignedProjection,
   balloonDot,
   detailScale,
   drawingAssemblies,
@@ -117,9 +119,7 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
   };
   // the views' projections (a detail view: its parent's), by what they depend on
   const projections = new Map<string, ProjectionData>();
-  const projOf = async (v: DrawingView): Promise<ProjectionData> => {
-    const views = need().views;
-    const pv = projectedView(v, views);
+  const rawProjOf = async (pv: DrawingView, views: DrawingView[]): Promise<ProjectionData> => {
     const req = { partIds: pv.partIds, orientation: pv.orientation, hidden: true, ...projectionRequest(pv, views) };
     const key = JSON.stringify([pv.studioId, pv.configuration ?? null, req]);
     const known = projections.get(key);
@@ -129,6 +129,14 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
     const res = { ...(await src.projection(req)), key };
     projections.set(key, res);
     return res;
+  };
+  /** A view's projection as it sits on the sheet: with the views it is kept in line with (`alignedProjection`). */
+  const projOf = async (v: DrawingView): Promise<ProjectionData> => {
+    const views = need().views;
+    const pv = projectedView(v, views);
+    const loaded = new Map<string, ProjectionData>();
+    for (let x: DrawingView | undefined = pv, i = 0; x && i < 16; x = alignedParent(x, views), i++) loaded.set(x.id, await rawProjOf(x, views));
+    return alignedProjection(pv, views, (x) => loaded.get(x.id))!;
   };
   /** A model point (mm) in a view's coordinates. */
   const inView = (v: DrawingView, p: Vec3): Vec2 => {
@@ -238,7 +246,11 @@ export async function runDrawingOps(doc: CadDocument, ops: DrawingOp[], host: Dr
           const dir = op.direction ?? 'right';
           const orientation = projectedOrientation(parent.orientation, dir, dr.projection ?? 'first');
           if (!orientation) throw new AgentError(`No view projects ${dir} of a ${parent.orientation} view`);
-          v = { id: uid('v'), studioId: parent.studioId, partIds: [...parent.partIds], orientation, x: parent.x, y: parent.y, scale: parent.scale, showHidden: op.hidden ?? parent.showHidden, parent: parent.id, ...(parent.configuration ? { configuration: { ...parent.configuration } } : {}) };
+          // its own parts (`parts`) or its parent's; kept in line with the parent either way (`alignedProjection`)
+          const own = d.tabs.find((x) => x.id === parent.studioId);
+          const shows = own?.type === 'partStudio' || own?.type === 'assembly';
+          const partIds = op.parts !== undefined && shows ? await partIdsOf(own, op.parts) : [...parent.partIds];
+          v = { id: uid('v'), studioId: parent.studioId, partIds, orientation, x: parent.x, y: parent.y, scale: parent.scale, showHidden: op.hidden ?? parent.showHidden, parent: parent.id, ...(parent.configuration ? { configuration: { ...parent.configuration } } : {}) };
           await beside(v, parent, dir, op.gap ?? 20);
           if (op.at) {
             // off its line of projection: placed freely

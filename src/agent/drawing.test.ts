@@ -123,6 +123,51 @@ describe('agent API: drawings', () => {
     expect(bad.error).toMatch(/No view "front"/);
   }, 180000);
 
+  it('projects a view showing parts of its own: their size, on the parent’s line of projection', async () => {
+    const { s } = await plate();
+    const made = await s.run([
+      { op: 'part', part: { near: [0, 0, 5] }, name: 'Plate' },
+      { op: 'sketch', name: 'B', shapes: [{ type: 'rect', x: 40, y: -10, w: 20, h: 20 }] },
+      { op: 'extrude', sketch: 'B', depth: 30, boolean: 'new' },
+      { op: 'part', part: { near: [50, 0, 15] }, name: 'Box' },
+    ]);
+    expect(made.error).toBeUndefined();
+    const r = await s.run([
+      { op: 'drawing', sheet: 'A3' },
+      { op: 'view', orientation: 'front', at: [150, 200], scale: '1:1' },
+      { op: 'view', from: 'front', direction: 'down', parts: ['Plate'] },
+      { op: 'view', from: 'front', direction: 'right', parts: ['box'] },
+    ]);
+    expect(r.error).toBeUndefined();
+    const v = viewIds(r.drawing!);
+    // the front view shows both: 90 wide (X −30…60); the top view only the plate, the side view only the box
+    expect(v.front.size).toEqual([90, 30]);
+    expect(v.top.size![0]).toBeCloseTo(60, 6);
+    expect(v.top.size![1]).toBeCloseTo(40, 6);
+    expect(v.left.size![0]).toBeCloseTo(20, 6);
+    expect(v.left.size![1]).toBeCloseTo(30, 6);
+    expect(v.top.at[0]).toBeCloseTo(v.front.at[0], 6);
+    expect(v.left.at[1]).toBeCloseTo(v.front.at[1], 6);
+    // the plate's left edge straight under the front view's (its own middle would put it 15 mm to the right):
+    // the leftmost line ends of each view on the sheet (SVG: sheet mm, y up)
+    const svg = new TextDecoder().decode(await s.exportDrawing('svg'));
+    const ends = [
+      ...[...svg.matchAll(/<line x1="([-\d.]+)" y1="([-\d.]+)" x2="([-\d.]+)" y2="([-\d.]+)"/g)].flatMap((m) => [
+        [+m[1], +m[2]],
+        [+m[3], +m[4]],
+      ]),
+      ...[...svg.matchAll(/<poly(?:line|gon) points="([^"]+)"/g)].flatMap((m) => m[1].trim().split(/\s+/).map((p) => p.split(',').map(Number))),
+    ];
+    const leftmost = (y0: number, y1: number) => Math.min(...ends.filter(([x, y]) => x > 60 && x < 260 && y > y0 && y < y1).map(([x]) => x));
+    const half = (k: 'front' | 'top', i: 0 | 1) => v[k].size![i] / 2;
+    const frontLeft = leftmost(v.front.at[1] - half('front', 1) - 0.1, v.front.at[1] + half('front', 1) + 0.1);
+    const topLeft = leftmost(v.top.at[1] - half('top', 1) - 0.1, v.top.at[1] + half('top', 1) + 0.1);
+    expect(frontLeft).toBeCloseTo(v.front.at[0] - 45, 3);
+    expect(topLeft).toBeCloseTo(frontLeft, 3);
+    const bad = await s.run([{ op: 'view', from: 'front', direction: 'up', parts: ['Nope'] }]);
+    expect(bad.error).toMatch(/No part "Nope"/);
+  }, 180000);
+
   it('draws an assembly with its bill of materials and item numbers', async () => {
     const s = await openHeadless(emptyDocument('BOM test'), wasm);
     const r = await s.run([

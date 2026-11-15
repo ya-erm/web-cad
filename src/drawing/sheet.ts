@@ -120,11 +120,17 @@ function cellText(text: string, x: number, y: number, width: number, height: num
 
 export interface ProjectionData extends ProjectionResult {
   key: string;
+  /**
+   * The point at the view's sheet position when it is not the middle of the bounds: a projected view showing other
+   * parts than its parent is centred across its line of projection where the parent is (`alignedProjection`).
+   */
+  center?: Vec2;
 }
 
 /** The point of the view's projection at its sheet position: the middle of its bounds (a detail view: its circle's centre). */
 export function viewCenter(v: DrawingView, p: ProjectionData | undefined): Vec2 {
   if (v.detail) return v.detail.c;
+  if (p?.center) return p.center;
   if (!p?.bounds) return [0, 0];
   const [lo, hi] = p.bounds;
   return [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2];
