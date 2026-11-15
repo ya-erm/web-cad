@@ -102,9 +102,15 @@ export class StudioBuilder {
     return [...st.parts.values(), ...open];
   }
 
-  /** A part's own colour, if it has one (given here, or its colour in the source). */
+  /**
+   * A part's colour, if it has one: given here, else its colour in the source (Derived — whatever the palette would
+   * give it here), else the palette's by creation order.
+   */
   ownColor(st: BuildState, id: string): string | undefined {
-    return this.meta[id]?.color || st.derived.get(id)?.color;
+    const m = this.meta[id];
+    if (m?.color) return m.color;
+    const d = st.derived.get(id);
+    return d ? d.color : m?.autoColor;
   }
 
   partColor(id: string): string {

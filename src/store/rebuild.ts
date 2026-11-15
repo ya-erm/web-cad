@@ -2,6 +2,7 @@
 // feature changes, and stores the latest result in the editor store.
 
 import { kernel, SupersededError } from '../kernel/client';
+import type { PartMeta } from '../kernel/protocol';
 import { activeAssembly, activeStudio, effectiveRollback, studioById, useDoc } from './docStore';
 import { useEditor } from './editorStore';
 import type { AssemblyTab, CadDocument, Feature, PartStudioTab } from '../core/types';
@@ -71,10 +72,26 @@ export function partColorFor(studio: PartStudioTab, partId: string, order: strin
   return paletteColor(Math.max(0, order.indexOf(partId)));
 }
 
+/**
+ * What a Part Studio keeps about its parts, for their build: names, visibility, colours given — and for the others
+ * the palette's by creation order (`order`: of its last build), which the kernel gives only to the Part Studio's own
+ * parts: one brought from another Part Studio (Derived) keeps the source's colour.
+ */
+export function studioPartMeta(studio: PartStudioTab, order: string[]): Record<string, PartMeta> {
+  const meta: Record<string, PartMeta> = {};
+  for (const id of new Set([...Object.keys(studio.parts), ...order])) {
+    const m = studio.parts[id];
+    meta[id] = { name: m?.name, color: m?.color, autoColor: m?.color ? undefined : partColorFor(studio, id, order), hidden: m?.hidden };
+  }
+  return meta;
+}
+
 /** The geometry worker's builder of a Part Studio used as a Derived source (apart from its own tab's builder). */
 export const derivedKey = (studioId: string) => `src:${studioId}`;
 /** Part order of each source's last build: its parts' palette colours go with them into other Part Studios. */
 const sourceOrder = new Map<string, string[]>();
+/** Part order of each Part Studio's last build in its tab: the palette colours of its parts. */
+const studioOrder = new Map<string, string[]>();
 
 /**
  * The parts and sketches of a Derived source (its key: a Part Studio of the document or of a saved version, in a
@@ -113,8 +130,8 @@ export async function withDerivedSources(doc: CadDocument, studioId: string, fea
     const req = (order: string[]) => ({
       units,
       features: feats,
-      // names and colours (as the source shows them) go with its parts
-      partMeta: Object.fromEntries(order.map((id) => [id, { name: s.parts[id]?.name, color: partColorFor(s, id, order) }])),
+      // names and colours (as the source shows them — its own Derived parts their sources') go with its parts
+      partMeta: studioPartMeta(s, order),
       upTo: feats.length,
       meshless: true,
     });
@@ -191,16 +208,9 @@ async function run() {
   }
   const mySeq = ++seq;
   useEditor.setState({ building: true });
-  // Colours by creation order need the previous result's order; good enough for display.
-  const prevOrder = useEditor.getState().build?.partOrder ?? [];
-  // parts brought from another Part Studio keep its colours unless they are given one here
-  const derived = new Set(useEditor.getState().build?.parts.filter((p) => p.derived).map((p) => p.id));
-  const partMeta: Record<string, { name?: string; color?: string; hidden?: boolean }> = {};
-  const ids = new Set([...Object.keys(studio.parts), ...prevOrder]);
-  for (const id of ids) {
-    const m = studio.parts[id];
-    partMeta[id] = { name: m?.name, color: m?.color ?? (derived.has(id) ? undefined : partColorFor(studio, id, prevOrder)), hidden: m?.hidden };
-  }
+  // Colours by creation order need the order of this Part Studio's last build (the app's last one may be another
+  // tab's); good enough for display. Parts brought from another Part Studio keep its colours unless given one here.
+  const partMeta = studioPartMeta(studio, studioOrder.get(studio.id) ?? []);
   try {
     // as the chosen configuration has them; the Part Studios they derive from are built first
     const base = configuredFeatures(studio).slice(0, upTo);
@@ -214,6 +224,7 @@ async function run() {
       preview: preview && all[base.length],
     });
     if (mySeq !== seq) return;
+    studioOrder.set(studio.id, res.partOrder);
     // Assign palette colours for parts that were new in this build.
     for (const p of res.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     if (res.preview) for (const p of res.preview.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);

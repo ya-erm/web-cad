@@ -156,12 +156,25 @@ export interface PreviewResult {
   threads?: ThreadResult[];
 }
 
+/** What a Part Studio keeps about a part of its build. */
+export interface PartMeta {
+  name?: string;
+  /** Its colour given in the Part Studio. */
+  color?: string;
+  /**
+   * Its colour by creation order (the palette's), for one with none of its own: none given and not brought from
+   * another Part Studio (a Derived part keeps the source's colour).
+   */
+  autoColor?: string;
+  hidden?: boolean;
+}
+
 export interface BuildRequest {
   type: 'build';
   reqId: number;
   units: CadDocument['units'];
   features: Feature[];
-  partMeta: Record<string, { name?: string; color?: string; hidden?: boolean }>;
+  partMeta: Record<string, PartMeta>;
   /** Apply only the first `upTo` features. */
   upTo: number;
   /** When editing: the feature (draft) evaluated as a preview on top of the base state. */
