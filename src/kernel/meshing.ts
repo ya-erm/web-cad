@@ -2,6 +2,7 @@
 // persistent references. Results are cached per shape object.
 
 import * as R from 'replicad';
+import type { Poly_Triangulation, TopoDS_Shape } from 'replicad-opencascadejs';
 import type { Vec3 } from '../core/types';
 import { v3 } from '../core/math';
 import type { EdgeInfo, FaceInfo, PartMesh } from './protocol';
@@ -346,9 +347,93 @@ export function transferablesOf(p: PartMesh): ArrayBuffer[] {
   ] as ArrayBuffer[];
 }
 
+const UNMESHED_FACES = 'Some faces could not be split into triangles: the mesh would have holes';
+
+/** The faces of a shape (in the order of an explorer over them) that have no triangles. */
+function unmeshedFaces(shape: TopoDS_Shape): number[] {
+  const oc = R.getOC();
+  const T = oc.TopAbs_ShapeEnum;
+  const ex = new oc.TopExp_Explorer(shape, T.TopAbs_FACE, T.TopAbs_SHAPE);
+  const loc = new oc.TopLoc_Location();
+  const out: number[] = [];
+  try {
+    for (let i = 0; ex.More(); ex.Next(), i++) {
+      const current = ex.Current();
+      const face = oc.TopoDS.Face(current);
+      // (a null handle: null, or an object that says so)
+      const tri = oc.BRep_Tool.Triangulation(face, loc, 0) as (Poly_Triangulation & { isNull?(): boolean }) | null;
+      if (!tri || tri.isNull?.() || tri.NbTriangles() === 0) out.push(i);
+      face.delete();
+      current.delete();
+    }
+  } finally {
+    ex.delete();
+    loc.delete();
+  }
+  return out;
+}
+
+/** Drops from the faces given (in explorer order) their wires, but the outer one, that are not closed. */
+function dropOpenWires(shape: TopoDS_Shape, faces: number[]) {
+  const oc = R.getOC();
+  const T = oc.TopAbs_ShapeEnum;
+  const wanted = new Set(faces);
+  const builder = new oc.TopoDS_Builder();
+  const ex = new oc.TopExp_Explorer(shape, T.TopAbs_FACE, T.TopAbs_SHAPE);
+  try {
+    for (let i = 0; ex.More(); ex.Next(), i++) {
+      if (!wanted.has(i)) continue;
+      const face = ex.Current();
+      const outer = oc.BRepTools.OuterWire(oc.TopoDS.Face(face));
+      const open: TopoDS_Shape[] = [];
+      const wires = new oc.TopExp_Explorer(face, T.TopAbs_WIRE, T.TopAbs_SHAPE);
+      for (; wires.More(); wires.Next()) {
+        const w = wires.Current();
+        if (!w.IsSame(outer) && !oc.BRep_Tool.IsClosed(w)) open.push(w);
+      }
+      wires.delete();
+      if (!open.length) continue;
+      face.Free(true);
+      for (const w of open) builder.Remove(face, w);
+    }
+  } finally {
+    ex.delete();
+    builder.delete();
+  }
+}
+
+/**
+ * The shape meshed for export, every face with its triangles — or an error, not a file with holes.
+ *
+ * The mesher gives up on a face that has an open wire of its own: the INTERNAL edge left in a wall that another
+ * body touches along a line (a cylinder tangent to it). The writers skip a face without triangles, and the mesh
+ * would be open there — a slicer then fills the cavity it bounded. A copy of the shape without such wires is meshed
+ * instead (the edge still bounds the faces on its other side, as before); then once more, finer.
+ */
+export function meshedForExport(shape: Shape3D, tolerance: number, angularTolerance: number): Shape3D {
+  const oc = R.getOC();
+  oc.ReplicadMeshExtractor.mesh(shape.wrapped, tolerance, angularTolerance);
+  const failed = unmeshedFaces(shape.wrapped);
+  if (!failed.length) return shape;
+  // a copy of the topology and geometry: the parts' own shapes stay as they are
+  const trsf = new oc.gp_Trsf();
+  const copier = new oc.BRepBuilderAPI_Transform(shape.wrapped, trsf, true, false);
+  const copy = copier.Shape();
+  trsf.delete();
+  copier.delete();
+  dropOpenWires(copy, failed);
+  oc.ReplicadMeshExtractor.mesh(copy, tolerance, angularTolerance);
+  if (unmeshedFaces(copy).length) oc.ReplicadMeshExtractor.mesh(copy, tolerance / 4, angularTolerance / 2);
+  if (unmeshedFaces(copy).length) {
+    copy.delete();
+    throw new Error(UNMESHED_FACES);
+  }
+  return R.cast(copy) as Shape3D;
+}
+
 /** Plain mesh at a requested resolution (for STL/OBJ/3MF export). */
 export function exportMesh(shape: Shape3D, tolerance: number, angularTolerance: number) {
-  const m = shape.mesh({ tolerance, angularTolerance });
+  const m = meshedForExport(shape, tolerance, angularTolerance).mesh({ tolerance, angularTolerance });
   return {
     positions: new Float32Array(m.vertices),
     normals: new Float32Array(m.normals),

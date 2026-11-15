@@ -1245,6 +1245,7 @@ const RU: Record<string, string> = {
   'Geometry operation failed': 'Геометрическая операция не выполнена',
   'No file data': 'Нет данных файла',
   'No parts to export': 'Нет деталей для экспорта',
+  'Some faces could not be split into triangles: the mesh would have holes': 'Не удалось разбить некоторые грани на треугольники: в сетке были бы дыры',
   'Nothing to fuse': 'Нечего объединять',
   'Nothing to remove: the tool does not touch any part': 'Нечего вырезать: инструмент не касается ни одной детали',
   'Nothing to intersect': 'Нечего пересекать',

@@ -8,7 +8,7 @@ import { perpendicular as perpendicularTo, v3 } from '../core/math';
 import { FeatureError, bboxOf, bodiesOf, compoundOf, isSurface, prism, type Shape3D } from './geom';
 import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
-import { exportMesh, meshPart, topologyOf } from './meshing';
+import { exportMesh, meshedForExport, meshPart, topologyOf } from './meshing';
 import type {
   BuildRequest,
   BuildResult,
@@ -1166,7 +1166,8 @@ export async function stepOf(items: Exported[], unit: 'mm' | 'in' = 'mm'): Promi
 /** STL of shapes as one mesh. */
 export async function stlOf(items: Exported[], tolerance: number, angularTolerance: number, binary: boolean): Promise<Uint8Array> {
   if (!items.length) throw new Error('No parts to export');
-  const shape = compoundOf(items.map((i) => i.shape));
+  // every face with its triangles (the writer would leave out one without them: the mesh open there)
+  const shape = meshedForExport(compoundOf(items.map((i) => i.shape)), tolerance, angularTolerance);
   return blobToBytes(shape.blobSTL({ tolerance, angularTolerance, binary }));
 }
 

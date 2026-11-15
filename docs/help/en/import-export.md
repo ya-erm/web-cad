@@ -25,6 +25,8 @@ The **WebCAD project** tab of the same dialog saves the whole document instead o
 
 **Resolution** (**Coarse**, **Medium**, **Fine**) sets the mesh accuracy for STL, OBJ, and 3MF: the higher it is, the smoother the curved surfaces and the larger the file. **Units**: mm or inch. Several selected parts are saved to one file. The format, resolution, and units of the last export are remembered in this browser and picked in the dialog right away the next time.
 
+The STL, OBJ, and 3MF mesh includes every face of the body, so it is closed, with no open edges. A face the kernel cannot split into triangles (a wall another body touches along a line, for example) is fixed in a copy of the body and meshed again. If that does not help either, the export fails with "Some faces could not be split into triangles", and no file with holes is saved.
+
 The file is named after the part when there is one, otherwise after the document. When the document is now one of its [versions](versions) — the version is open for viewing, or the document has not changed since it was made — the version's name is added: "Part v3.stl". When something changed after the latest version, the name has no version.
 
 ## Exporting an assembly {#export-assembly}
