@@ -3962,18 +3962,52 @@ body.panel-resizing-y * {
   font-size: 12px;
   z-index: 30;
 }
-.embed-hint {
+/* the top left corner of the graphics area: what measuring wants clicked, the controls (clear of the view cube) */
+.embed-corner {
   position: absolute;
   top: 8px;
   left: 8px;
-  width: min(320px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 150px);
+  z-index: 45;
+  pointer-events: none;
+}
+.embed-corner > * {
+  pointer-events: auto;
+}
+.embed-hint {
+  width: min(320px, 100%);
   padding: 6px 10px 10px;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-  z-index: 45;
   font-size: 12px;
+}
+.embed-measure-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 5px 6px 5px 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.embed-measure-hint .icon-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+.measure-panel .mrow.mhead span {
+  font-weight: 600;
+  color: var(--text);
 }
 .embed-hint-head {
   display: flex;
@@ -4012,5 +4046,9 @@ body.panel-resizing-y * {
   }
   .embed .view-menu {
     top: 104px;
+  }
+  /* left of the view menu's buttons */
+  .embed-corner {
+    max-width: calc(100% - 172px);
   }
 }

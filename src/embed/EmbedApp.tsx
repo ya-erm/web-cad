@@ -4,10 +4,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useDoc } from '../store/docStore';
-import { useEditor } from '../store/editorStore';
+import { setRotationMode, useEditor } from '../store/editorStore';
 import { startRebuildLoop } from '../store/rebuild';
 import { Viewport } from '../ui/Viewport';
-import { ContextMenu } from '../ui/Overlays';
+import { ContextMenu, MeasureRows } from '../ui/Overlays';
+import { measureSelection } from './measure';
+import type { Measured } from './meshMeasure';
 import { TooltipLayer } from '../ui/Tooltip';
 import { Icon } from '../ui/icons';
 import { handleViewerKey } from '../ui/keyboard';
@@ -33,8 +35,61 @@ function ControlsHint({ onClose }: { onClose: () => void }) {
         <li>{t('Move: drag with the middle button or Shift + left button, or with two fingers')}</li>
         <li>{t('Zoom: the mouse wheel or pinch')}</li>
         <li>{t('The whole model: the Zoom to fit button or F; standard views: the cube and the Views menu')}</li>
+        <li>{t('The turntable button keeps the Z axis upright while turning')}</li>
+        <li>{t('The ruler button measures: click faces, edges and vertices')}</li>
       </ul>
     </div>
+  );
+}
+
+/** Measuring: what to click (and a button that drops the selection). */
+function MeasureHint() {
+  const selected = useEditor((s) => s.selection.length > 0);
+  return (
+    <div className="embed-measure-hint" role="status">
+      <Icon name="measure" size={14} />
+      <span>{t(selected ? 'One more — the distance and angle; a click on a selected one drops it' : 'Click a face, an edge or a vertex; two of them — the distance between them')}</span>
+      {selected && (
+        <button className="icon-btn" title={t('Clear selection')} aria-label={t('Clear selection')} onClick={() => useEditor.getState().clearSelection()}>
+          <Icon name="close" size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Measuring: the values of the selection (one — its size, two — the distance and angle between them) or the model's overall size. */
+function MeasureResults() {
+  const selection = useEditor((s) => s.selection);
+  const build = useEditor((s) => s.build);
+  const units = useViewer((s) => s.units);
+  const [res, setRes] = useState<Measured | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    measureSelection(selection)
+      .then((r) => !cancelled && setRes(r))
+      .catch((e) => {
+        console.warn('The embedded viewer could not measure the selection', e);
+        if (!cancelled) setRes(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selection, build]);
+  if (!res || !res.items.length) return null;
+  return (
+    <MeasureRows
+      res={res}
+      units={units}
+      selection={selection}
+      top={
+        !selection.length && (
+          <div className="mrow mhead">
+            <span>{t('Overall size of the model')}</span>
+          </div>
+        )
+      }
+    />
   );
 }
 
@@ -83,6 +138,7 @@ export default function EmbedApp() {
   const framed = window.parent !== window;
   const v = useViewer();
   const kernelReady = useEditor((s) => s.kernelReady);
+  const turntable = useEditor((s) => s.rotationMode === 'turntable');
   const [hint, setHint] = useState(false);
 
   useEffect(() => {
@@ -96,12 +152,17 @@ export default function EmbedApp() {
       show: showFile,
     });
     const onMessage = (e: MessageEvent) => void session.receive(e);
+    // the view's keys; Esc drops the selection
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') useEditor.getState().clearSelection();
+      else handleViewerKey(e);
+    };
     window.addEventListener('message', onMessage);
-    window.addEventListener('keydown', handleViewerKey);
+    window.addEventListener('keydown', onKey);
     session.ready();
     return () => {
       window.removeEventListener('message', onMessage);
-      window.removeEventListener('keydown', handleViewerKey);
+      window.removeEventListener('keydown', onKey);
     };
   }, [params, framed]);
 
@@ -137,12 +198,38 @@ export default function EmbedApp() {
         </span>
         <TabPicker />
         {graphics && <span className="embed-units">{v.units}</span>}
+        <button
+          className={'icon-btn' + (turntable ? ' active' : '')}
+          title={t(turntable ? 'Rotation about the vertical (Z up): click for free rotation' : 'Free rotation: click to keep the Z axis upright')}
+          aria-pressed={turntable}
+          onClick={() => setRotationMode(turntable ? 'free' : 'turntable')}
+        >
+          <Icon name="rotateLeft" size={16} />
+        </button>
+        <button
+          className={'icon-btn' + (v.measuring ? ' active' : '')}
+          title={t('Measure')}
+          aria-pressed={v.measuring}
+          disabled={!graphics}
+          onClick={() => {
+            // measuring ends with its selection
+            if (v.measuring) useEditor.getState().clearSelection();
+            useViewer.setState({ measuring: !v.measuring });
+          }}
+        >
+          <Icon name="measure" size={16} />
+        </button>
         <button className={'icon-btn' + (hint ? ' active' : '')} title={t('View controls')} onClick={() => setHint(!hint)}>
           <Icon name="help" size={16} />
         </button>
       </div>
       <div className="graphics">
         {graphics && <Viewport key={v.key} />}
+        <div className="embed-corner">
+          {v.phase === 'shown' && v.measuring && <MeasureHint />}
+          {hint && <ControlsHint onClose={() => setHint(false)} />}
+        </div>
+        {v.phase === 'shown' && v.measuring && <MeasureResults />}
         {v.phase === 'waiting' && <Message title={t(kernelReady ? 'Waiting for the model…' : 'Loading geometry kernel…')} />}
         {v.phase === 'error' && <Message icon="warning" title={t('The model could not be opened')} text={v.error} />}
         {v.phase === 'shown' && v.empty && <EmptyNote />}
@@ -151,7 +238,6 @@ export default function EmbedApp() {
             <Icon name="warning" size={14} /> {t('Some features of the document could not be built: the model may be incomplete')}
           </div>
         )}
-        {hint && <ControlsHint onClose={() => setHint(false)} />}
         <span className="embed-version">WebCAD {APP_VERSION}</span>
       </div>
       <ContextMenu />

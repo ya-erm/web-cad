@@ -48,7 +48,7 @@ function bodyMesh(mesh: Mesh, body: StlBody, id: string, name: string, meshKey: 
       }
     });
   });
-  const { edgePositions, edgeRanges, edges } = creaseEdges(mesh, body, unit);
+  const { edgePositions, edgeRanges, edges, corners } = creaseEdges(mesh, body, unit);
   const center: Vec3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
   return {
     id,
@@ -63,7 +63,8 @@ function bodyMesh(mesh: Mesh, body: StlBody, id: string, name: string, meshKey: 
     faceRanges: Int32Array.of(0, n * 3),
     edgePositions,
     edgeRanges,
-    vertices: new Float32Array(0),
+    // the corners of the shape (where its edges meet): points to measure from
+    vertices: Float32Array.from(corners.flatMap((v) => pts[v])),
     faces: [{ type: 'MESH', center, area }],
     edges,
     bbox: [lo, hi],
@@ -71,8 +72,11 @@ function bodyMesh(mesh: Mesh, body: StlBody, id: string, name: string, meshKey: 
   };
 }
 
-/** The edges of the shape as polylines: segments between welded corners joined where only two of them meet. */
-function creaseEdges(mesh: Mesh, body: StlBody, unit: Vec3[]): { edgePositions: Float32Array; edgeRanges: Int32Array; edges: EdgeInfo[] } {
+/**
+ * The edges of the shape as polylines: segments between welded corners joined where only two of them meet; the
+ * corners where the polylines end (other than two segments there).
+ */
+function creaseEdges(mesh: Mesh, body: StlBody, unit: Vec3[]): { edgePositions: Float32Array; edgeRanges: Int32Array; edges: EdgeInfo[]; corners: number[] } {
   const { pts, faces } = mesh;
   const N = pts.length;
   // the triangles (their index in the body) on each edge
@@ -148,5 +152,6 @@ function creaseEdges(mesh: Mesh, body: StlBody, unit: Vec3[]): { edgePositions: 
     const end = pts[l[l.length - 1]];
     edges.push({ type: 'MESH', center: pts[l[Math.floor(l.length / 2)]], start, end, length, ...(l[0] === l[l.length - 1] ? { closed: true } : {}) });
   });
-  return { edgePositions, edgeRanges, edges };
+  const corners = [...at].filter(([, list]) => list.length !== 2).map(([v]) => v);
+  return { edgePositions, edgeRanges, edges, corners };
 }

@@ -29,9 +29,11 @@ export interface ViewerState {
   /** Some features of the document failed: the model may be incomplete. */
   failedFeatures: number;
   error: string;
+  /** Measuring: what is selected is measured (nothing selected — the model's overall size). */
+  measuring: boolean;
 }
 
-export const useViewer = create<ViewerState>(() => ({ phase: 'waiting', title: '', units: 'mm', key: '', empty: false, failedFeatures: 0, error: '' }));
+export const useViewer = create<ViewerState>(() => ({ phase: 'waiting', title: '', units: 'mm', key: '', empty: false, failedFeatures: 0, error: '', measuring: false }));
 
 /** A model is to be built this fast (the page around the viewer waits two minutes for it, the download included). */
 export const BUILD_TIMEOUT_MS = 110_000;

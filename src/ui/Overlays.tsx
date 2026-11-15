@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { LengthUnit } from '../core/types';
 import { useEditor } from '../store/editorStore';
 import { activeAssembly, activeStudio, useDoc } from '../store/docStore';
 import { kernel } from '../kernel/client';
@@ -111,6 +112,71 @@ export function Toast() {
   return <div className={'toast' + (toast.kind === 'error' ? ' error' : '')}>{t(toast.text)}</div>;
 }
 
+/** A measurement as the panel shows it (a kernel's answer, the embedded viewer's measure of a mesh). */
+export type Measured = Omit<MeasureResult, 'type' | 'reqId'>;
+
+/**
+ * A measurement's rows: its values in `units` (a distance row picks the segment drawn on the model — the minimum
+ * until another is picked, again for each new `selection`) and the centre of mass (marked on the model while under
+ * the cursor). `mass` formats a mass row (as the parts' materials have it); `top` and `bottom` — rows of their own.
+ */
+export function MeasureRows({ res, units, selection, mass, top, bottom }: { res: Measured; units: LengthUnit; selection: unknown; mass?: (v: number) => string; top?: ReactNode; bottom?: ReactNode }) {
+  // the distance drawn on the model (minimum by default; a click on a row picks another)
+  const [shown, setShown] = useState('min');
+  useEffect(() => setShown('min'), [selection]);
+  useEffect(() => {
+    const line = res.lines?.find((l) => l.key === shown) ?? res.lines?.[0];
+    getEngine()?.setMeasureLine(line?.points ?? null);
+    return () => getEngine()?.setMeasureLine(null);
+  }, [res, shown]);
+  // the centre of mass is marked on the model while its row is under the cursor
+  const [comHover, setComHover] = useState(false);
+  useEffect(() => {
+    getEngine()?.setMassCenter(comHover && res.centerOfMass ? res.centerOfMass : null);
+    return () => getEngine()?.setMassCenter(null);
+  }, [comHover, res]);
+  const f = LENGTH_FACTOR[units];
+  const fmt = (v: number, kind: string) => {
+    switch (kind) {
+      case 'length':
+        return `${formatNumber(v / f, 3)} ${units}`;
+      case 'area':
+        return `${formatNumber(v / f ** 2, 3)} ${units}²`;
+      case 'volume':
+        return `${formatNumber(v / f ** 3, 3)} ${units}³`;
+      case 'mass':
+        return mass ? mass(v) : massText(v / 1000);
+      case 'angle':
+        return `${formatNumber((v * 180) / Math.PI, 3)}°`;
+      default:
+        return formatNumber(v, 4);
+    }
+  };
+  return (
+    <div className="measure-panel">
+      {top}
+      {res.items.map((it) => (
+        <div
+          key={it.label}
+          className={'mrow' + (it.line ? ' mline' : '') + (it.line && it.line === shown ? ' active' : '')}
+          title={it.line ? t('Show on the model') : undefined}
+          onClick={it.line ? () => setShown(it.line!) : undefined}
+        >
+          <span>{t(it.label)}</span>
+          <span>{fmt(it.value, it.kind)}</span>
+        </div>
+      ))}
+      {bottom}
+      {res.centerOfMass && (
+        <div className="mrow mpoint" onMouseEnter={() => setComHover(true)} onMouseLeave={() => setComHover(false)}>
+          <span>{t('Center of mass')}</span>
+          <span>{res.centerOfMass.map((v) => formatNumber(v / f, 2)).join(', ')}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MeasurePanel() {
   const selection = useEditor((s) => s.selection);
   const editing = useEditor((s) => s.editing);
@@ -118,20 +184,6 @@ export function MeasurePanel() {
   const doc = useDoc((s) => s.doc);
   const studio = activeStudio(doc);
   const [res, setRes] = useState<MeasureResult | null>(null);
-  // the distance drawn on the model (minimum by default; a click on a row picks another)
-  const [shown, setShown] = useState('min');
-  useEffect(() => setShown('min'), [selection]);
-  useEffect(() => {
-    const line = res?.lines?.find((l) => l.key === shown) ?? res?.lines?.[0];
-    getEngine()?.setMeasureLine(line?.points ?? null);
-    return () => getEngine()?.setMeasureLine(null);
-  }, [res, shown]);
-  // the centre of mass is marked on the model while its row is under the cursor
-  const [comHover, setComHover] = useState(false);
-  useEffect(() => {
-    getEngine()?.setMassCenter(comHover && res?.centerOfMass ? res.centerOfMass : null);
-    return () => getEngine()?.setMassCenter(null);
-  }, [comHover, res]);
   useEffect(() => {
     if (!studio || editing || !selection.length || selection.length > 200) {
       setRes(null);
@@ -147,63 +199,36 @@ export function MeasurePanel() {
     };
   }, [selection, editing, build, studio?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!res || !res.items.length || !doc) return null;
-  const u = doc.units.length;
-  const f = LENGTH_FACTOR[u];
-  const fmt = (v: number, kind: string) => {
-    switch (kind) {
-      case 'length':
-        return `${formatNumber(v / f, 3)} ${u}`;
-      case 'area':
-        return `${formatNumber(v / f ** 2, 3)} ${u}²`;
-      case 'volume':
-        return `${formatNumber(v / f ** 3, 3)} ${u}³`;
-      case 'mass': {
-        // the kernel gives cm³ (density 1): the part's own density, steel without a material
-        const partId = selection[0]?.kind === 'part' ? selection[0].partId : null;
-        return massText((v * partDensity(partId ? studio?.parts[partId] : undefined)) / 1000);
-      }
-      case 'angle':
-        return `${formatNumber((v * 180) / Math.PI, 3)}°`;
-      default:
-        return formatNumber(v, 4);
-    }
-  };
+  // the kernel gives the mass in g of cm³ (density 1): the part's own density, steel without a material
+  const partId = selection[0]?.kind === 'part' ? selection[0].partId : null;
+  const mass = (v: number) => massText((v * partDensity(partId ? studio?.parts[partId] : undefined)) / 1000);
   // one part: its material (a click changes it); several: their total mass by their materials
   const onePart = selection.length === 1 && selection[0].kind === 'part' && res.items.some((i) => i.kind === 'mass') ? selection[0].partId : null;
   const meta = onePart ? studio?.parts[onePart] : undefined;
   const totalMass = res.volumes?.reduce((s, x) => s + massKg(x.volume, partDensity(studio?.parts[x.partId])), 0);
   return (
-    <div className="measure-panel">
-      {onePart && (
-        <div className="mrow mline" title={t('Change the material')} onClick={() => useEditor.setState({ materialOpen: { partIds: [onePart] } })}>
-          <span>{t('Material')}</span>
-          <span>{meta?.material ? `${meta.material} · ${formatNumber(partDensity(meta), 3)} g/cm³` : `${t('No material')} (${formatNumber(DEFAULT_DENSITY, 3)} g/cm³)`}</span>
-        </div>
-      )}
-      {res.items.map((it) => (
-        <div
-          key={it.label}
-          className={'mrow' + (it.line ? ' mline' : '') + (it.line && it.line === shown ? ' active' : '')}
-          title={it.line ? t('Show on the model') : undefined}
-          onClick={it.line ? () => setShown(it.line!) : undefined}
-        >
-          <span>{t(it.label)}</span>
-          <span>{fmt(it.value, it.kind)}</span>
-        </div>
-      ))}
-      {totalMass !== undefined && (
-        <div className="mrow">
-          <span>{t('Total mass')}</span>
-          <span>{massText(totalMass)}</span>
-        </div>
-      )}
-      {res.centerOfMass && (
-        <div className="mrow mpoint" onMouseEnter={() => setComHover(true)} onMouseLeave={() => setComHover(false)}>
-          <span>{t('Center of mass')}</span>
-          <span>{res.centerOfMass.map((v) => formatNumber(v / f, 2)).join(', ')}</span>
-        </div>
-      )}
-    </div>
+    <MeasureRows
+      res={res}
+      units={doc.units.length}
+      selection={selection}
+      mass={mass}
+      top={
+        onePart && (
+          <div className="mrow mline" title={t('Change the material')} onClick={() => useEditor.setState({ materialOpen: { partIds: [onePart] } })}>
+            <span>{t('Material')}</span>
+            <span>{meta?.material ? `${meta.material} · ${formatNumber(partDensity(meta), 3)} g/cm³` : `${t('No material')} (${formatNumber(DEFAULT_DENSITY, 3)} g/cm³)`}</span>
+          </div>
+        )
+      }
+      bottom={
+        totalMass !== undefined && (
+          <div className="mrow">
+            <span>{t('Total mass')}</span>
+            <span>{massText(totalMass)}</span>
+          </div>
+        )
+      }
+    />
   );
 }
 

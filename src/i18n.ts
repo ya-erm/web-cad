@@ -1352,6 +1352,14 @@ const RU: Record<string, string> = {
   'Zoom: the mouse wheel or pinch': 'Масштаб — колесо мыши или щипок двумя пальцами',
   'The whole model: the Zoom to fit button or F; standard views: the cube and the Views menu':
     'Модель целиком — кнопка «Показать всё» или F; стандартные виды — куб и меню «Виды»',
+  'The turntable button keeps the Z axis upright while turning': 'Кнопка со стрелкой вращения держит ось Z вертикальной при вращении',
+  'The ruler button measures: click faces, edges and vertices': 'Кнопка с линейкой включает измерения: щёлкайте грани, рёбра и вершины',
+  'Rotation about the vertical (Z up): click for free rotation': 'Вращение вокруг вертикали (Z вверх): нажмите для свободного вращения',
+  'Free rotation: click to keep the Z axis upright': 'Свободное вращение: нажмите, чтобы ось Z оставалась вертикальной',
+  'Click a face, an edge or a vertex; two of them — the distance between them': 'Щёлкните грань, ребро или вершину; два элемента — расстояние между ними',
+  'One more — the distance and angle; a click on a selected one drops it': 'Ещё один — расстояние и угол; щелчок по выбранному снимает его',
+  'Clear selection': 'Снять выбор',
+  'Overall size of the model': 'Габариты модели',
 };
 
 export function t(s: string): string {

@@ -22,7 +22,29 @@ Files up to 20 MB are supported.
 
 The **Zoom to fit** button (or the `F` key) brings the whole model back into view. Pick standard views with the view cube and the **Views** menu; the view keys work too — `Shift`+`1`…`7`, the arrows, `Z` (see [View controls](view-controls)). Clicking a face selects it. For a planar face of a STEP model or a project, **View normal to** turns the model to face it, and a [section view](section-view) can go through it; a section through a standard plane is always available. The **?** button in the bar above the model reminds you of the controls.
 
+The button with a rotation arrow in the bar above the model locks the axis: the view turns about the vertical, the Z axis stays upright on the screen and the horizon level (like **Turntable (Z up)** in the settings of WebCAD itself). Press it again for free rotation. The mode is remembered in this browser.
+
 Once loaded, the whole model is shown in the isometric view. If the chosen tab has no parts or sketches, a note in the middle of the window says so. If some features of the document fail to build, a warning appears at the bottom: the model may be incomplete.
+
+## Measuring {#measure}
+
+The ruler button in the bar above the model turns measuring on. With nothing selected, the panel at the bottom right shows the **overall size of the model** along X, Y and Z. Click faces, edges and vertices, and the panel shows their sizes:
+
+| Selected | Values |
+|---|---|
+| Edge | **Length**; for a circle or an arc (a hole's rim, for example) — **Radius** and **Diameter** |
+| Face | **Area**; for a cylindrical face — **Radius**. In an STL a face is the whole body: **Area** and **Volume** |
+| Vertex | Coordinates **X**, **Y**, **Z** |
+| Two items | **Minimum distance** and its projections **ΔX**, **ΔY**, **ΔZ**, **Maximum distance**; for circles, cylinders and spheres — **Center to center**; for lines and planes — **Angle** |
+| Several edges or faces | **Total length** or **Total area** |
+
+The minimum distance is drawn on the model as an orange dashed line; click the **Maximum distance** or **Center to center** row to show that one. Clicking a selected item again drops it; the cross in the hint or `Esc` clears the whole selection. Values are in the model's units (millimeters for STEP and STL).
+
+STEP models and projects are measured exactly, as with [Measure](measure) in WebCAD itself, assemblies included. An STL has no exact geometry, so its triangle mesh is measured:
+
+- edges are its crease lines and borders, vertices are their corners;
+- a circle is recognized when the points of an edge lie on it; its radius and diameter come from those points, the corners of the polygon the mesh uses for the circle;
+- a distance to a body is measured to its triangles: exact for flat faces, to the mesh's accuracy for curved ones.
 
 ## When a model does not open {#errors}
 
