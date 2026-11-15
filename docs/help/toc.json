@@ -150,6 +150,7 @@
       "title": { "ru": "Дополнительно", "en": "More" },
       "pages": [
         { "id": "offline", "icon": "download", "title": { "ru": "Офлайн-работа и хранение", "en": "Offline use and storage" } },
+        { "id": "embed", "icon": "isoView", "title": { "ru": "Встроенный просмотр", "en": "Embedded viewer" } },
         { "id": "agent-api", "title": { "ru": "Agent API", "en": "Agent API" } },
         { "id": "help-authoring", "icon": "edit", "title": { "ru": "Как устроена справка", "en": "About this help" } }
       ]

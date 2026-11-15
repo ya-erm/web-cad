@@ -1,6 +1,7 @@
 // Local persistence in IndexedDB: no accounts, everything stays in the browser.
 
 import type { CadDocument, DocumentSummary, DocumentVersion } from '../core/types';
+import { embedMode, storageBlocked } from '../embed/mode';
 
 const DB_NAME = 'webcad';
 const DB_VERSION = 2;
@@ -13,6 +14,8 @@ const VERSION_DATA = 'versionData';
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function db(): Promise<IDBDatabase> {
+  // the embedded viewer neither reads nor writes the documents of this browser
+  if (embedMode()) return Promise.reject(storageBlocked());
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);

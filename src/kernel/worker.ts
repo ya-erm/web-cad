@@ -6,6 +6,7 @@ import wasmUrl from 'replicad-opencascadejs/wasm?url';
 import { setOC } from 'replicad';
 import { StudioBuilder, assemblyStepOf, errorMessage, placedShape, stepOf, stlOf } from './build';
 import { transferablesOf } from './meshing';
+import { stlMeshes } from './stlMesh';
 import { loadFonts } from '../sketch/text';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -109,6 +110,11 @@ async function handle(req: WorkerRequest) {
       builderFor(req.studioKey).place(req.instances, (key) => builders.get(key));
       post({ type: 'place', reqId: req.reqId });
       return;
+    case 'stlMesh': {
+      const parts = stlMeshes(new Uint8Array(req.data), req.key);
+      post({ type: 'stlMesh', reqId: req.reqId, parts }, parts.flatMap(transferablesOf));
+      return;
+    }
     case 'reset':
       // shapes no longer referenced are deleted from the kernel's memory as they are collected
       builders.clear();

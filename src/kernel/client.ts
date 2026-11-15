@@ -12,6 +12,7 @@ import type {
   PlacedPart,
   ProjectionRequest,
   ProjectionResult,
+  StlMeshResult,
   ViewAnchorRequest,
   ViewAnchorResult,
   ViewRefsRequest,
@@ -119,12 +120,12 @@ export class KernelClient {
     }, 5000);
   }
 
-  private send<R extends WorkerResponse>(req: Omitted<WorkerRequest> & { type: WorkerRequest['type'] }): Promise<R> {
+  private send<R extends WorkerResponse>(req: Omitted<WorkerRequest> & { type: WorkerRequest['type'] }, transfer: Transferable[] = []): Promise<R> {
     const reqId = this.nextId++;
     return new Promise<R>((resolve, reject) => {
       this.pending.set(reqId, { resolve: resolve as (v: WorkerResponse) => void, reject });
       this.watch();
-      this.worker.postMessage({ ...req, reqId } as WorkerRequest);
+      this.worker.postMessage({ ...req, reqId } as WorkerRequest, transfer);
     });
   }
 
@@ -173,6 +174,22 @@ export class KernelClient {
   place(studioKey: string, instances: PlacedPart[]): Promise<unknown> {
     return this.send({ type: 'place', studioKey, instances } as never);
   }
+
+  /** An STL file's bodies as meshes (the embedded viewer); its bytes go to the worker (`data` is empty after). */
+  stlMesh(data: ArrayBuffer, key: string): Promise<StlMeshResult> {
+    return this.send<StlMeshResult>({ type: 'stlMesh', data, key } as never, [data]);
+  }
+
+  /** Stop the worker for good (the page is closed): its kernel's memory is freed, the requests waiting fail. */
+  dispose() {
+    this.worker.onmessage = null;
+    this.worker.onerror = null;
+    this.worker.terminate();
+    const waiting = [...this.pending.values()];
+    this.pending.clear();
+    this.stopWatchdog();
+    for (const p of waiting) p.reject(new KernelRestartedError('The geometry kernel was stopped'));
+  }
 }
 
 let instance: KernelClient | null = null;
@@ -180,4 +197,10 @@ let instance: KernelClient | null = null;
 export function kernel(): KernelClient {
   if (!instance) instance = new KernelClient();
   return instance;
+}
+
+/** Stop the geometry worker if it was started (the page is closed). */
+export function disposeKernel() {
+  instance?.dispose();
+  instance = null;
 }

@@ -456,6 +456,22 @@ export interface PingRequest {
   reqId: number;
 }
 
+/** The embedded viewer: an STL file's bodies as meshes to show as they are (no solids made of them). */
+export interface StlMeshRequest {
+  type: 'stlMesh';
+  reqId: number;
+  /** The file's bytes (transferred). */
+  data: ArrayBuffer;
+  /** Of the meshes' keys: another file, another key. */
+  key: string;
+}
+
+export interface StlMeshResult {
+  type: 'stlMesh';
+  reqId: number;
+  parts: PartMesh[];
+}
+
 export type WorkerRequest =
   | (BuildRequest & { studioKey: string })
   | ExportRequest
@@ -467,6 +483,7 @@ export type WorkerRequest =
   | PlaceRequest
   | ViewPartRequest
   | PingRequest
+  | StlMeshRequest
   /** Forget every builder (another document opened): their shapes' memory goes back to the kernel. */
   | { type: 'reset'; reqId: number };
 
@@ -482,6 +499,7 @@ export type WorkerResponse =
   | { type: 'reset'; reqId: number }
   | ViewPartResult
   | { type: 'ping'; reqId: number }
+  | StlMeshResult
   /** `fatal`: the WebAssembly kernel itself failed (out of memory, a trap) — its state cannot be trusted any more. */
   | { type: 'error'; reqId: number; message: string; fatal?: boolean }
   | { type: 'ready' }

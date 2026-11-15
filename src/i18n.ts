@@ -1311,6 +1311,46 @@ const RU: Record<string, string> = {
     'Касательные к выбранным рёбра тоже включены: остановить скругление на выбранных рёбрах не удалось',
   // help
   Help: 'Справка',
+  // the embedded viewer (#/embed)
+  'The embedded viewer of WebCAD': 'Встроенный просмотр WebCAD',
+  'This site is not allowed to show models in WebCAD.': 'Этому сайту не разрешено показывать модели в WebCAD.',
+  'It shows models inside the sites that embed WebCAD. To work with your documents, open WebCAD itself.':
+    'Он показывает модели внутри сайтов, которые встраивают WebCAD. Чтобы работать со своими документами, откройте сам WebCAD.',
+  'Open WebCAD': 'Открыть WebCAD',
+  'Waiting for the model…': 'Ожидание модели…',
+  'The model could not be opened': 'Не удалось открыть модель',
+  'The model could not be built': 'Не удалось построить модель',
+  'The model could not be shown': 'Не удалось показать модель',
+  'The geometry kernel failed on this model': 'Геометрическое ядро не справилось с этой моделью',
+  'Building the model took too long': 'Построение модели заняло слишком много времени',
+  'Another file is being opened: try again once it is shown': 'Открывается другой файл: повторите, когда он появится',
+  'Only STEP, STL and WebCAD project files can be shown': 'Показать можно только файлы STEP, STL и проекты WebCAD',
+  'The file name is missing or too long': 'Имя файла не указано или слишком длинное',
+  'The file size is not valid': 'Неверный размер файла',
+  'The file is empty': 'Файл пустой',
+  'The file is larger than 20 MB': 'Файл больше 20 МБ',
+  'The file size does not match its data': 'Размер файла не совпадает с его данными',
+  'The file is not a STEP file': 'Это не файл STEP',
+  'The STEP file is damaged or incomplete': 'Файл STEP повреждён или загружен не полностью',
+  'Failed to load STEP file': 'Не удалось прочитать файл STEP',
+  'The file is not an STL file': 'Это не файл STL',
+  'The STL file is damaged or incomplete': 'Файл STL повреждён или загружен не полностью',
+  'The file is not a WebCAD project': 'Это не проект WebCAD',
+  'The WebCAD project is damaged': 'Проект WebCAD повреждён',
+  'The document has no Part Studios or assemblies: drawings are not shown in the viewer':
+    'В документе нет Part Studio и сборок: чертежи во встроенном просмотре не показываются',
+  'This tab has no parts or sketches to show': 'На этой вкладке нет деталей и эскизов',
+  'This assembly has no parts to show': 'В этой сборке нет деталей',
+  'Some features of the document could not be built: the model may be incomplete':
+    'Некоторые фичи документа не построились: модель может быть неполной',
+  Tab: 'Вкладка',
+  'View controls': 'Управление видом',
+  'Turn: drag with the left or right button, or with one finger': 'Вращение — перетаскивание левой или правой кнопкой мыши либо одним пальцем',
+  'Move: drag with the middle button or Shift + left button, or with two fingers':
+    'Сдвиг — перетаскивание средней кнопкой или Shift + левой кнопкой либо двумя пальцами',
+  'Zoom: the mouse wheel or pinch': 'Масштаб — колесо мыши или щипок двумя пальцами',
+  'The whole model: the Zoom to fit button or F; standard views: the cube and the Views menu':
+    'Модель целиком — кнопка «Показать всё» или F; стандартные виды — куб и меню «Виды»',
 };
 
 export function t(s: string): string {

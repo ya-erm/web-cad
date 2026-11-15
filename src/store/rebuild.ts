@@ -17,9 +17,25 @@ import { t } from '../i18n';
 
 const PART_PALETTE = ['#a9bfd6', '#d8c3a1', '#a8c99e', '#d6a6a6', '#b3a8d6', '#9fcfcc', '#d9c27a', '#c9a6c9'];
 
+/** A palette colour by creation order (parts given no colour of their own). */
+export const paletteColor = (i: number) => PART_PALETTE[i % PART_PALETTE.length];
+
 let seq = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let lastInputs: unknown[] = [];
+
+/** Each rebuild of the open tab that ended: built (its result is the editor store's `build` now) or failed — why. */
+export type Rebuilt = { ok: true } | { ok: false; error: string };
+export const rebuildListeners = new Set<(r: Rebuilt) => void>();
+const rebuilt = (r: Rebuilt) => rebuildListeners.forEach((l) => l(r));
+
+/** The rebuilds under way are not wanted any more (another model is shown): their results are dropped. */
+export function dropRebuilds() {
+  seq++;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  lastInputs = [];
+}
 
 function inputsOf(): unknown[] | null {
   const doc = useDoc.getState().doc;
@@ -52,8 +68,7 @@ function sameInputs(a: unknown[], b: unknown[]) {
 export function partColorFor(studio: PartStudioTab, partId: string, order: string[]): string {
   const c = studio.parts[partId]?.color;
   if (c) return c;
-  const i = Math.max(0, order.indexOf(partId));
-  return PART_PALETTE[i % PART_PALETTE.length];
+  return paletteColor(Math.max(0, order.indexOf(partId)));
 }
 
 /** The geometry worker's builder of a Part Studio used as a Derived source (apart from its own tab's builder). */
@@ -142,6 +157,7 @@ async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
     build.timeMs = performance.now() - t0;
     useAssembly.setState({ sources, missing, failedMates });
     useEditor.setState({ build, building: false });
+    rebuilt({ ok: true });
     if (moved)
       useDoc.getState().update(
         (d) => {
@@ -155,6 +171,7 @@ async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
     if (mySeq === seq) {
       useEditor.setState({ building: false });
       useEditor.getState().showToast(`Rebuild failed: ${(e as Error).message}`, 'error');
+      rebuilt({ ok: false, error: (e as Error).message });
     }
   }
 }
@@ -201,11 +218,13 @@ async function run() {
     for (const p of res.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     if (res.preview) for (const p of res.preview.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     useEditor.setState({ build: res, building: false });
+    rebuilt({ ok: true });
   } catch (e) {
     if (e instanceof SupersededError) return;
     if (mySeq === seq) {
       useEditor.setState({ building: false });
       useEditor.getState().showToast(`Rebuild failed: ${(e as Error).message}`, 'error');
+      rebuilt({ ok: false, error: (e as Error).message });
     }
   }
 }

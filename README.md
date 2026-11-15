@@ -65,6 +65,7 @@ npm run serve        # локальный сервер dist/: http://localhost:4
   - размеры, примечания;
   - экспорт в PDF, SVG, DXF.
 - **Экспорт**: STEP, STL (бинарный и ASCII), OBJ, 3MF; DXF эскиза.
+- **Встроенный просмотр** (`#/embed`): разрешённый сайт показывает в iframe модель STEP, STL или `.webcad.json`, переданную через `postMessage` (WebCAD Embed Protocol v1, `src/embed/`), — только просмотр, без доступа к документам браузера.
 
 ## Управление
 

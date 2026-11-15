@@ -3,6 +3,7 @@
 // its subfolders — are listed, read and written in place; subfolders are made, renamed and moved.
 
 import { t } from '../i18n';
+import { embedMode, storageBlocked } from '../embed/mode';
 
 /** Parts of the File System Access API that TypeScript's DOM library does not describe yet. */
 type PermissionMode = { mode: 'read' | 'readwrite' };
@@ -38,6 +39,8 @@ const OLD_FOLDER = 'folder';
 
 let opened: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
+  // the embedded viewer never touches the folders chosen in this browser
+  if (embedMode()) return Promise.reject(storageBlocked());
   return (opened ??= new Promise((resolve, reject) => {
     const r = indexedDB.open(DB, 1);
     r.onupgradeneeded = () => STORES.forEach((s) => r.result.createObjectStore(s));

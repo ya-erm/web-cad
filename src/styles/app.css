@@ -3864,3 +3864,153 @@ body.panel-resizing-y * {
   color: var(--text-2);
   padding: 2px 4px 6px;
 }
+
+/* ---------------------------------------------------------------------------
+   The embedded viewer (#/embed): a bar with the file's name and tabs over the graphics area — in a site's iframe,
+   down to a phone's width
+   --------------------------------------------------------------------------- */
+.embed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.embed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  flex: none;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  min-width: 0;
+}
+.embed-logo {
+  color: var(--accent);
+  font-size: 15px;
+}
+.embed-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.embed-tabs {
+  min-width: 0;
+  max-width: 45%;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 0 4px;
+}
+.embed-units {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.embed .graphics {
+  flex: 1;
+  min-height: 0;
+}
+/* fingers turn, move and zoom the model, not the page */
+.embed .viewport-canvas,
+.embed .viewcube {
+  touch-action: none;
+}
+.embed-message {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 40;
+  color: var(--text-2);
+}
+.embed-message .loading-card {
+  max-width: 420px;
+  text-align: center;
+}
+.embed-message-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.embed-message-text {
+  font-size: 12px;
+  line-height: 1.45;
+}
+/* an empty tab: the view's buttons stay usable around the note */
+.embed-empty {
+  pointer-events: none;
+}
+.embed-note {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  border: 1px solid #ecd28b;
+  border-radius: 6px;
+  background: #fff8e1;
+  font-size: 12px;
+  z-index: 30;
+}
+.embed-hint {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: min(320px, calc(100% - 16px));
+  padding: 6px 10px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  z-index: 45;
+  font-size: 12px;
+}
+.embed-hint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+.embed-hint ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.embed-version {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  color: var(--text-3);
+  font-size: 11px;
+  pointer-events: none;
+}
+.embed-denied {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+}
+.embed-open {
+  position: relative;
+  z-index: 41;
+  margin-top: 200px;
+  text-decoration: none;
+}
+@media (max-width: 480px) {
+  .embed .viewcube {
+    transform: scale(0.8);
+    transform-origin: top right;
+  }
+  .embed .view-menu {
+    top: 104px;
+  }
+}

@@ -55,6 +55,73 @@ function isTyping(e: KeyboardEvent) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
 
+/**
+ * The keys of the view (every mode, the embedded viewer too): standard views, fit, normal to, zoom, turning, planes,
+ * sketches, section. True when the key was one of them.
+ */
+export function handleViewKey(e: KeyboardEvent): boolean {
+  const ed = useEditor.getState();
+  const ctrl = e.ctrlKey || e.metaKey;
+  // Ctrl+arrows: turn the view by 5°
+  if (ctrl && !e.shiftKey && e.code.startsWith('Arrow')) {
+    e.preventDefault();
+    if (e.code === 'ArrowLeft') ed.view({ kind: 'rotate', axis: 'h', deg: -5 });
+    if (e.code === 'ArrowRight') ed.view({ kind: 'rotate', axis: 'h', deg: 5 });
+    if (e.code === 'ArrowUp') ed.view({ kind: 'rotate', axis: 'v', deg: -5 });
+    if (e.code === 'ArrowDown') ed.view({ kind: 'rotate', axis: 'v', deg: 5 });
+    return true;
+  }
+  if (ctrl) return false;
+  if (e.shiftKey && /^Digit[1-7]$/.test(e.code)) {
+    e.preventDefault();
+    ed.view({ kind: 'std', view: VIEW_KEYS[Number(e.code.slice(5)) - 1] });
+    return true;
+  }
+  if (!e.shiftKey && e.code === 'KeyF') {
+    ed.view({ kind: 'fit' });
+    return true;
+  }
+  if (!e.shiftKey && e.code === 'KeyN') {
+    normalTo();
+    return true;
+  }
+  if (!e.shiftKey && e.code === 'KeyP') {
+    useEditor.setState({ showPlanes: !ed.showPlanes });
+    return true;
+  }
+  if (e.shiftKey && e.code === 'KeyH') {
+    useEditor.setState({ showSketches: !ed.showSketches });
+    return true;
+  }
+  if (e.shiftKey && e.code === 'KeyX') {
+    toggleSection();
+    return true;
+  }
+  if (e.code.startsWith('Arrow')) {
+    e.preventDefault();
+    const deg = e.shiftKey ? 90 : 15;
+    if (e.code === 'ArrowLeft') ed.view({ kind: 'rotate', axis: 'h', deg: -deg });
+    if (e.code === 'ArrowRight') ed.view({ kind: 'rotate', axis: 'h', deg });
+    if (e.code === 'ArrowUp') ed.view({ kind: 'rotate', axis: 'v', deg: -deg });
+    if (e.code === 'ArrowDown') ed.view({ kind: 'rotate', axis: 'v', deg });
+    return true;
+  }
+  if (!e.shiftKey && e.code === 'KeyZ') {
+    ed.view({ kind: 'zoom', factor: 1.25 });
+    return true;
+  }
+  if (e.shiftKey && e.code === 'KeyZ') {
+    ed.view({ kind: 'zoom', factor: 0.8 });
+    return true;
+  }
+  return false;
+}
+
+/** The embedded viewer's keys: the view's only, never in a text field. */
+export function handleViewerKey(e: KeyboardEvent) {
+  if (!isTyping(e) && !e.altKey) handleViewKey(e);
+}
+
 export function handleKey(e: KeyboardEvent) {
   // F1: help for the active sketch tool / feature dialog (works in text fields too)
   if (e.key === 'F1') {
@@ -83,15 +150,8 @@ export function handleKey(e: KeyboardEvent) {
     }
     return;
   }
-  // Ctrl+arrows: turn the view by 5°
-  if (ctrl && !e.shiftKey && e.code.startsWith('Arrow')) {
-    e.preventDefault();
-    if (e.code === 'ArrowLeft') ed.view({ kind: 'rotate', axis: 'h', deg: -5 });
-    if (e.code === 'ArrowRight') ed.view({ kind: 'rotate', axis: 'h', deg: 5 });
-    if (e.code === 'ArrowUp') ed.view({ kind: 'rotate', axis: 'v', deg: -5 });
-    if (e.code === 'ArrowDown') ed.view({ kind: 'rotate', axis: 'v', deg: 5 });
-    return;
-  }
+  // views (all modes)
+  if (handleViewKey(e)) return;
 
   if (ctrl && e.code === 'KeyZ' && !e.shiftKey) {
     e.preventDefault();
@@ -118,50 +178,6 @@ export function handleKey(e: KeyboardEvent) {
       input.setSelectionRange(input.value.length, input.value.length);
       return;
     }
-  }
-
-  // views (all modes)
-  if (e.shiftKey && /^Digit[1-7]$/.test(e.code)) {
-    e.preventDefault();
-    ed.view({ kind: 'std', view: VIEW_KEYS[Number(e.code.slice(5)) - 1] });
-    return;
-  }
-  if (!e.shiftKey && e.code === 'KeyF') {
-    ed.view({ kind: 'fit' });
-    return;
-  }
-  if (!e.shiftKey && e.code === 'KeyN') {
-    normalTo();
-    return;
-  }
-  if (!e.shiftKey && e.code === 'KeyP') {
-    useEditor.setState({ showPlanes: !ed.showPlanes });
-    return;
-  }
-  if (e.shiftKey && e.code === 'KeyH') {
-    useEditor.setState({ showSketches: !ed.showSketches });
-    return;
-  }
-  if (e.shiftKey && e.code === 'KeyX') {
-    toggleSection();
-    return;
-  }
-  if (e.code.startsWith('Arrow')) {
-    e.preventDefault();
-    const deg = e.shiftKey ? 90 : 15;
-    if (e.code === 'ArrowLeft') ed.view({ kind: 'rotate', axis: 'h', deg: -deg });
-    if (e.code === 'ArrowRight') ed.view({ kind: 'rotate', axis: 'h', deg });
-    if (e.code === 'ArrowUp') ed.view({ kind: 'rotate', axis: 'v', deg: -deg });
-    if (e.code === 'ArrowDown') ed.view({ kind: 'rotate', axis: 'v', deg });
-    return;
-  }
-  if (!e.shiftKey && e.code === 'KeyZ') {
-    ed.view({ kind: 'zoom', factor: 1.25 });
-    return;
-  }
-  if (e.shiftKey && e.code === 'KeyZ') {
-    ed.view({ kind: 'zoom', factor: 0.8 });
-    return;
   }
 
   if (inSketch && engine) {

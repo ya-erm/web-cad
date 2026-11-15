@@ -23,6 +23,7 @@ import { animationOpen } from '../assembly/AnimateUI';
 import { explodeActive } from '../assembly/explode';
 import { findInstance, topInstance } from '../assembly/expand';
 import { explodeCommit, explodePreview } from '../assembly/BomExplodeUI';
+import { embedMode } from '../embed/mode';
 
 /** Instances are not dragged and have no triad while the mate dialog, an animation or an exploded view is open. */
 const assemblyHandsOff = () => mateDialogOpen() || animationOpen() || explodeActive();
@@ -326,6 +327,14 @@ export class Engine {
   private firstFit = false;
   private restoredView = false;
   private studioId: string | null = null;
+  /**
+   * The embedded viewer: the view only — the left button (one finger) turns it, two fingers move and zoom it; no
+   * instance is dragged, no menu of a part opens, no view is remembered.
+   */
+  private readonly viewOnly = embedMode();
+  /** Viewer: the pointers (buttons, fingers) down on the graphics area, where each is now. */
+  private viewPointers = new Map<number, { x: number; y: number }>();
+  private viewDrag: { x: number; y: number; moved: boolean; button: number; touch: boolean; pan: boolean; pivot?: THREE.Vector3 } | null = null;
   private saveViewTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly sketchEditor: SketchEditor;
@@ -563,6 +572,17 @@ export class Engine {
     return this.renderer.domElement.toDataURL('image/png');
   }
 
+  /**
+   * The viewer: the whole model in the isometric view at once (no turn to play: a hidden frame gets no animation
+   * frames) and drawn now. False — there is nothing to show.
+   */
+  showWhole(): boolean {
+    this.cam.setStdView('iso', this.fitBox());
+    this.cam.finishAnimation();
+    this.render();
+    return !this.sceneBox.isEmpty();
+  }
+
   private loop = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -608,8 +628,8 @@ export class Engine {
 
   /** Camera of each part studio survives tab switches and page reloads. */
   private saveView() {
-    // nothing meaningful to remember before the first build arrived
-    if (!this.studioId || !this.firstFit) return;
+    // nothing meaningful to remember before the first build arrived (nor in the viewer: each file opens whole)
+    if (!this.studioId || !this.firstFit || this.viewOnly) return;
     const v = this.cam.getView();
     savedViews.set(this.studioId, v);
     try {
@@ -620,7 +640,7 @@ export class Engine {
   }
 
   private restoreView(): boolean {
-    if (!this.studioId) return false;
+    if (!this.studioId || this.viewOnly) return false;
     let v = savedViews.get(this.studioId);
     if (!v) {
       try {
@@ -644,6 +664,8 @@ export class Engine {
     this.sketchEditor.dispose();
     for (const c of this.partGeos.values()) disposePartGeo(c);
     this.partGeos.clear();
+    // the viewer: the next file has a graphics area of its own — this one's WebGL context is freed now, not later
+    if (this.viewOnly) this.renderer.forceContextLoss();
     this.renderer.dispose();
     this.viewCube.dispose();
     this.picker.dispose();
@@ -1241,7 +1263,8 @@ export class Engine {
       return;
     }
     // a part of a flexible sub-assembly gets its own triad
-    const ids = asm && !assemblyHandsOff() ? selectedUnits(asm, useEditor.getState().selection) : [];
+    // (the viewer moves nothing: no triad)
+    const ids = asm && !assemblyHandsOff() && !this.viewOnly ? selectedUnits(asm, useEditor.getState().selection) : [];
     // while an instance is dragged, it is where the drag put it
     const tab = useDragPreview.getState().tab ?? asm;
     const inst = ids.length === 1 && tab ? findInstance(tab, useAssembly.getState().sources, ids[0]) : undefined;
@@ -1895,13 +1918,100 @@ export class Engine {
         }
       }
     });
+    // the browser took a finger over (a gesture of its own): it ends without a tap
+    const onCancel = (e: PointerEvent) => this.viewOnly && this.viewUp(e, true);
+    window.addEventListener('pointercancel', onCancel);
     this.unsub.push(() => {
       window.removeEventListener('pointermove', this.onMove);
       window.removeEventListener('pointerup', this.onUp);
+      window.removeEventListener('pointercancel', onCancel);
     });
   }
 
+  // -------------------------------------------------------------------------
+  // The viewer's pointers: mouse and touch turn, move and zoom the view only
+  // -------------------------------------------------------------------------
+
+  private viewDown(e: PointerEvent) {
+    const p = this.localPos(e);
+    const touch = e.pointerType === 'touch';
+    this.viewPointers.set(e.pointerId, p);
+    useEditor.setState({ contextMenu: null });
+    if (touch && this.viewPointers.size > 1) {
+      // a second finger: two move and pinch the view (no tap any more)
+      if (this.viewDrag) this.viewDrag.moved = true;
+      return;
+    }
+    // middle button, Ctrl+right, Shift+left: move the view; the left and the right buttons, a finger: turn it
+    const pan = e.button === 1 || (e.button === 2 && (e.ctrlKey || e.metaKey)) || (e.button === 0 && e.shiftKey && !touch);
+    this.viewDrag = { ...p, moved: false, button: e.button, touch, pan };
+    if (!pan) {
+      this.cam.beginRotate();
+      this.viewDrag.pivot = this.raycastParts(p.x, p.y) ?? undefined;
+    }
+    if (e.button === 1) e.preventDefault();
+  }
+
+  /** True when the pointer is one of the viewer's (pressed on the graphics area): no hover then. */
+  private viewMove(e: PointerEvent): boolean {
+    const prev = this.viewPointers.get(e.pointerId);
+    if (!prev) return false;
+    // the button was let go outside the frame (its pointerup came to the page around): the drag is over
+    if (e.pointerType !== 'touch' && e.buttons === 0) {
+      this.viewUp(e, true);
+      return false;
+    }
+    const p = this.localPos(e);
+    if (this.viewPointers.size >= 2) {
+      // two fingers: the view moves with their middle and zooms as they spread or pinch
+      const [a, b] = [...this.viewPointers.values()];
+      const mid0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const d0 = Math.hypot(a.x - b.x, a.y - b.y);
+      this.viewPointers.set(e.pointerId, p);
+      const [c, d] = [...this.viewPointers.values()];
+      const mid1 = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+      const d1 = Math.hypot(c.x - d.x, c.y - d.y);
+      this.cam.pan(mid1.x - mid0.x, mid1.y - mid0.y);
+      if (d0 > 1 && d1 > 1) this.cam.zoomAt(d0 / d1, mid1.x, mid1.y);
+      return true;
+    }
+    this.viewPointers.set(e.pointerId, p);
+    const d = this.viewDrag;
+    if (!d) return true;
+    if (!d.moved && Math.hypot(p.x - d.x, p.y - d.y) > (d.touch ? 6 : 3)) d.moved = true;
+    if (!d.moved) return true;
+    if (d.pan) {
+      this.applyCursor('grabbing');
+      this.cam.pan(p.x - prev.x, p.y - prev.y);
+    } else {
+      this.applyCursor(ROTATE_CURSOR);
+      this.cam.rotate(p.x - prev.x, p.y - prev.y, d.pivot);
+    }
+    return true;
+  }
+
+  private viewUp(e: PointerEvent, cancelled = false) {
+    if (!this.viewPointers.delete(e.pointerId)) return;
+    const d = this.viewDrag;
+    if (this.viewPointers.size) {
+      // one finger of two lifted: the other turns the view on from where it is
+      const [rest] = [...this.viewPointers.values()];
+      this.viewDrag = { ...rest, moved: true, button: 0, touch: true, pan: false };
+      this.cam.beginRotate();
+      return;
+    }
+    this.viewDrag = null;
+    if (!d) return;
+    if (d.moved) this.applyCursor(this.cursorWanted);
+    // a click (a tap) selects: a face to look normal to, a section through it
+    else if (!cancelled && d.button === 0) {
+      const { x, y } = this.localPos(e);
+      this.onClick(x, y, e);
+    }
+  }
+
   private onDown(e: PointerEvent) {
+    if (this.viewOnly) return this.viewDown(e);
     const { x, y } = this.localPos(e);
     this.down = { x, y, button: e.button, ctrl: e.ctrlKey || e.metaKey, moved: false };
     this.lastPos = { x, y };
@@ -1954,6 +2064,7 @@ export class Engine {
   }
 
   private onMove = (e: PointerEvent) => {
+    if (this.viewOnly && this.viewMove(e)) return;
     const { x, y } = this.localPos(e);
     const d = this.down;
     if (d) {
@@ -2156,6 +2267,7 @@ export class Engine {
   }
 
   private onUp = (e: PointerEvent) => {
+    if (this.viewOnly) return this.viewUp(e);
     const d = this.down;
     this.down = null;
     if (!d) return;
