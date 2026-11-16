@@ -1346,7 +1346,7 @@ const RU: Record<string, string> = {
   'This assembly has no parts to show': 'В этой сборке нет деталей',
   'Some features of the document could not be built: the model may be incomplete':
     'Некоторые фичи документа не построились: модель может быть неполной',
-  Tab: 'Вкладка',
+  Tabs: 'Вкладки',
   'View controls': 'Управление видом',
   'Turn: drag with the left or right button, or with one finger': 'Вращение — перетаскивание левой или правой кнопкой мыши либо одним пальцем',
   'Move: drag with the middle button or Shift + left button, or with two fingers':

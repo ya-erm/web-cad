@@ -3899,14 +3899,36 @@ body.panel-resizing-y * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.embed-tabs {
-  min-width: 0;
-  max-width: 45%;
-  height: 28px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+/* the document's tabs under the graphics area, as in WebCAD itself; more of them than fit — scrolled sideways */
+.embed-tabbar {
+  position: relative;
+  display: flex;
+  flex: none;
+  height: 34px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.embed-tabbar::-webkit-scrollbar {
+  display: none;
+}
+.embed-tabbar .tab {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: none;
+  padding: 0 14px;
+}
+.embed-tabbar .tab.active {
   background: #fff;
-  padding: 0 4px;
+}
+.embed-tabbar .tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .embed-units {
   color: var(--text-3);
@@ -4071,5 +4093,10 @@ body.panel-resizing-y * {
   /* left of the view menu's buttons */
   .embed-corner {
     max-width: calc(100% - 172px);
+  }
+  /* tabs for a finger */
+  .embed-tabbar {
+    height: 40px;
+    font-size: 13px;
   }
 }

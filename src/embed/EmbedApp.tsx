@@ -1,8 +1,8 @@
 // The embedded viewer's page (#/embed?parentOrigin=…&channel=…): a model that the site around it sends, shown only —
-// the file's name, its tabs (Part Studios, assemblies) and the graphics area with its view controls. No editing, no
+// the file's name, the graphics area with its view controls and the tabs under it (Part Studios, assemblies, drawings). No editing, no
 // documents of this browser, nothing saved (see embed/mode.ts).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { activeTab, useDoc } from '../store/docStore';
 import { SheetView } from './SheetView';
 import { setRotationMode, useEditor } from '../store/editorStore';
@@ -95,19 +95,42 @@ function MeasureResults() {
   );
 }
 
-function TabPicker() {
+/** The document's tabs that can be shown, under the graphics area as in WebCAD itself (a single tab — no strip). */
+function TabStrip() {
   const doc = useDoc((s) => s.doc);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = doc?.activeTab;
+  // the open tab stays in sight when the strip is wider than the window (scrolled here: scrollIntoView could move
+  // the page around the frame too)
+  useEffect(() => {
+    const strip = ref.current;
+    const tab = strip?.querySelector<HTMLElement>('.tab.active');
+    if (!strip || !tab) return;
+    if (tab.offsetLeft < strip.scrollLeft) strip.scrollLeft = tab.offsetLeft;
+    else if (tab.offsetLeft + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = tab.offsetLeft + tab.offsetWidth - strip.clientWidth;
+  }, [active]);
   if (!doc) return null;
   const tabs = viewableTabs(doc);
   if (tabs.length < 2) return null;
   return (
-    <select className="embed-tabs" value={doc.activeTab} title={t('Tab')} aria-label={t('Tab')} onChange={(e) => void showTab(e.target.value)}>
-      {tabs.map((x) => (
-        <option key={x.id} value={x.id}>
-          {`${tName(x.name)} · ${t(x.type === 'assembly' ? 'Assembly' : x.type === 'drawing' ? 'Drawing' : 'Part Studio')}`}
-        </option>
-      ))}
-    </select>
+    <div className="embed-tabbar" role="tablist" aria-label={t('Tabs')} ref={ref}>
+      {tabs.map((x) => {
+        const open = x.id === doc.activeTab;
+        return (
+          <button
+            key={x.id}
+            role="tab"
+            aria-selected={open}
+            className={'tab' + (open ? ' active' : '')}
+            title={`${tName(x.name)} · ${t(x.type === 'assembly' ? 'Assembly' : x.type === 'drawing' ? 'Drawing' : 'Part Studio')}`}
+            onClick={() => !open && void showTab(x.id)}
+          >
+            <Icon name={x.type} size={14} />
+            {tName(x.name)}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -201,7 +224,6 @@ export default function EmbedApp() {
         <span className="embed-title" title={v.title}>
           {v.title || 'WebCAD'}
         </span>
-        <TabPicker />
         {graphics && <span className="embed-units">{v.units}</span>}
         <button
           className={'icon-btn' + (turntable ? ' active' : '')}
@@ -247,6 +269,7 @@ export default function EmbedApp() {
         )}
         <span className="embed-version">WebCAD {APP_VERSION}</span>
       </div>
+      <TabStrip />
       <ContextMenu />
       <TooltipLayer />
     </div>

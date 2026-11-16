@@ -8,7 +8,7 @@ The embedded viewer shows a 3D model inside another website: the site opens WebC
 |---|---|
 | **STEP** (`.step`, `.stp`) | As a new document with one Part Studio that imports the file with an [Import](import) feature: exact solids with their faces and edges, in millimeters. |
 | **STL** (binary and text) | As a triangle mesh, not turned into solids, so even a large file opens in seconds. Each separate body is a part with its own color. Edges are drawn where faces meet at more than 30° and along the borders of open bodies. STL has no units: numbers are taken as millimeters. |
-| **WebCAD project** (`.webcad.json`) | The document as it is: its Part Studios and assemblies are built just as in the editor, in the document's units; [drawings](#drawings) are shown as sheets. If it has several tabs, pick one in the list at the top right. It opens at the tab that was active when it was saved; if that is a drawing, at its first Part Studio or assembly. |
+| **WebCAD project** (`.webcad.json`) | The document as it is: its Part Studios and assemblies are built just as in the editor, in the document's units; [drawings](#drawings) are shown as sheets. If it has several tabs, they are under the model, as in WebCAD itself: click one to open it (on a narrow screen, scroll the strip sideways). It opens at the tab that was active when it was saved; if that is a drawing, at its first Part Studio or assembly. |
 
 Files up to 20 MB are supported.
 
@@ -48,7 +48,7 @@ STEP models and projects are measured exactly, as with [Measure](measure) in Web
 
 ## Drawings {#drawings}
 
-A project's [drawing](drawings) tabs are in the tab list together with its Part Studios and assemblies. A drawing is shown as its sheet, as it is exported to SVG: views with dimensions, notes, the border and the title block. The views are projected from the model again, so they match it as it is now.
+A project's [drawing](drawings) tabs are under the model together with its Part Studios and assemblies. A drawing is shown as its sheet, as it is exported to SVG: views with dimensions, notes, the border and the title block. The views are projected from the model again, so they match it as it is now.
 
 | Action | Mouse | Touch |
 |---|---|---|
