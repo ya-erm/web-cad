@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { produce, type Draft } from 'immer';
 import type { ConstraintType, Feature, FeatureType, PlaneRef, SelRef, SketchData, Vec2, Vec3 } from '../core/types';
-import type { BuildResult, MeasureResult } from '../kernel/protocol';
+import type { BuildProgress, BuildResult, MeasureResult } from '../kernel/protocol';
 import { defaultParams, nextFeatureName } from '../core/features';
 import { uid } from '../core/ids';
 import { commitConfigured, configuredFeatures } from '../core/config';
@@ -178,6 +178,9 @@ export interface ContextMenuState {
 
 export interface EditorState {
   build: BuildResult | null;
+  /** Display only: never used for selection, editing, measurements or export. */
+  loadingPreview: { build: BuildResult; cached: boolean } | null;
+  buildProgress: (BuildProgress & { studio: string }) | null;
   building: boolean;
   kernelReady: boolean;
   editing: Editing | null;
@@ -389,6 +392,8 @@ function afterRebuild(then: () => void) {
 
 export const useEditor = create<EditorState>()((set, get) => ({
   build: null,
+  loadingPreview: null,
+  buildProgress: null,
   building: false,
   kernelReady: false,
   editing: null,

@@ -124,6 +124,7 @@ function insertInstance(doc: CadDocument, asm: AssemblyTab, studio: PartStudioTa
 }
 
 export function AssemblyToolbar() {
+  const loading = useEditor((s) => !s.build && s.building && !s.editing);
   const doc = useDoc((s) => s.doc);
   const asm = activeAssembly(doc);
   const selection = useEditor((s) => s.selection);
@@ -136,7 +137,7 @@ export function AssemblyToolbar() {
   const ids = selectedInstances(selection).filter((id) => asm.instances.some((i) => i.id === id));
   const allFixed = ids.length > 0 && ids.every((id) => asm.instances.find((i) => i.id === id)?.fixed);
   return (
-    <div className="toolbar">
+    <div className="toolbar" inert={loading}>
       <button className="icon-btn" title={`${t('Undo')} (Ctrl+Z)`} disabled={!canUndo} onClick={undo}>
         <Icon name="undo" />
       </button>

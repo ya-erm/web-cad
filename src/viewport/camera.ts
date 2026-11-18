@@ -285,7 +285,13 @@ export class CameraController {
   /** Jump to the end of a turn under way: a page in the background gets no animation frames to play it. */
   finishAnimation() {
     const a = this.anim;
-    if (a) this.tick(a.t0 + a.dur);
+    if (!a) return;
+    // Adding the duration and subtracting t0 can round just below it: tick would leave the animation running.
+    this.anim = null;
+    this.quat.copy(a.toQ);
+    this.target.copy(a.toT);
+    this.viewHeight = a.toH;
+    this.update();
   }
 
   setStdView(v: StdView, box?: THREE.Box3) {

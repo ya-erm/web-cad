@@ -2,7 +2,7 @@
 // feature changes, and stores the latest result in the editor store.
 
 import { kernel, SupersededError } from '../kernel/client';
-import type { PartMeta } from '../kernel/protocol';
+import type { BuildProgress, PartMeta } from '../kernel/protocol';
 import { activeAssembly, activeStudio, effectiveRollback, studioById, useDoc } from './docStore';
 import { useEditor } from './editorStore';
 import type { AssemblyTab, CadDocument, Feature, PartStudioTab } from '../core/types';
@@ -12,9 +12,10 @@ import { loadVersionSources, versionDocument } from './versionSources';
 import { sourceKey, variantStudio, type AssemblySources } from '../assembly/compose';
 import { buildStudio, useAssembly } from '../assembly/sources';
 import { addSubassemblies, applySolve } from '../assembly/mates';
-import { composeDisplayed } from '../assembly/explode';
+import { composeDisplayed, explodeActive } from '../assembly/explode';
 import { usedTabs } from '../assembly/expand';
 import { t } from '../i18n';
+import { loadBuildPreview, saveBuildPreview } from './buildPreview';
 
 const PART_PALETTE = ['#a9bfd6', '#d8c3a1', '#a8c99e', '#d6a6a6', '#b3a8d6', '#9fcfcc', '#d9c27a', '#c9a6c9'];
 
@@ -36,6 +37,23 @@ export function dropRebuilds() {
   if (timer) clearTimeout(timer);
   timer = null;
   lastInputs = [];
+  useEditor.setState({ loadingPreview: null, buildProgress: null });
+}
+
+export type ReportBuildProgress = (studio: string, progress: BuildProgress) => void;
+
+function beginBuild(doc: CadDocument, studio: string, mySeq: number): ReportBuildProgress {
+  useEditor.setState({ building: true, buildProgress: { studio, stage: 'features', current: 0, total: 0 } });
+  if (!useEditor.getState().build && !useEditor.getState().editing && !explodeActive()) {
+    void loadBuildPreview(doc).then((build) => {
+      const ed = useEditor.getState();
+      if (build && mySeq === seq && !ed.build && !ed.loadingPreview?.cached)
+        useEditor.setState({ loadingPreview: { build, cached: true } });
+    });
+  }
+  return (studio, progress) => {
+    if (mySeq === seq) useEditor.setState({ buildProgress: { ...progress, studio } });
+  };
 }
 
 function inputsOf(): unknown[] | null {
@@ -123,7 +141,7 @@ export interface SourceContents {
  * Build the Derived sources of a Part Studio (whose features are `features`) in the geometry worker, the deepest
  * first; returns the features, prepared for the build (each Derived feature knows its source's builder and version).
  */
-export async function withDerivedSources(doc: CadDocument, studioId: string, features: Feature[]): Promise<Feature[]> {
+export async function withDerivedSources(doc: CadDocument, studioId: string, features: Feature[], report?: ReportBuildProgress): Promise<Feature[]> {
   // saved versions it derives from (of this document or others): their snapshots first
   await loadVersionSources(doc, features);
   return buildDerivedSources(doc, studioId, features, derivedKey, async (s, feats, units) => {
@@ -135,7 +153,7 @@ export async function withDerivedSources(doc: CadDocument, studioId: string, fea
       upTo: feats.length,
       meshless: true,
     });
-    const res = await kernel().build(derivedKey(s.id), req(sourceOrder.get(s.id) ?? Object.keys(s.parts)));
+    const res = await kernel().build(derivedKey(s.id), req(sourceOrder.get(s.id) ?? Object.keys(s.parts)), (p) => report?.(s.name, p));
     // new parts: once more with their colours (everything else comes from the cache)
     if (JSON.stringify(res.partOrder) !== JSON.stringify(sourceOrder.get(s.id))) {
       sourceOrder.set(s.id, res.partOrder);
@@ -147,20 +165,33 @@ export async function withDerivedSources(doc: CadDocument, studioId: string, fea
 /** An assembly: build its source Part Studios, then place the instances. */
 async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
   const mySeq = ++seq;
-  useEditor.setState({ building: true });
+  const report = beginBuild(doc, asm.name, mySeq);
   const t0 = performance.now();
   const sources: AssemblySources = new Map();
   try {
     const used = usedTabs(doc.tabs, asm);
-    for (const id of used.studios) {
+    const publishPartial = () => {
+      if (mySeq !== seq || useEditor.getState().build || useEditor.getState().loadingPreview?.cached) return;
+      const partial = new Map(sources);
+      for (const sub of used.subs) partial.set(sub.id, { parts: new Map(), mates: [], assembly: sub });
+      const { build } = composeDisplayed(asm, partial);
+      if (build.parts.length) useEditor.setState({ loadingPreview: { build, cached: false } });
+    };
+    // Small sources first: the first opening can show useful geometry before the expensive body is ready.
+    const studios = [...used.studios].sort((a, b) => (studioById(doc, a)?.features.length ?? 0) - (studioById(doc, b)?.features.length ?? 0));
+    for (const id of studios) {
+      if (mySeq !== seq) return;
       const studio = studioById(doc, id);
       if (!studio) continue;
-      sources.set(id, await buildStudio(doc, studio));
+      sources.set(id, await buildStudio(doc, studio, report));
+      publishPartial();
     }
     // the variants instances choose by their own configuration: each its own build
     for (const v of used.variants) {
+      if (mySeq !== seq) return;
       const studio = studioById(doc, v.studioId);
-      if (studio) sources.set(sourceKey(v), await buildStudio(doc, variantStudio(studio, v.configuration)));
+      if (studio) sources.set(sourceKey(v), await buildStudio(doc, variantStudio(studio, v.configuration), report));
+      publishPartial();
     }
     if (mySeq !== seq) return;
     // sub-assemblies as solved (the deepest first: each uses the ones inside it)
@@ -173,7 +204,7 @@ async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
     const { build, missing } = composeDisplayed(solved, sources);
     build.timeMs = performance.now() - t0;
     useAssembly.setState({ sources, missing, failedMates });
-    useEditor.setState({ build, building: false });
+    useEditor.setState({ build, building: false, loadingPreview: null, buildProgress: null });
     rebuilt({ ok: true });
     if (moved)
       useDoc.getState().update(
@@ -183,10 +214,12 @@ async function runAssembly(doc: CadDocument, asm: AssemblyTab) {
         },
         { undoable: false },
       );
+    if (!explodeActive() && !missing.length && !failedMates.length && ![...sources.values()].some((s) => s.failed))
+      void saveBuildPreview(useDoc.getState().doc ?? doc, build);
   } catch (e) {
     if (e instanceof SupersededError) return;
     if (mySeq === seq) {
-      useEditor.setState({ building: false });
+      useEditor.setState({ building: false, loadingPreview: null, buildProgress: null });
       useEditor.getState().showToast(`Rebuild failed: ${(e as Error).message}`, 'error');
       rebuilt({ ok: false, error: (e as Error).message });
     }
@@ -207,14 +240,14 @@ async function run() {
     if (ed.draft.type !== 'sketch') preview = ed.draft;
   }
   const mySeq = ++seq;
-  useEditor.setState({ building: true });
+  const report = beginBuild(doc, studio.name, mySeq);
   // Colours by creation order need the order of this Part Studio's last build (the app's last one may be another
   // tab's); good enough for display. Parts brought from another Part Studio keep its colours unless given one here.
   const partMeta = studioPartMeta(studio, studioOrder.get(studio.id) ?? []);
   try {
     // as the chosen configuration has them; the Part Studios they derive from are built first
     const base = configuredFeatures(studio).slice(0, upTo);
-    const all = await withDerivedSources(doc, studio.id, preview ? [...base, preview] : base);
+    const all = await withDerivedSources(doc, studio.id, preview ? [...base, preview] : base, report);
     if (mySeq !== seq) return;
     const res = await kernel().build(studio.id, {
       units: doc.units,
@@ -222,18 +255,19 @@ async function run() {
       partMeta,
       upTo,
       preview: preview && all[base.length],
-    });
+    }, (p) => report(studio.name, p));
     if (mySeq !== seq) return;
     studioOrder.set(studio.id, res.partOrder);
     // Assign palette colours for parts that were new in this build.
     for (const p of res.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
     if (res.preview) for (const p of res.preview.parts) if (!studio.parts[p.id]?.color && !p.derived) p.color = partColorFor(studio, p.id, res.partOrder);
-    useEditor.setState({ build: res, building: false });
+    useEditor.setState({ build: res, building: false, loadingPreview: null, buildProgress: null });
+    if (!ed) void saveBuildPreview(doc, res);
     rebuilt({ ok: true });
   } catch (e) {
     if (e instanceof SupersededError) return;
     if (mySeq === seq) {
-      useEditor.setState({ building: false });
+      useEditor.setState({ building: false, loadingPreview: null, buildProgress: null });
       useEditor.getState().showToast(`Rebuild failed: ${(e as Error).message}`, 'error');
       rebuilt({ ok: false, error: (e as Error).message });
     }
@@ -244,6 +278,7 @@ function schedule() {
   const inputs = inputsOf();
   if (!inputs) return;
   if (sameInputs(inputs, lastInputs)) return;
+  seq++; // invalidate callbacks and results immediately, before the debounce expires
   lastInputs = inputs;
   if (timer) clearTimeout(timer);
   const editingDraft = !!useEditor.getState().editing;
@@ -264,7 +299,7 @@ export function startRebuildLoop() {
     const now = Date.now();
     restarts.push(now);
     while (restarts.length && now - restarts[0] > 60_000) restarts.shift();
-    useEditor.setState({ building: false, kernelReady: false });
+    useEditor.setState({ building: false, kernelReady: false, loadingPreview: null, buildProgress: null });
     if (restarts.length >= 3) {
       useEditor.getState().showToast(t('The geometry kernel keeps failing on this model: undo the last change (Ctrl+Z) or reload the page'), 'error');
       return;
@@ -275,6 +310,10 @@ export function startRebuildLoop() {
   // another document: the builders of the one before (its Part Studios, variants, sources) are forgotten — their
   // shapes would stay in the kernel's memory for the whole session otherwise (the new one is built anew anyway)
   useDoc.subscribe((s, prev) => {
+    if (s.doc?.id !== prev.doc?.id || s.doc?.activeTab !== prev.doc?.activeTab) {
+      dropRebuilds();
+      useEditor.setState({ build: null, building: !!(activeStudio(s.doc) || activeAssembly(s.doc)) });
+    }
     if (prev.doc && s.doc?.id !== prev.doc.id) void k.reset().catch(() => undefined);
   });
   useDoc.subscribe(schedule);

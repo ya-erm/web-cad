@@ -211,6 +211,7 @@ export function searchTools(query: string, tr: (s: string) => string = t): ToolD
 }
 
 function FeatureToolbar() {
+  const loading = useEditor((s) => !s.build && s.building && !s.editing);
   const start = useEditor((s) => s.startFeature);
   const editing = useEditor((s) => s.editing);
   const undo = useDoc((s) => s.undo);
@@ -231,7 +232,7 @@ function FeatureToolbar() {
   // the toolbar clips what sticks out of it (it scrolls sideways): the results are placed in the window instead
   const box = focused && matches.length ? input.current?.getBoundingClientRect() : undefined;
   return (
-    <div className="toolbar">
+    <div className="toolbar" inert={loading}>
       <button className="icon-btn" title={`${t('Undo')} (Ctrl+Z)`} disabled={!canUndo || !!editing} onClick={undo}>
         <Icon name="undo" />
       </button>

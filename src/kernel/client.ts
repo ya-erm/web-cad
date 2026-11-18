@@ -1,6 +1,7 @@
 // UI-thread facade for the geometry worker.
 
 import type {
+  BuildProgress,
   BuildRequest,
   BuildResult,
   ExportRequest,
@@ -23,7 +24,7 @@ import type {
   WorkerResponse,
 } from './protocol';
 
-type Pending = { resolve: (v: WorkerResponse) => void; reject: (e: Error) => void };
+type Pending = { resolve: (v: WorkerResponse) => void; reject: (e: Error) => void; progress?: (p: BuildProgress) => void };
 
 type Omitted<T> = Omit<T, 'type' | 'reqId'>;
 
@@ -94,7 +95,10 @@ export class KernelClient {
       this.readyListeners.forEach((l) => l());
       return;
     }
-    if (msg.type === 'progress') return;
+    if (msg.type === 'progress') {
+      this.pending.get(msg.reqId)?.progress?.(msg);
+      return;
+    }
     const p = this.pending.get(msg.reqId);
     if (p) this.pending.delete(msg.reqId);
     if (!this.pending.size) this.stopWatchdog();
@@ -120,10 +124,10 @@ export class KernelClient {
     }, 5000);
   }
 
-  private send<R extends WorkerResponse>(req: Omitted<WorkerRequest> & { type: WorkerRequest['type'] }, transfer: Transferable[] = []): Promise<R> {
+  private send<R extends WorkerResponse>(req: Omitted<WorkerRequest> & { type: WorkerRequest['type'] }, transfer: Transferable[] = [], progress?: (p: BuildProgress) => void): Promise<R> {
     const reqId = this.nextId++;
     return new Promise<R>((resolve, reject) => {
-      this.pending.set(reqId, { resolve: resolve as (v: WorkerResponse) => void, reject });
+      this.pending.set(reqId, { resolve: resolve as (v: WorkerResponse) => void, reject, progress });
       this.watch();
       this.worker.postMessage({ ...req, reqId } as WorkerRequest, transfer);
     });
@@ -133,8 +137,8 @@ export class KernelClient {
     return this.readyPromise;
   }
 
-  build(studioKey: string, req: Omitted<BuildRequest>): Promise<BuildResult> {
-    return this.send<BuildResult>({ ...req, type: 'build', studioKey } as never);
+  build(studioKey: string, req: Omitted<BuildRequest>, progress?: (p: BuildProgress) => void): Promise<BuildResult> {
+    return this.send<BuildResult>({ ...req, type: 'build', studioKey } as never, [], progress);
   }
 
   exportFile(req: Omitted<ExportRequest>): Promise<ExportResult> {

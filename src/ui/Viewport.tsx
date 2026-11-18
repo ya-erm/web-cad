@@ -7,6 +7,7 @@ import { formatNumber, LENGTH_FACTOR } from '../core/expr';
 import type { Vec3 } from '../core/types';
 import { Icon } from './icons';
 import { t } from '../i18n';
+import { BuildStatus } from './BuildStatus';
 
 const SECTION_PLANES: Record<'top' | 'front' | 'right', { normal: Vec3; label: string }> = {
   top: { normal: [0, 0, 1], label: 'Top' },
@@ -113,19 +114,18 @@ function SectionPanel({ s }: { s: SectionState }) {
 export function Viewport() {
   const ref = useRef<HTMLDivElement>(null);
   const kernelReady = useEditor((s) => s.kernelReady);
-  // the tab's first build (the document just opened, another tab): nothing to show yet — not an empty model
-  const firstBuild = useEditor((s) => !s.build && s.building);
+  const building = useEditor((s) => s.building);
   // shown after a moment (a fast build does not blink it), counted from the build's start: not by a CSS delay,
   // which would start only with the first frame — late on opening, while the 3D view is being set up
   const [slowBuild, setSlowBuild] = useState(false);
   useEffect(() => {
-    if (!firstBuild) return;
+    if (!building) return;
     const id = setTimeout(() => setSlowBuild(true), 150);
     return () => {
       clearTimeout(id);
       setSlowBuild(false);
     };
-  }, [firstBuild]);
+  }, [building]);
   const perspective = useEditor((s) => s.perspective);
   const section = useEditor((s) => s.section);
   const [menu, setMenu] = useState(false);
@@ -227,12 +227,11 @@ export function Viewport() {
         </div>
       </div>
       {section && <SectionPanel s={section} />}
-      {(!kernelReady || (firstBuild && slowBuild)) && (
+      {(!kernelReady || (building && slowBuild)) && (
         // one overlay for both: the kernel loaded, its text changes to the build without blinking
-        <div className={'loading-overlay' + (kernelReady ? ' building' : '')} role="status" aria-live="polite">
+        <div className="loading-overlay building">
           <div className="loading-card">
-            <div className="loading-spinner" />
-            {t(kernelReady ? 'Building the model…' : 'Loading geometry kernel…')}
+            <BuildStatus />
           </div>
         </div>
       )}

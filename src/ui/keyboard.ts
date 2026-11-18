@@ -152,6 +152,7 @@ export function handleKey(e: KeyboardEvent) {
   }
   // views (all modes)
   if (handleViewKey(e)) return;
+  if (!ed.build && ed.building && !ed.editing) return;
 
   if (ctrl && e.code === 'KeyZ' && !e.shiftKey) {
     e.preventDefault();

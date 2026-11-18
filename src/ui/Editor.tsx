@@ -55,6 +55,7 @@ function FolderState({ docId }: { docId: string }) {
 }
 
 function TopBar({ onBack }: { onBack: () => void }) {
+  const loading = useEditor((s) => !s.build && s.building);
   const doc = useDoc((s) => s.doc)!;
   const saving = useDoc((s) => s.saving);
   const saveError = useDoc((s) => s.saveError);
@@ -135,6 +136,7 @@ function TopBar({ onBack }: { onBack: () => void }) {
       </div>
       <button
         className="btn small primary"
+        disabled={loading}
         onClick={() => {
           const selection = useEditor.getState().selection;
           // an assembly: the instances of whatever is selected on them
@@ -542,7 +544,7 @@ export function Editor({ onBack }: { onBack: () => void }) {
       const e = getEngine();
       const d = useDoc.getState().doc;
       // (a document of a folder: its file keeps the picture too)
-      if (e && d && !useEditor.getState().editing && !useDoc.getState().readOnly) void saveThumbnail(d.id, e.thumbnail()).then(() => syncThumbnail(d.id));
+      if (e && d && useEditor.getState().build && !useEditor.getState().building && !useEditor.getState().editing && !useDoc.getState().readOnly) void saveThumbnail(d.id, e.thumbnail()).then(() => syncThumbnail(d.id));
     }, 15000);
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -552,7 +554,7 @@ export function Editor({ onBack }: { onBack: () => void }) {
     };
   }, []);
   useEffect(() => {
-    useEditor.setState({ editing: null, sketch: null, selection: [], hover: null, build: null, activeField: null });
+    useEditor.setState({ editing: null, sketch: null, selection: [], hover: null, build: null, loadingPreview: null, buildProgress: null, activeField: null });
     // continue an unfinished sketch / feature dialog after a reload
     restoreDraft();
     startDraftPersistence();
@@ -561,8 +563,8 @@ export function Editor({ onBack }: { onBack: () => void }) {
   if (!doc || !tab) return null;
   const back = () => {
     const e = getEngine();
-    if (e && !useDoc.getState().readOnly) void saveThumbnail(doc.id, e.thumbnail()).then(() => syncThumbnail(doc.id));
-    useEditor.setState({ editing: null, sketch: null, selection: [], build: null });
+    if (e && useEditor.getState().build && !useEditor.getState().building && !useDoc.getState().readOnly) void saveThumbnail(doc.id, e.thumbnail()).then(() => syncThumbnail(doc.id));
+    useEditor.setState({ editing: null, sketch: null, selection: [], build: null, loadingPreview: null, buildProgress: null });
     onBack();
   };
   return (

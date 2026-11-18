@@ -10,6 +10,7 @@ import { rotationMatrix } from '../assembly/compose';
 import { applyFeature, type SourceBuild, type SourceLookup } from './features';
 import { exportMesh, meshedForExport, meshPart, topologyOf } from './meshing';
 import type {
+  BuildProgress,
   BuildRequest,
   BuildResult,
   CurveResult,
@@ -138,7 +139,7 @@ export class StudioBuilder {
    * Build the features (incrementally). `sources` — the builders of other Part Studios by key, for Derived
    * features (built before this one).
    */
-  async build(req: BuildRequest, sources?: (key: string) => StudioBuilder | undefined): Promise<BuildResult> {
+  async build(req: BuildRequest, sources?: (key: string) => StudioBuilder | undefined, progress?: (p: BuildProgress) => void): Promise<BuildResult> {
     const t0 = performance.now();
     this.meta = req.partMeta;
     this.sources = sources ? (key) => sources(key)?.asSource() : undefined;
@@ -157,6 +158,7 @@ export class StudioBuilder {
 
     for (let i = start; i < n; i++) {
       const f = req.features[i];
+      progress?.({ stage: 'features', current: i + 1, total: n, featureName: f.name });
       const prev = this.states[i];
       let st = prev;
       let status: FeatureStatus = { ok: true };
@@ -181,6 +183,7 @@ export class StudioBuilder {
 
     const statuses: Record<string, FeatureStatus> = {};
     for (let i = 0; i < n; i++) statuses[req.features[i].id] = this.statuses[i];
+    progress?.({ stage: 'meshing', current: n, total: n });
 
     const result: BuildResult = {
       type: 'build',

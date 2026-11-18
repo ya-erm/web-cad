@@ -206,6 +206,14 @@ export interface BuildResult {
   trails?: number[];
 }
 
+/** Counts operations, not elapsed time: individual geometry operations have very different costs. */
+export interface BuildProgress {
+  stage: 'features' | 'meshing';
+  current: number;
+  total: number;
+  featureName?: string;
+}
+
 export type ExportFormat = 'step' | 'stl' | 'stl-ascii' | 'brep';
 
 export interface ExportRequest {
@@ -516,4 +524,4 @@ export type WorkerResponse =
   /** `fatal`: the WebAssembly kernel itself failed (out of memory, a trap) — its state cannot be trusted any more. */
   | { type: 'error'; reqId: number; message: string; fatal?: boolean }
   | { type: 'ready' }
-  | { type: 'progress'; message: string };
+  | ({ type: 'progress'; reqId: number } & BuildProgress);

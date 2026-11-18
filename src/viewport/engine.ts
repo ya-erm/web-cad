@@ -375,9 +375,13 @@ export class Engine {
     container.appendChild(this.labels.domElement);
     this.viewCube = new ViewCube(112, t);
     container.appendChild(this.viewCube.element);
-    this.viewCube.onPick = (dir, up) => this.cam.viewFrom(dir, up, this.fitBox());
+    this.viewCube.onPick = (dir, up) => {
+      this.restoredView = true;
+      this.cam.viewFrom(dir, up, this.fitBox());
+    };
     // its arrows: a quarter turn about the screen's axes (from where a turn under way ends: quick clicks add up)
     this.viewCube.onTurn = (turn) => {
+      this.restoredView = true;
       const q = this.cam.finalQuat;
       const axis = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(q);
       const quarter = Math.PI / 2;
@@ -429,7 +433,7 @@ export class Engine {
     // store subscriptions
     this.unsub.push(
       useEditor.subscribe((s, p) => {
-        if (s.build !== p.build || s.showPlanes !== p.showPlanes || s.showSketches !== p.showSketches) this.syncBuild();
+        if (s.build !== p.build || s.loadingPreview !== p.loadingPreview || s.showPlanes !== p.showPlanes || s.showSketches !== p.showSketches) this.syncBuild();
         else if (s.editing?.featureId !== p.editing?.featureId) this.syncBuild();
         if (
           s.selection !== p.selection ||
@@ -464,6 +468,12 @@ export class Engine {
       useDoc.subscribe((s, p) => {
         const a = activeTab(s.doc);
         const b = activeTab(p.doc);
+        if (a?.id !== b?.id || s.doc?.id !== p.doc?.id) {
+          this.saveView();
+          this.firstFit = false;
+          this.studioId = a?.id ?? null;
+          this.restoredView = this.restoreView();
+        }
         if (hiddenIn(a) !== hiddenIn(b) || a?.id !== b?.id) this.syncBuild();
       }),
     );
@@ -686,9 +696,14 @@ export class Engine {
     }
   }
 
+  private loadingModel(): boolean {
+    const s = useEditor.getState();
+    return !s.build && s.building && !s.editing;
+  }
+
   private syncBuild() {
     const ed = useEditor.getState();
-    const build = ed.build;
+    const build = ed.build ?? ed.loadingPreview?.build;
     const studio = activeStudio(useDoc.getState().doc);
     // (an assembly: its default geometry — the planes until shown)
     const hidden = new Set(hiddenIn(activeTab(useDoc.getState().doc)));
@@ -779,7 +794,8 @@ export class Engine {
     // Fit the view once, on the first build after opening the studio (never afterwards:
     // operations must not move the camera). A remembered view wins over the fit.
     if (!this.firstFit && build) {
-      this.firstFit = true;
+      // Partial assemblies grow while loading. Fit them until the user takes control of the camera.
+      this.firstFit = !!ed.build || !!ed.loadingPreview?.cached;
       if (build.parts.length && !this.restoredView) this.cam.setStdView('iso', this.fitBox());
     }
     this.cam.sceneRadius = Math.max(200, this.sceneBox.isEmpty() ? 200 : this.sceneBox.getBoundingSphere(new THREE.Sphere()).radius * 2);
@@ -1919,7 +1935,7 @@ export class Engine {
       }
     });
     // the browser took a finger over (a gesture of its own): it ends without a tap
-    const onCancel = (e: PointerEvent) => this.viewOnly && this.viewUp(e, true);
+    const onCancel = (e: PointerEvent) => this.viewUp(e, true);
     window.addEventListener('pointercancel', onCancel);
     this.unsub.push(() => {
       window.removeEventListener('pointermove', this.onMove);
@@ -1980,6 +1996,7 @@ export class Engine {
     if (!d) return true;
     if (!d.moved && Math.hypot(p.x - d.x, p.y - d.y) > (d.touch ? 6 : 3)) d.moved = true;
     if (!d.moved) return true;
+    this.restoredView = true;
     if (d.pan) {
       this.applyCursor('grabbing');
       this.cam.pan(p.x - prev.x, p.y - prev.y);
@@ -2011,7 +2028,7 @@ export class Engine {
   }
 
   private onDown(e: PointerEvent) {
-    if (this.viewOnly) return this.viewDown(e);
+    if (this.viewOnly || this.loadingModel()) return this.viewDown(e);
     const { x, y } = this.localPos(e);
     this.down = { x, y, button: e.button, ctrl: e.ctrlKey || e.metaKey, moved: false };
     this.lastPos = { x, y };
@@ -2064,7 +2081,8 @@ export class Engine {
   }
 
   private onMove = (e: PointerEvent) => {
-    if (this.viewOnly && this.viewMove(e)) return;
+    if (this.viewMove(e)) return;
+    if (this.loadingModel()) return;
     const { x, y } = this.localPos(e);
     const d = this.down;
     if (d) {
@@ -2267,7 +2285,7 @@ export class Engine {
   }
 
   private onUp = (e: PointerEvent) => {
-    if (this.viewOnly) return this.viewUp(e);
+    if (this.viewOnly || this.viewPointers.has(e.pointerId)) return this.viewUp(e);
     const d = this.down;
     this.down = null;
     if (!d) return;
@@ -2301,6 +2319,7 @@ export class Engine {
   };
 
   private onWheel(e: WheelEvent) {
+    this.restoredView = true;
     e.preventDefault();
     const { x, y } = this.localPos(e);
     const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
@@ -2317,6 +2336,7 @@ export class Engine {
   }
 
   private onClick(x: number, y: number, e: MouseEvent) {
+    if (this.loadingModel()) return;
     const ed = useEditor.getState();
     const accepts = this.activeAccepts();
     const ref = this.pickRef(x, y, accepts);
@@ -2393,6 +2413,7 @@ export class Engine {
   }
 
   private onContextMenu(e: MouseEvent) {
+    if (this.loadingModel()) return;
     const { x, y } = this.localPos(e);
     const ed = useEditor.getState();
     const ref = this.pickRef(x, y);
@@ -2456,6 +2477,7 @@ export class Engine {
   }
 
   private runView(cmd: import('../store/editorStore').ViewCommand) {
+    this.restoredView = true;
     switch (cmd.kind) {
       case 'std':
         this.cam.setStdView(cmd.view, this.fitBox());

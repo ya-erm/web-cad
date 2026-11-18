@@ -40,7 +40,7 @@ async function handle(req: WorkerRequest) {
       return;
     case 'build': {
       // Derived features read the other Part Studios' builders (built before this request)
-      const res = await builderFor(req.studioKey).build(req, (key) => builders.get(key));
+      const res = await builderFor(req.studioKey).build(req, (key) => builders.get(key), (progress) => post({ ...progress, type: 'progress', reqId: req.reqId }));
       const transfer: Transferable[] = [];
       for (const p of res.parts) transfer.push(...transferablesOf(p));
       if (res.preview) {

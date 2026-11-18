@@ -38,6 +38,26 @@ afterEach(() => vi.useRealTimers());
 const build = (k: InstanceType<typeof KernelClient>) => k.build('ps', { units: { length: 'mm', angle: 'deg' }, features: [], partMeta: {}, upTo: 0 } as never);
 
 describe('kernel client', () => {
+  it('routes progress to its request and keeps that request pending until the result', async () => {
+    const k = new KernelClient();
+    const w = FakeWorker.all[0];
+    const progress = vi.fn();
+    const req = { units: { length: 'mm', angle: 'deg' }, features: [], partMeta: {}, upTo: 0 } as const;
+    const a = k.build('a', { ...req, features: [] }, progress);
+    const b = build(k);
+    w.answer({ type: 'progress', reqId: w.sent[1].reqId, stage: 'features', current: 1, total: 2 });
+    expect(progress).not.toHaveBeenCalled();
+    w.answer({ type: 'progress', reqId: w.sent[0].reqId, stage: 'features', current: 1, total: 2, featureName: 'Body' });
+    expect(progress).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ featureName: 'Body' }));
+    w.answer({ type: 'build', reqId: w.sent[0].reqId, parts: [] } as never);
+    await expect(a).resolves.toMatchObject({ parts: [] });
+    w.answer({ type: 'progress', reqId: w.sent[0].reqId, stage: 'meshing', current: 2, total: 2 });
+    expect(progress).toHaveBeenCalledTimes(1);
+    w.answer({ type: 'build', reqId: w.sent[1].reqId, parts: [] } as never);
+    await b;
+    k.dispose();
+  });
+
   it('answers requests as the worker does', async () => {
     const k = new KernelClient();
     const w = FakeWorker.all[0];

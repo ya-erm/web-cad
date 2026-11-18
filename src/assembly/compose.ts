@@ -129,6 +129,7 @@ export function placeMesh(mesh: PartMesh, pl: Placement, id: string, name: strin
 export interface StudioData {
   parts: Map<string, PartMesh>;
   mates: MateResult[];
+  failed?: boolean;
   assembly?: AssemblyTab;
 }
 

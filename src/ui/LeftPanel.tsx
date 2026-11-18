@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { clampSplit, clampWidth, DEFAULT_SPLIT, loadSplit, loadWidth, saveSplit, saveWidth, type SplitKind } from './panelSize';
+import { useEditor } from '../store/editorStore';
 
 /**
  * Follow the pointer from a press on a handle until it is let go. The handle captures the pointer, so the
@@ -28,6 +29,7 @@ function drag(e: ReactPointerEvent<HTMLElement>, axis: 'x' | 'y', move: (ev: Poi
 }
 
 export function LeftPanel({ kind, top, bottom }: { kind: SplitKind; top: ReactNode; bottom: ReactNode }) {
+  const loading = useEditor((s) => !s.build && s.building && !s.editing);
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(loadWidth);
   const [split, setSplit] = useState(() => loadSplit(kind));
@@ -77,7 +79,7 @@ export function LeftPanel({ kind, top, bottom }: { kind: SplitKind; top: ReactNo
     '--split-bottom': String(Math.round((1 - share) * 1000) / 1000),
   } as CSSProperties;
   return (
-    <div className="left-panel" ref={ref} style={style}>
+    <div className="left-panel" ref={ref} style={style} inert={loading}>
       {top}
       <div
         className="panel-splitter"

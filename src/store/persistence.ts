@@ -1,15 +1,25 @@
 // Local persistence in IndexedDB: no accounts, everything stays in the browser.
 
 import type { CadDocument, DocumentSummary, DocumentVersion } from '../core/types';
+import type { BuildResult } from '../kernel/protocol';
 import { embedMode, storageBlocked } from '../embed/mode';
 
 const DB_NAME = 'webcad';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const DOCS = 'documents';
 const SUMMARIES = 'summaries';
 /** Versions and history of the documents (`DocumentVersion`, by `docId`), and their snapshots apart (by version id). */
 const VERSIONS = 'versions';
 const VERSION_DATA = 'versionData';
+const PREVIEWS = 'renderPreviews';
+
+export interface RenderPreview {
+  id: string;
+  docId: string;
+  signature: string;
+  used: number;
+  build: BuildResult;
+}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -25,6 +35,7 @@ function db(): Promise<IDBDatabase> {
         if (!d.objectStoreNames.contains(SUMMARIES)) d.createObjectStore(SUMMARIES, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(VERSIONS)) d.createObjectStore(VERSIONS, { keyPath: 'id' }).createIndex('docId', 'docId');
         if (!d.objectStoreNames.contains(VERSION_DATA)) d.createObjectStore(VERSION_DATA, { keyPath: 'id' });
+        if (!d.objectStoreNames.contains(PREVIEWS)) d.createObjectStore(PREVIEWS, { keyPath: 'id' }).createIndex('used', 'used');
       };
       req.onsuccess = () => {
         // a newer version of the app opened in another tab: let it upgrade the database (reopened when needed)
@@ -62,6 +73,26 @@ export async function listDocuments(): Promise<DocumentSummary[]> {
 
 export async function loadDocument(id: string): Promise<CadDocument | undefined> {
   return tx<CadDocument>([DOCS], 'readonly', (t) => t.objectStore(DOCS).get(id));
+}
+
+/** Disposable display data, separate from documents and their backups. Keep only eight recent tab previews. */
+export async function loadRenderPreview(id: string): Promise<RenderPreview | undefined> {
+  return tx<RenderPreview>([PREVIEWS], 'readonly', (t) => t.objectStore(PREVIEWS).get(id));
+}
+
+export async function saveRenderPreview(preview: RenderPreview): Promise<void> {
+  await tx([PREVIEWS], 'readwrite', (t) => {
+    const s = t.objectStore(PREVIEWS);
+    s.put(preview);
+    let count = 0;
+    const cursor = s.index('used').openKeyCursor(null, 'prev');
+    cursor.onsuccess = () => {
+      const c = cursor.result;
+      if (!c) return;
+      if (++count > 8) s.delete(c.primaryKey);
+      c.continue();
+    };
+  });
 }
 
 export async function saveDocument(doc: CadDocument, thumbnail?: string): Promise<void> {
@@ -102,9 +133,16 @@ export async function setTrashed(id: string, trashed: number | null): Promise<vo
 /** Permanent deletion (with its versions and history). */
 export async function deleteDocument(id: string): Promise<void> {
   const versions = await listVersions(id);
-  await tx([DOCS, SUMMARIES, VERSIONS, VERSION_DATA], 'readwrite', (t) => {
+  await tx([DOCS, SUMMARIES, VERSIONS, VERSION_DATA, PREVIEWS], 'readwrite', (t) => {
     t.objectStore(DOCS).delete(id);
     t.objectStore(SUMMARIES).delete(id);
+    const previews = t.objectStore(PREVIEWS).openCursor();
+    previews.onsuccess = () => {
+      const c = previews.result;
+      if (!c) return;
+      if ((c.value as RenderPreview).docId === id) c.delete();
+      c.continue();
+    };
     for (const v of versions) {
       t.objectStore(VERSIONS).delete(v.id);
       t.objectStore(VERSION_DATA).delete(v.id);

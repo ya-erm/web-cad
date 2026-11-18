@@ -11,6 +11,14 @@ width: 690
 
 The **Documents** page opens when you start WebCAD and when you click the ◆ logo in the editor. It shows all documents in this browser with a thumbnail, name, and modification date.
 
+### Opening a model
+
+The panel at the top centre of the graphics area shows the Part Studio and operation currently being built. Its short headline changes every four seconds. The progress bar counts completed operations, not remaining time: some operations take much longer than others. Detailed progress is shown only in this panel, keeping the bottom status bar compact.
+
+After a successful build, WebCAD keeps a 3D preview in this browser. When you reopen the same unchanged model, the preview appears while the editable geometry is rebuilt. You can rotate and zoom it; editing, measurements and export become available after the build finishes. On the first opening of an assembly, completed source parts appear progressively, starting with smaller Part Studios.
+
+Previews are optional local cache data, separate from the project file. If a preview is missing or the document has changed, WebCAD builds the model normally.
+
 | Action | How |
 |---|---|
 | Create a document | The **Create** button (or **New document** if there are no documents yet). The new document opens immediately. |

@@ -1,7 +1,7 @@
 // Turntable rotation (Z up): from the Top / Bottom view to the sides, over the pole (upside down) and back; a horizontal
 // drag pulls the near side with the cursor, upside down too.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { CameraController } from './camera';
 
@@ -31,6 +31,19 @@ function tilted(steps: number) {
 }
 
 describe('view animation', () => {
+  it('finishes exactly even when the start time would round the elapsed duration down', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(162.222220746);
+    try {
+      const c = new CameraController();
+      c.setStdView('top');
+      c.finishAnimation();
+      expect(c.animating).toBe(false);
+      expect(back(c).z).toBeCloseTo(1, 6);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('finishes a turn under way at once (a background tab gets no animation frames)', () => {
     const c = new CameraController();
     c.setStdView('front');
