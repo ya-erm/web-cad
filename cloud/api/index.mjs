@@ -1,4 +1,5 @@
 import { checkStorage, checkYdb } from './probes.mjs';
+import { CLOUD_ROUTES, cloudHandler } from './cloud.mjs';
 import { AUTH_ROUTES, authHandler } from './auth.mjs';
 
 /** @typedef {import('./auth.mjs').AuthEvent} HttpEvent */
@@ -34,6 +35,7 @@ export function createHandler({ settings = readSettings, ydb = checkYdb, storage
   /** @param {HttpEvent} event @param {FunctionContext} context */
   return async (event, context) => {
     const path = event.path;
+    if (CLOUD_ROUTES.has(path ?? '')) return cloudHandler(event, context);
     if (AUTH_ROUTES.has(path ?? '')) return authHandler(event, context);
     if (path !== '/health' && path !== '/ready') return response(404, { error: 'not_found' });
     if (event.httpMethod !== 'GET') return response(405, { error: 'method_not_allowed' }, { Allow: 'GET' });

@@ -14,13 +14,13 @@ export const AUTH_ROUTES = new Map([
  * queryStringParameters?: Record<string,string>, multiValueQueryStringParameters?: Record<string,string[]>}} AuthEvent */
 
 /** @param {AuthEvent} event @param {string} name */
-function header(event, name) {
+export function header(event, name) {
   const multiple = Object.entries(event.multiValueHeaders ?? {}).find(([key]) => key.toLowerCase() === name);
   if (multiple) return multiple[1].length === 1 ? multiple[1][0] : '';
   return Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1] ?? '';
 }
 /** @param {AuthEvent} event @param {string} name */
-function cookie(event, name) {
+export function cookie(event, name) {
   const values = header(event, 'cookie').split(';').map(v => v.trim()).filter(v => v.startsWith(name + '='));
   if (values.length !== 1) return null;
   const value = values[0].slice(name.length + 1);

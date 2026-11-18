@@ -10,7 +10,7 @@ dependencies = source / 'node_modules'
 if not dependencies.is_dir():
     raise SystemExit('Run npm ci --omit=dev --ignore-scripts --prefix cloud/api first')
 files = [source / name for name in ('index.js', 'index.mjs', 'probes.mjs', 'auth.mjs',
-    'auth-store.mjs', 'auth-policy.mjs', 'yandex.mjs', 'package.json', 'package-lock.json')]
+    'cloud.mjs', 'cloud-store.mjs', 'cloud-storage.mjs', 'auth-store.mjs', 'auth-policy.mjs', 'yandex.mjs', 'package.json', 'package-lock.json')]
 files += sorted(p for p in dependencies.rglob('*') if p.is_file() and '.bin' not in p.parts)
 output.parent.mkdir(parents=True, exist_ok=True)
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:

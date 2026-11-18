@@ -208,7 +208,10 @@ export const useDoc = create<DocState>()((set, get) => {
       const doc = await db.loadDocument(id);
       if (!doc) return;
       const now = Date.now();
-      await db.saveDocument({ ...doc, id: docId(), name: `${doc.name} (copy)`, created: now, modified: now });
+      const copyId = docId();
+      await db.saveDocument({ ...doc, id: copyId, name: `${doc.name} (copy)`, created: now, modified: now });
+      const parent = get().docs.find(d => d.id === doc.id)?.folderId;
+      if (parent) await db.changeLibrary({kind: 'document', id: copyId, folderId: parent});
       await get().loadList();
     },
 

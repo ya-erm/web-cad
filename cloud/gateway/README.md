@@ -3,7 +3,9 @@
 Публичный шлюз `webcad-api` перед приватной Cloud Function `webcad-api`.
 Публикует `GET /health`, вход через Яндекс (`/auth/yandex/start`,
 `/auth/yandex/callback`), `GET /auth/session`, `POST /auth/logout` и OPTIONS.
-`/ready` и `/documents` отсутствуют.
+`/cloud/list` и POST `/cloud/folder`, `/cloud/prepare`, `/cloud/commit`,
+`/cloud/open`, `/cloud/document` опубликованы с тегом `cloud-v1` и требуют
+пользовательскую сессию. `/ready` и `/documents` отсутствуют.
 
 ## Размещение
 

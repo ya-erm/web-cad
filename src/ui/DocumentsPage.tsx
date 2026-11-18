@@ -28,7 +28,11 @@ import { AppSettingsButton, LangSwitch } from './AppSettings';
 import { t, getLang } from '../i18n';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
+import {CloudLibrary, CloudUploadDialog} from './CloudLibrary';
 import { AccountButton } from './AccountButton';
+import { LibraryFolderDialog, LibraryFolderGrid, LibraryMoveDialog, LibraryPath } from './LibraryFolders';
+import { listLibraryFolders, changeLibrary } from '../store/persistence';
+import { folderTrail, type LibraryFolder } from '../store/library';
 
 function fmtDate(ts: number) {
   return new Date(ts).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', {
@@ -606,6 +610,13 @@ const isKeys = (v: unknown): v is string[] => Array.isArray(v) && v.every((k) =>
 
 export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const all = useDoc((s) => s.docs);
+  const [libraryFolders, setLibraryFolders] = useState<LibraryFolder[]>([]);
+  const [folderEdit, setFolderEdit] = useState<LibraryFolder | 'new' | null>(null);
+  const [uploading, setUploading] = useState<string[] | null>(null);
+  const [cloudGeneration, setCloudGeneration] = useState(0);
+  const [libraryMoving, setLibraryMoving] = useState<string | null>(null);
+  const reloadLibrary = async () => { setLibraryFolders(await listLibraryFolders()); await loadList(); };
+  useEffect(() => { void listLibraryFolders().then(setLibraryFolders); }, []);
   const { loadList, createDocument, deleteDocument, renameDocument, duplicateDocument, importDocument, trashDocument, restoreDocument, emptyTrash } =
     useDoc.getState();
   const folders = useFolder((s) => s.folders);
@@ -674,7 +685,9 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     return () => clearTimeout(id);
   }, [confirming]);
   const trashed = all.filter((d) => d.trashed).sort((a, b) => (b.trashed ?? 0) - (a.trashed ?? 0));
-  const docs = view === 'trash' ? trashed : all.filter((d) => !d.trashed);
+  const browserPath = libraryFolders.some(f => f.id === path) ? path : '';
+  const docs = view === 'trash' ? trashed : all.filter(d => !d.trashed && (view !== 'browser' || (!links[d.id] && !d.cloudSource && (d.folderId ?? '') === browserPath)));
+  const goBrowser = (id: string) => {setView('browser'); setPath(id);};
   const confirmThen = (key: string, action: () => void) => {
     if (confirming === key) {
       setConfirming(null);
@@ -693,6 +706,8 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
       : [
           { label: t('Rename'), icon: 'rename', action: () => setRenaming(d.id) },
           { label: t('Duplicate'), icon: 'copy', action: () => void duplicateDocument(d.id) },
+          { label: t('Upload to cloud…'), icon: 'cloud', action: () => setUploading([d.id]) },
+          ...(!l ? [{label: t('Move to browser folder…'), icon: 'folder', action: () => setLibraryMoving(d.id)}] : []),
           // a file of a folder: where it is; a document of the browser goes into a folder: one item per folder
           ...(l
             ? folders.some((f) => f.id === l.folder)
@@ -714,6 +729,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
 
   const create = async () => {
     const id = await createDocument(t('Untitled document'));
+    if (view === 'browser' && browserPath) await changeLibrary({kind: 'document', id, folderId: browserPath});
     onOpen(id);
   };
 
@@ -777,6 +793,8 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 <div className="doc-name">{d.name}</div>
               )}
               <div className="doc-date">{d.trashed ? `${t('Deleted')}: ${fmtDate(d.trashed)}` : `${t('Modified')}: ${fmtDate(d.modified)}`}</div>
+              {view === 'docs' && <div className="doc-date">{d.cloudSource ? t('Cloud copy on this device') : links[d.id] ? linkTitle(d.id) :
+                `${t('In this browser')}${d.folderId && libraryFolders.some(f => f.id === d.folderId) ? ' / '+folderTrail(libraryFolders,d.folderId).map(f => f.name).join(' / ') : ''}`}</div>}
             </div>
             {d.trashed ? (
               <div className="doc-actions trash-actions" onClick={(e) => e.stopPropagation()}>
@@ -860,6 +878,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 const copies = copiedVersionIds(versions);
                 const id = await importDocument(withCopiedVersions(doc, copies), thumbnail);
                 await importVersions(id, versions, false, copies);
+                if (view === 'browser' && browserPath) await changeLibrary({kind: 'document', id, folderId: browserPath});
                 onOpen(id);
               } catch {
                 alert('Invalid project file');
@@ -869,7 +888,13 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           />
           <div className="docs-nav">
             <button className={'docs-nav-item' + (view === 'docs' ? ' active' : '')} onClick={() => setView('docs')}>
-              <Icon name="document" size={16} /> {t('Documents')}
+              <Icon name="document" size={16} /> {t('Recent documents')}
+            </button>
+            <button className={'docs-nav-item' + (view === 'browser' ? ' active' : '')} onClick={() => goBrowser('')}>
+              <Icon name="folder" size={16} /> {t('In this browser')}
+            </button>
+            <button className={'docs-nav-item' + (view === 'cloud' ? ' active' : '')} onClick={() => setView('cloud')}>
+              <Icon name="cloud" size={16} /> {t('Cloud')}
             </button>
             <button className={'docs-nav-item' + (view === 'trash' ? ' active' : '')} onClick={() => setView('trash')}>
               <Icon name="trash" size={16} /> {t('Trash')}
@@ -900,12 +925,13 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             )}
           </div>
           <div className="offline-note">
-            {t(folders.length ? 'Works offline. Documents are stored in this browser; those of the folders are also saved to their files.' : 'Works offline. Your documents are stored only in this browser.')}
+            {t(folders.length ? 'Works offline. Documents are stored in this browser; those of the folders are also saved to their files.' : 'Works offline. Cloud uploads are optional.')}
           </div>
         </div>
         <div className="docs-main">
           <div className="docs-title">
-            <h2>{t(view === 'trash' ? 'Trash' : view === 'docs' ? 'Documents' : 'Folder on this computer')}</h2>
+            <h2>{t(view === 'trash' ? 'Trash' : view === 'docs' ? 'Recent documents' : view === 'browser' ? 'In this browser' : view === 'cloud' ? 'Cloud' : 'Folder on this computer')}</h2>
+            {view === 'browser' && <button className="btn small" onClick={() => setFolderEdit('new')}><Icon name="folder" size={14} /> {t('New folder')}</button>}
             {view === 'trash' && trashed.length > 0 && (
               <button className={'btn small' + (confirming === 'empty' ? ' danger' : '')} onClick={() => confirmThen('empty', () => void emptyTrash())}>
                 <Icon name="trash" size={14} /> {t(confirming === 'empty' ? 'Click again to empty the trash' : 'Empty trash')}
@@ -916,6 +942,11 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             <div className="docs-hint">{t('Documents in the trash can be restored. Deleting them from the trash removes them permanently.')}</div>
           )}
           {error && <div className="docs-error">{error}</div>}
+          {view === 'cloud' && <CloudLibrary key={cloudGeneration} onOpen={onOpen} onUpload={() => setUploading([])} />}
+          {view === 'browser' && <>
+            <LibraryPath folders={libraryFolders} current={browserPath} label={t('In this browser')} onGo={goBrowser} />
+            <LibraryFolderGrid folders={libraryFolders} current={browserPath} onGo={goBrowser} onEdit={setFolderEdit} />
+          </>}
           {shownFolder ? (
             <FolderView
               key={shownFolder.id}
@@ -928,13 +959,23 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               run={run}
               drop={drop}
             />
-          ) : view === 'docs' || view === 'trash' ? (
+          ) : view === 'docs' || view === 'trash' || view === 'browser' ? (
             list
           ) : view === 'folders' ? (
             <FolderIntro onAdded={(id) => go(id, '')} />
           ) : null}
         </div>
       </div>
+      {uploading && <CloudUploadDialog initial={uploading} onClose={() => setUploading(null)} onComplete={() => {setCloudGeneration(n => n+1); setView('cloud');}} />}
+      {folderEdit && <LibraryFolderDialog folders={libraryFolders} initial={folderEdit === 'new' ? undefined : folderEdit} parent={browserPath}
+        onClose={() => setFolderEdit(null)} onSave={async (name, parentId) => {
+          const now = Date.now();
+          await changeLibrary({kind: 'folder', folder: {...(folderEdit === 'new' ? {id: crypto.randomUUID(), created: now} : folderEdit), name, parentId, modified: now}});
+          await reloadLibrary();
+        }} onDelete={folderEdit === 'new' ? undefined : async () => {await changeLibrary({kind: 'remove', id: folderEdit.id}); await reloadLibrary();}} />}
+      {libraryMoving && <LibraryMoveDialog folders={libraryFolders} onClose={() => setLibraryMoving(null)} onSave={async folderId => {
+        await changeLibrary({kind: 'document', id: libraryMoving, folderId}); await reloadLibrary();
+      }} />}
       {moving && <MoveDialog what={moving} onClose={() => setMoving(null)} run={run} />}
       <ContextMenu />
     </div>

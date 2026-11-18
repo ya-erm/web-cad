@@ -994,6 +994,7 @@ const ICONS = {
       <circle cx={12} cy={12} r={2.8} />
     </>
   ),
+  cloud: <path d="M7 18h11a4 4 0 0 0 .6-8 6.5 6.5 0 0 0-12.4-1A4.5 4.5 0 0 0 7 18Z" />,
   account: (
     <>
       <circle cx={12} cy={8} r={3.5} />

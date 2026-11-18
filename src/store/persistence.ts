@@ -1,11 +1,13 @@
 // Local persistence in IndexedDB: no accounts, everything stays in the browser.
 
 import type { CadDocument, DocumentSummary, DocumentVersion } from '../core/types';
+import { validateLibraryChange, type LibraryFolder, type LibraryChange } from './library';
 import type { BuildResult } from '../kernel/protocol';
 import { embedMode, storageBlocked } from '../embed/mode';
 
 const DB_NAME = 'webcad';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+const FOLDERS = 'libraryFolders';
 const DOCS = 'documents';
 const SUMMARIES = 'summaries';
 /** Versions and history of the documents (`DocumentVersion`, by `docId`), and their snapshots apart (by version id). */
@@ -31,6 +33,7 @@ function db(): Promise<IDBDatabase> {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const d = req.result;
+        if (!d.objectStoreNames.contains(FOLDERS)) d.createObjectStore(FOLDERS, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(DOCS)) d.createObjectStore(DOCS, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(SUMMARIES)) d.createObjectStore(SUMMARIES, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(VERSIONS)) d.createObjectStore(VERSIONS, { keyPath: 'id' }).createIndex('docId', 'docId');
@@ -108,6 +111,8 @@ export async function saveDocument(doc: CadDocument, thumbnail?: string): Promis
         created: doc.created,
         modified: doc.modified,
         thumbnail: thumbnail ?? prev?.thumbnail,
+        ...(prev?.folderId ? { folderId: prev.folderId } : {}),
+        ...(prev?.cloudSource ? { cloudSource: prev.cloudSource } : {}),
         ...(prev?.trashed ? { trashed: prev.trashed } : {}),
       } satisfies DocumentSummary);
     };
@@ -202,4 +207,40 @@ export async function requestPersistentStorage() {
   } catch {
     /* ignore */
   }
+}
+
+/** Folders in this browser, independent of files on disk. */
+export async function listLibraryFolders(): Promise<LibraryFolder[]> {
+  return (await tx<LibraryFolder[]>([FOLDERS], 'readonly', t => t.objectStore(FOLDERS).getAll())) ?? [];
+}
+
+/** Validate and apply against one atomic snapshot, including changes from other tabs. */
+export async function changeLibrary(change: LibraryChange): Promise<void> {
+  const d = await db();
+  await new Promise<void>((resolve, reject) => {
+    const t = d.transaction([FOLDERS, SUMMARIES], 'readwrite');
+    const fs = t.objectStore(FOLDERS), ds = t.objectStore(SUMMARIES);
+    const folders = fs.getAll(), docs = ds.getAll();
+    let remaining = 2, error: unknown;
+    const apply = () => {
+      if (--remaining) return;
+      try {
+        validateLibraryChange(folders.result, docs.result, change);
+        if (change.kind === 'folder') fs.put({ ...change.folder, name: change.folder.name.trim() });
+        else if (change.kind === 'remove') fs.delete(change.id);
+        else ds.put({ ...docs.result.find((v: DocumentSummary) => v.id === change.id), folderId: change.folderId });
+      } catch (e) { error = e; t.abort(); }
+    };
+    folders.onsuccess = apply; docs.onsuccess = apply;
+    t.oncomplete = () => resolve();
+    t.onabort = t.onerror = () => reject(error ?? t.error);
+  });
+}
+
+/** Remember a cloud download as a local cache, never overwriting another local document. */
+export async function markCloudCopy(id: string, cloudSource: NonNullable<DocumentSummary['cloudSource']>): Promise<void> {
+  await tx([SUMMARIES], 'readwrite', t => {
+    const s = t.objectStore(SUMMARIES), request = s.get(id);
+    request.onsuccess = () => {if (request.result) s.put({...request.result, cloudSource});};
+  });
 }

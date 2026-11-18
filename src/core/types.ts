@@ -1178,6 +1178,9 @@ export interface Workspace {
 }
 
 export interface DocumentSummary {
+  /** Folder in the browser library (not a path on disk). */
+  folderId?: string;
+  cloudSource?: {userId: string; documentId: string; revision: string};
   id: string;
   name: string;
   created: number;

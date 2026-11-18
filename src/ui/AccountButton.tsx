@@ -94,6 +94,7 @@ export function AccountButton() {
       });
       if (!response.ok) throw new Error('Sign-out failed');
       setUser(null);
+      window.dispatchEvent(new Event('webcad:account-changed'));
       setStatus('ready');
       if (menu.current) menu.current.open = false;
     } catch { setError('Could not sign out. Try again when online.'); }
@@ -115,7 +116,7 @@ export function AccountButton() {
           <div className="dropdown account-dropdown">
             <div className="account-name">{user.displayName}</div>
             {user.email && <div className="dropdown-label account-email">{user.email}</div>}
-            <div className="dropdown-note">{t('Documents are currently saved on this device.')}</div>
+            <div className="dropdown-note">{t('Local autosave works offline. Cloud uploads are optional.')}</div>
             {status === 'unavailable' && <div className="dropdown-note">{t('Account unavailable. You can keep working offline.')}</div>}
             <button className="dropdown-item" disabled={busy} onClick={() => void signOut()}>{t('Sign out')}</button>
           </div>

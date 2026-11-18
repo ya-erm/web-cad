@@ -17,7 +17,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }
@@ -33,7 +33,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       },
@@ -47,7 +47,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }
@@ -63,7 +63,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       },
@@ -77,7 +77,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }
@@ -93,7 +93,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       },
@@ -107,7 +107,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }
@@ -123,7 +123,7 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       },
@@ -137,7 +137,187 @@
         "x-yc-apigateway-integration": {
           "type": "cloud_functions",
           "function_id": "d4ec3d7jtmn3ua7pao9e",
-          "tag": "auth-v1",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/list": {
+      "get": {
+        "operationId": "cloud_list_get",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_list_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/folder": {
+      "post": {
+        "operationId": "cloud_folder_post",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_folder_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/prepare": {
+      "post": {
+        "operationId": "cloud_prepare_post",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_prepare_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/commit": {
+      "post": {
+        "operationId": "cloud_commit_post",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_commit_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/open": {
+      "post": {
+        "operationId": "cloud_open_post",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_open_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/cloud/document": {
+      "post": {
+        "operationId": "cloud_document_post",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "cloud_document_options",
+        "responses": {
+          "200": {
+            "description": "Cloud library response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }

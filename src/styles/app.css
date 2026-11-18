@@ -4343,3 +4343,19 @@ body.panel-resizing-y * {
 @media (max-width: 760px) {
   .account-error { max-width: 110px; }
 }
+
+.library-path { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; }
+.library-path > span { display: inline-flex; align-items: center; gap: 4px; }
+.library-folder-card { display: flex; align-items: center; padding-right: 6px; }
+.library-folder-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; padding: 16px; cursor: pointer; color: inherit; }
+.library-folder-open span { overflow-wrap: anywhere; }
+.library-form { display: grid; gap: 16px; }
+.library-form label { display: grid; gap: 6px; }
+.library-form input, .library-form select { width: 100%; box-sizing: border-box; padding: 7px; }
+.library-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.cloud-document-open { display: block; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; color: inherit; cursor: pointer; }
+.cloud-upload-dialog { width: min(540px, 92vw); }
+.cloud-upload-list { max-height: 36vh; overflow: auto; display: grid; gap: 8px; }
+.cloud-upload-list label, .library-form .library-check { display: flex; align-items: center; gap: 8px; }
+.cloud-upload-list input, .library-form .library-check input { width: auto; }
+.cloud-upload-list small { display: block; color: var(--text-2); font-size: 11px; }

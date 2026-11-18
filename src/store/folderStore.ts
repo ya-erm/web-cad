@@ -412,6 +412,8 @@ export async function openFolderFile(folderId: string, name: string): Promise<st
   if (useDoc.getState().docs.find((d) => d.id === doc.id)?.trashed) await db.setTrashed(doc.id, null);
   // the file keeps its name (it may differ from the document's) until the document is renamed
   await link(doc.id, { folder: folderId, name, title: doc.name });
+  // The file is now organised by its disk path, so it no longer occupies a browser-only folder.
+  await db.changeLibrary({ kind: 'document', id: doc.id, folderId: '' });
   await remember(doc.id, f.dir, name);
   await useDoc.getState().loadList();
   return doc.id;
@@ -428,6 +430,7 @@ export async function saveToFolder(docId: string, folderId: string, dir = ''): P
   const name = joinPath(dir, freeFileName(doc.name, namesIn(f, dir)));
   await writeFolderFile(f.dir, name, await fileText(doc));
   await link(doc.id, { folder: folderId, name, title: doc.name });
+  await db.changeLibrary({ kind: 'document', id: doc.id, folderId: '' });
   await remember(doc.id, f.dir, name);
   await refreshFolder(folderId);
   return name;

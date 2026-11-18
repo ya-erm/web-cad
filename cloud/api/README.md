@@ -1,7 +1,7 @@
 # WebCAD Cloud API
 
 Серверный пакет для Yandex Cloud Functions. Вход через Яндекс, сессии и выход
-подключены к интерфейсу. Документы пока хранятся локально.
+подключены к интерфейсу. Локальные документы можно явно загружать в облачную библиотеку; детали — [storage](../storage/README.md).
 
 Публичный адрес: `https://api.cad.ya-erm.ru`. Функция приватная; запросы
 принимает API Gateway. Подробности входа — [AUTH.md](AUTH.md).
@@ -28,8 +28,8 @@
 пользователей нельзя открывать `/ready` через публичный API Gateway.
 
 Сервисный аккаунт функции — `webcad-api`. Обработчик получает его временный
-IAM-токен из `context.token.access_token` на каждом вызове. Постоянные ключи
-и токены не нужны в исходниках, архиве или переменных окружения. SDK получает
+IAM-токен из `context.token.access_token` на каждом вызове. Постоянных ключей нет в исходниках и архиве. OAuth и ключ подписи S3
+передаются через интеграцию с Lockbox в переменные окружения версии. SDK получает
 новый драйвер на проверку и освобождает сессии и соединения после неё.
 
 ## Конфигурация
@@ -38,6 +38,7 @@ IAM-токен из `context.token.access_token` на каждом вызове.
 | --- | --- |
 | `YDB_CONNECTION_STRING` | `grpcs://ydb.serverless.yandexcloud.net:2135/ru-central1/<cloud-id>/<database-id>` |
 | `S3_BUCKET` | `webcad-documents` |
+| `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY` | Интеграция с Lockbox для подписи S3 |
 | `YANDEX_CLIENT_ID`, `YANDEX_CLIENT_SECRET` | Интеграция с Lockbox, без значений в исходниках |
 
 Строка подключения SDK содержит путь БД непосредственно после хоста,
@@ -77,7 +78,7 @@ package.json, lockfile и установленные зависимости. К�
 со сроком хранения 7 дней, когда Cloud Logging станет доступен.
 
 Функция создана: `d4ec3d7jtmn3ua7pao9e`, каталог `b1gej4nlbqfik932flcc`.
-Версия авторизации `d4e5ltgg1ufa4pdg7mur` (тег `auth-v1`) развёрнута 18 ноября 2026, статус ACTIVE.
+Версия облачной библиотеки `d4eq9s56j1n31mh8lgf6` (тег `cloud-v1`) развёрнута 19 ноября 2026, статус ACTIVE.
 Проверено вызовом из облака: `/health` и `/ready` возвращают 200, обе зависимости
 отвечают `ok`. Анонимный запрос к основному URL функции возвращает 403;
 публичных access bindings и политик прогретых экземпляров нет.
@@ -96,10 +97,14 @@ package.json, lockfile и установленные зависимости. К�
 Для проверки через
 `yc serverless function invoke` передавать событие с `httpMethod: "GET"`
 и `path: "/ready"`. Основной URL функции требует IAM-авторизации;
-маршруты авторизации опубликованы через API Gateway. `/ready` доступен только
+маршруты авторизации и `/cloud/*` опубликованы через API Gateway. `/ready` доступен только
 через приватный вызов функции, `/documents` ещё не реализован.
 
 Документация платформы:
 [контекст Node.js](https://yandex.cloud/ru/docs/functions/lang/nodejs/context),
 [IAM в S3 API](https://yandex.cloud/ru/docs/storage/s3/),
 [пример YDB SDK](https://ydb.tech/docs/en/dev/example-app/example-js).
+
+Облачные маршруты: `GET /cloud/list`, POST `/cloud/folder`, `/cloud/prepare`,
+`/cloud/commit`, `/cloud/open`, `/cloud/document` и OPTIONS. Все требуют сессию
+пользователя; изменения требуют Origin приложения.
