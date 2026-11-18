@@ -37,7 +37,7 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
-  'Local autosave works offline. Cloud uploads are optional.': 'Локальное автосохранение работает офлайн. Загрузка в облако необязательна.',
+  'Autosave on this device.': 'Автосохранение на устройстве.',
   Save: 'Сохранить',
   'Works offline. Cloud uploads are optional.': 'Работает офлайн. Загрузка в облако необязательна.',
   "Recent documents": "Недавние документы",

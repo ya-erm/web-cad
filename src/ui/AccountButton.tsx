@@ -116,7 +116,7 @@ export function AccountButton() {
           <div className="dropdown account-dropdown">
             <div className="account-name">{user.displayName}</div>
             {user.email && <div className="dropdown-label account-email">{user.email}</div>}
-            <div className="dropdown-note">{t('Local autosave works offline. Cloud uploads are optional.')}</div>
+            <div className="dropdown-note">{t('Autosave on this device.')}</div>
             {status === 'unavailable' && <div className="dropdown-note">{t('Account unavailable. You can keep working offline.')}</div>}
             <button className="dropdown-item" disabled={busy} onClick={() => void signOut()}>{t('Sign out')}</button>
           </div>

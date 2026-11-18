@@ -924,9 +924,6 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               </button>
             )}
           </div>
-          <div className="offline-note">
-            {t(folders.length ? 'Works offline. Documents are stored in this browser; those of the folders are also saved to their files.' : 'Works offline. Cloud uploads are optional.')}
-          </div>
         </div>
         <div className="docs-main">
           <div className="docs-title">
