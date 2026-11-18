@@ -1,5 +1,7 @@
 # Documents and tabs
 
+Click the **WebCAD** logo in the Documents page top bar to reload the page.
+
 ## Documents page {#documents-page}
 
 ```figure

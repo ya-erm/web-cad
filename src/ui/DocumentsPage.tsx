@@ -803,7 +803,9 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="docs-page">
       <div className="docs-top">
         <div className="brand">
-          <div className="brand-logo">◆</div> WebCAD
+          <button className="brand-reload" title={t('Reload the page')} aria-label={`WebCAD — ${t('Reload the page')}`} onClick={() => location.reload()}>
+            <span className="brand-logo" aria-hidden="true">◆</span> WebCAD
+          </button>
           <span className="brand-version" title={appVersionTitle()}>
             {APP_VERSION}
           </span>
