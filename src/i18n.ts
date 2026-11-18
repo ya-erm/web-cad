@@ -37,6 +37,12 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  '1 finger: rotate · 2 fingers: pan / zoom · Tap: select': '1 палец: вращение · 2 пальца: сдвиг / масштаб · Касание: выбор',
+  '1 finger: pan · 2 fingers: pan / zoom · Tap: draw or select': '1 палец: сдвиг · 2 пальца: сдвиг / масштаб · Касание: рисование или выбор',
+  'Touch and Apple Pencil': 'Касания и Apple Pencil',
+  'Navigate with fingers': 'Управлять камерой пальцами',
+  'One finger rotates; two pan and zoom. In sketches, one finger pans. Apple Pencil selects and draws.':
+    'Один палец вращает, два сдвигают и масштабируют. В эскизе один палец сдвигает вид. Apple Pencil выбирает и рисует.',
   // documents page
   Documents: 'Документы',
   'Create': 'Создать',

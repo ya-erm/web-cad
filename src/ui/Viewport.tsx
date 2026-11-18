@@ -126,6 +126,8 @@ export function Viewport() {
       setSlowBuild(false);
     };
   }, [building]);
+  const touchNavigation = useEditor((s) => s.touchNavigation);
+  const sketchActive = useEditor((s) => !!s.sketch);
   const perspective = useEditor((s) => s.perspective);
   const section = useEditor((s) => s.section);
   const [menu, setMenu] = useState(false);
@@ -226,6 +228,9 @@ export function Viewport() {
           )}
         </div>
       </div>
+      {touchNavigation && <div className="touch-navigation-hint">
+        {t(sketchActive ? '1 finger: pan · 2 fingers: pan / zoom · Tap: draw or select' : '1 finger: rotate · 2 fingers: pan / zoom · Tap: select')}
+      </div>}
       {section && <SectionPanel s={section} />}
       {(!kernelReady || (building && slowBuild)) && (
         // one overlay for both: the kernel loaded, its text changes to the build without blinking

@@ -214,6 +214,8 @@ export interface EditorState {
   toast: { id: number; text: string; kind: 'info' | 'error' } | null;
   perspective: boolean;
   rotationMode: 'free' | 'turntable';
+  /** Fingers navigate; pen pointers keep the usual tool / selection behavior. */
+  touchNavigation: boolean;
   /** Section view: parts are clipped by a plane (world normal / origin, offset along the normal in mm). */
   section: SectionState | null;
   /** Constraint glyphs in sketch mode: all, or only for the selected/hovered entities. */
@@ -434,6 +436,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
       return localStorage.getItem('webcad.rotation') === 'turntable' ? 'turntable' : 'free';
     } catch {
       return 'free';
+    }
+  })(),
+  touchNavigation: (() => {
+    try {
+      return localStorage.getItem('webcad.touchNavigation') !== '0';
+    } catch {
+      return true;
     }
   })(),
   section: null,
@@ -700,6 +709,15 @@ export function setRotationMode(mode: 'free' | 'turntable') {
   useEditor.setState({ rotationMode: mode });
   try {
     localStorage.setItem('webcad.rotation', mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setTouchNavigation(enabled: boolean) {
+  useEditor.setState({ touchNavigation: enabled });
+  try {
+    localStorage.setItem('webcad.touchNavigation', enabled ? '1' : '0');
   } catch {
     /* ignore */
   }

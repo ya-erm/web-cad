@@ -3,15 +3,17 @@
 // has them alone.
 
 import { useState } from 'react';
-import { setRotationMode, useEditor } from '../store/editorStore';
+import { setRotationMode, setTouchNavigation, useEditor } from '../store/editorStore';
 import { getLang, setLang, t } from '../i18n';
 import { openHelp } from '../help/context';
 import { installApp, useInstallState } from '../pwa';
 import { Icon } from './icons';
+import { isIPad } from './inputDevice';
 
 /** Rotation, Language and App items of a settings dropdown. */
 export function AppSettingsItems() {
   const rotationMode = useEditor((s) => s.rotationMode);
+  const touchNavigation = useEditor((s) => s.touchNavigation);
   const install = useInstallState();
   return (
     <>
@@ -28,6 +30,25 @@ export function AppSettingsItems() {
         </div>
       ))}
       <div className="dropdown-sep" />
+      {isIPad() && (
+        <>
+          <div className="dropdown-label">{t('Touch and Apple Pencil')}</div>
+          <button
+            type="button"
+            className="dropdown-item"
+            role="menuitemcheckbox"
+            aria-checked={touchNavigation}
+            onClick={() => setTouchNavigation(!touchNavigation)}
+          >
+            <span className="menu-icon">{touchNavigation ? '✓' : ''}</span>
+            {t('Navigate with fingers')}
+          </button>
+          <div className="dropdown-note">
+            {t('One finger rotates; two pan and zoom. In sketches, one finger pans. Apple Pencil selects and draws.')}
+          </div>
+          <div className="dropdown-sep" />
+        </>
+      )}
       <div className="dropdown-label">{t('Language')}</div>
       {(['ru', 'en'] as const).map((l) => (
         <div

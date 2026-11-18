@@ -332,7 +332,7 @@ export class Engine {
    * instance is dragged, no menu of a part opens, no view is remembered.
    */
   private readonly viewOnly = embedMode();
-  /** Viewer: the pointers (buttons, fingers) down on the graphics area, where each is now. */
+  /** Navigation pointers: viewer mouse buttons and fingers in both viewer and editor. */
   private viewPointers = new Map<number, { x: number; y: number }>();
   private viewDrag: { x: number; y: number; moved: boolean; button: number; touch: boolean; pan: boolean; pivot?: THREE.Vector3 } | null = null;
   private saveViewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -342,6 +342,7 @@ export class Engine {
 
   // pointer state
   private down: {
+    pointerId: number;
     x: number;
     y: number;
     button: number;
@@ -1937,6 +1938,7 @@ export class Engine {
     // the browser took a finger over (a gesture of its own): it ends without a tap
     const onCancel = (e: PointerEvent) => this.viewUp(e, true);
     window.addEventListener('pointercancel', onCancel);
+    el.addEventListener('lostpointercapture', onCancel);
     this.unsub.push(() => {
       window.removeEventListener('pointermove', this.onMove);
       window.removeEventListener('pointerup', this.onUp);
@@ -1945,13 +1947,14 @@ export class Engine {
   }
 
   // -------------------------------------------------------------------------
-  // The viewer's pointers: mouse and touch turn, move and zoom the view only
+  // Navigation: viewer mouse buttons and editor / viewer touch gestures
   // -------------------------------------------------------------------------
 
   private viewDown(e: PointerEvent) {
     const p = this.localPos(e);
     const touch = e.pointerType === 'touch';
     this.viewPointers.set(e.pointerId, p);
+    this.renderer.domElement.setPointerCapture(e.pointerId);
     useEditor.setState({ contextMenu: null });
     if (touch && this.viewPointers.size > 1) {
       // a second finger: two move and pinch the view (no tap any more)
@@ -1959,7 +1962,7 @@ export class Engine {
       return;
     }
     // middle button, Ctrl+right, Shift+left: move the view; the left and the right buttons, a finger: turn it
-    const pan = e.button === 1 || (e.button === 2 && (e.ctrlKey || e.metaKey)) || (e.button === 0 && e.shiftKey && !touch);
+    const pan = (touch && this.sketchEditor.active) || e.button === 1 || (e.button === 2 && (e.ctrlKey || e.metaKey)) || (e.button === 0 && e.shiftKey && !touch);
     this.viewDrag = { ...p, moved: false, button: e.button, touch, pan };
     if (!pan) {
       this.cam.beginRotate();
@@ -1978,7 +1981,11 @@ export class Engine {
       return false;
     }
     const p = this.localPos(e);
-    if (this.viewPointers.size >= 2) {
+    if (this.viewPointers.size > 2) {
+      this.viewPointers.set(e.pointerId, p);
+      return true;
+    }
+    if (this.viewPointers.size === 2) {
       // two fingers: the view moves with their middle and zooms as they spread or pinch
       const [a, b] = [...this.viewPointers.values()];
       const mid0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -2009,11 +2016,13 @@ export class Engine {
 
   private viewUp(e: PointerEvent, cancelled = false) {
     if (!this.viewPointers.delete(e.pointerId)) return;
+    const el = this.renderer.domElement;
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     const d = this.viewDrag;
     if (this.viewPointers.size) {
       // one finger of two lifted: the other turns the view on from where it is
       const [rest] = [...this.viewPointers.values()];
-      this.viewDrag = { ...rest, moved: true, button: 0, touch: true, pan: false };
+      this.viewDrag = { ...rest, moved: true, button: 0, touch: true, pan: this.sketchEditor.active };
       this.cam.beginRotate();
       return;
     }
@@ -2023,14 +2032,18 @@ export class Engine {
     // a click (a tap) selects: a face to look normal to, a section through it
     else if (!cancelled && d.button === 0) {
       const { x, y } = this.localPos(e);
-      this.onClick(x, y, e);
+      if (this.sketchEditor.active && !this.viewOnly) {
+        // Delay sketch presses until a tap is certain: a pan / pinch must not edit geometry.
+        this.sketchEditor.onPointerDown(x, y, e);
+        this.sketchEditor.onPointerUp(x, y, e, false);
+      } else this.onClick(x, y, e);
     }
   }
 
   private onDown(e: PointerEvent) {
-    if (this.viewOnly || this.loadingModel()) return this.viewDown(e);
+    if (this.viewOnly || this.loadingModel() || (e.pointerType === 'touch' && useEditor.getState().touchNavigation)) return this.viewDown(e);
     const { x, y } = this.localPos(e);
-    this.down = { x, y, button: e.button, ctrl: e.ctrlKey || e.metaKey, moved: false };
+    this.down = { pointerId: e.pointerId, x, y, button: e.button, ctrl: e.ctrlKey || e.metaKey, moved: false };
     this.lastPos = { x, y };
     useEditor.setState({ contextMenu: null });
     if (e.button === 2 && !this.down.ctrl) {
@@ -2082,9 +2095,10 @@ export class Engine {
 
   private onMove = (e: PointerEvent) => {
     if (this.viewMove(e)) return;
-    if (this.loadingModel()) return;
+    if (this.loadingModel() || (e.pointerType === 'touch' && useEditor.getState().touchNavigation)) return;
     const { x, y } = this.localPos(e);
     const d = this.down;
+    if (d && d.pointerId !== e.pointerId) return;
     if (d) {
       const dx = x - this.lastPos.x;
       const dy = y - this.lastPos.y;
@@ -2287,8 +2301,8 @@ export class Engine {
   private onUp = (e: PointerEvent) => {
     if (this.viewOnly || this.viewPointers.has(e.pointerId)) return this.viewUp(e);
     const d = this.down;
+    if (!d || d.pointerId !== e.pointerId) return;
     this.down = null;
-    if (!d) return;
     if (d.moved && d.button !== 0) this.applyCursor(this.cursorWanted);
     const { x, y } = this.localPos(e);
     if (d.part?.started || d.triad) {

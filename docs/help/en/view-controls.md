@@ -16,6 +16,23 @@ The view rotates around the point on the part under the cursor (if there is no p
 - **Free rotation**: the model rotates around the screen axes (as in Onshape);
 - **Turntable (Z up)**: rotation around the Z axis; the horizon does not tilt. Keep tilting over the top or the bottom of the model to look at its far side: the view turns upside down and the horizon stays level. Upside down, dragging sideways still pulls the side of the model nearest to you along with the pointer.
 
+## iPad and Apple Pencil {#touch}
+
+In **Settings** → **Touch and Apple Pencil**, enable **Navigate with fingers** (on by default). This preference is saved in this browser. This section appears only on iPad, including Safari in desktop mode. An attached Apple Pencil cannot be detected in advance: pen input is recognized from pointer events.
+
+| Action | Gesture |
+|---|---|
+| Rotate | Drag one finger in the graphics area |
+| Pan | Move two fingers together |
+| Zoom | Pinch or spread two fingers |
+| Select | Briefly tap an object |
+
+In a sketch, one finger **pans the view**, keeping the working plane's orientation. A brief tap selects an object or places a point with the current tool; panning and zooming do not draw geometry.
+
+**Apple Pencil** works like the left mouse button: select objects, draw and drag sketch elements, use manipulators and move assembly instances. Fingers control the camera. A gesture hint appears at the bottom of the graphics area on touch screens.
+
+With **Navigate with fingers** off, touches work like the left mouse button as before. Drag the view cube in the top-right corner to rotate; the **Zoom to fit** button below it fits the model to the screen.
+
 ## View cube {#view-cube}
 
 The cube in the top-right corner of the graphics area rotates together with the model. Click a face of the cube (**Front**, **Top**, **Right**, and so on) to view the model from that side; click an edge or a corner to view it at an angle.
