@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { useDoc } from '../store/docStore';
+import { Icon } from './icons';
 
 const API = 'https://api.cad.ya-erm.ru';
 type User = { id: string; displayName: string; email: string | null; avatarUrl: string | null };
@@ -119,6 +120,7 @@ export function AccountButton() {
         <button className="btn small" title={t('Account unavailable. You can keep working offline.')} onClick={() => setRetry(n => n + 1)}>{t('Retry sign-in')}</button>
       ) : (
         <button className="btn small" disabled={busy || status === 'loading'} onClick={() => void signIn()}>
+          <Icon name="account" size={16} />
           {t(status === 'loading' ? 'Checking account…' : 'Sign in with Yandex')}
         </button>
       )}

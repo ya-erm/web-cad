@@ -994,6 +994,12 @@ const ICONS = {
       <circle cx={12} cy={12} r={2.8} />
     </>
   ),
+  account: (
+    <>
+      <circle cx={12} cy={8} r={3.5} />
+      <path d="M5 20v-1a7 7 0 0 1 14 0v1" />
+    </>
+  ),
   help: (
     <>
       <circle cx={12} cy={12} r={9} />
