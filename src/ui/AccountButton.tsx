@@ -103,7 +103,7 @@ export function AccountButton() {
       {error && <span className="account-error" role="status" title={t(error)}>{t(error)}</span>}
       {user ? (
         <details className="account-menu" ref={menu}>
-          <summary className="btn small" title={user.email ?? user.displayName}>
+          <summary title={user.email ?? user.displayName}>
             {avatar ? <img src={avatar} alt="" className="account-avatar" referrerPolicy="no-referrer" />
               : <span className="account-avatar account-initials" aria-hidden="true">{user.displayName.slice(0, 1).toUpperCase()}</span>}
             <span className="account-name">{user.displayName}</span>
