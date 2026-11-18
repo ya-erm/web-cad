@@ -28,6 +28,7 @@ import { AppSettingsButton, LangSwitch } from './AppSettings';
 import { t, getLang } from '../i18n';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
+import { AccountButton } from './AccountButton';
 
 function fmtDate(ts: number) {
   return new Date(ts).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', {
@@ -831,6 +832,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
         <button className="btn small" title={t('Help')} onClick={() => openHelp()}>
           <Icon name="help" size={14} /> {t('Help')}
         </button>
+        <AccountButton />
         <AppSettingsButton />
         <LangSwitch />
       </div>

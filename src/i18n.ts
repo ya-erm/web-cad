@@ -37,6 +37,15 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'Sign in with Yandex': 'Войти через Яндекс',
+  'Sign out': 'Выйти',
+  'Checking account…': 'Проверка аккаунта…',
+  'Retry sign-in': 'Повторить подключение',
+  'Sign-in was cancelled.': 'Вход отменён.',
+  'Save your changes before signing in.': 'Сохраните изменения перед входом.',
+  'Could not sign out. Try again when online.': 'Не удалось выйти. Повторите, когда появится сеть.',
+  'Documents are currently saved on this device.': 'Документы пока сохраняются на этом устройстве.',
+  'Account unavailable. You can keep working offline.': 'Аккаунт недоступен. Можно продолжить работу офлайн.',
   '1 finger: rotate · 2 fingers: pan / zoom · Tap: select': '1 палец: вращение · 2 пальца: сдвиг / масштаб · Касание: выбор',
   '1 finger: pan · 2 fingers: pan / zoom · Tap: draw or select': '1 палец: сдвиг · 2 пальца: сдвиг / масштаб · Касание: рисование или выбор',
   'Touch and Apple Pencil': 'Касания и Apple Pencil',

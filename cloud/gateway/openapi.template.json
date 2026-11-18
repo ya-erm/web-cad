@@ -1,0 +1,146 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "WebCAD API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Check the API handler without accessing document storage",
+        "responses": {
+          "200": {
+            "description": "API handler is running"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/auth/yandex/start": {
+      "get": {
+        "operationId": "yandexStart",
+        "responses": {
+          "200": {
+            "description": "Authentication response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "yandexStartOptions",
+        "responses": {
+          "204": {
+            "description": "CORS response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/auth/yandex/callback": {
+      "get": {
+        "operationId": "yandexCallback",
+        "responses": {
+          "200": {
+            "description": "Authentication response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "yandexCallbackOptions",
+        "responses": {
+          "204": {
+            "description": "CORS response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "session",
+        "responses": {
+          "200": {
+            "description": "Authentication response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "sessionOptions",
+        "responses": {
+          "204": {
+            "description": "CORS response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "description": "Authentication response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "logoutOptions",
+        "responses": {
+          "204": {
+            "description": "CORS response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "auth-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    }
+  }
+}

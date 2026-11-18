@@ -1,0 +1,14 @@
+{
+  "name": "webcad-cloud-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@ydbjs/auth": "6.3.1",
+    "@ydbjs/core": "6.3.1",
+    "@ydbjs/query": "6.3.0"
+  }
+}

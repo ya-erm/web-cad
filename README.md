@@ -12,6 +12,7 @@
 
 ```bash
 npm install
+npm ci --prefix cloud/api --omit=dev --ignore-scripts # зависимости серверных тестов
 npm run dev          # режим разработки: http://localhost:5173
 ```
 

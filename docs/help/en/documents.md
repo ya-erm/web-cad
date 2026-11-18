@@ -35,6 +35,22 @@ The thumbnail updates while the document is open and when you return to the docu
 
 Each document has its own address of the form `#/doc/<id>`, which you can bookmark in this browser.
 
+## Account {#account}
+
+**Sign in with Yandex** in the top bar of the Documents page and editor opens
+Yandex ID. After you grant access, WebCAD shows your name and avatar, or the first
+letter of your name when no avatar is available. Your email appears in the account
+menu. **Sign out** ends the current session in this browser.
+
+Signing in is optional. Documents are currently saved on this device: signing in
+does not upload them to the cloud. Signing out does not delete local documents.
+If the account service is unavailable or you are offline, editing still works;
+**Retry sign-in** checks the account service again.
+
+A session lasts 180 days and renews when you use the app, at most once per day.
+After 180 days of inactivity you need to sign in again. Cancelling on the Yandex
+page returns to WebCAD with a “Sign-in was cancelled” message.
+
 ## Trash and recovery {#trash}
 
 1. Click **Trash** on the left of the Documents page.

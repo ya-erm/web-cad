@@ -32,6 +32,7 @@ import { DrawingEditor } from '../drawing/DrawingEditor';
 import { Icon } from './icons';
 import { t } from '../i18n';
 import { AppSettingsItems } from './AppSettings';
+import { AccountButton } from './AccountButton';
 import { CompareBanner, VersionBanner, VersionsButton } from './VersionsPanel';
 
 import { APP_VERSION, appVersionTitle } from './version';
@@ -105,6 +106,7 @@ function TopBar({ onBack }: { onBack: () => void }) {
         </span>
       )}
       <div className="spacer" />
+      <AccountButton />
       <button className="icon-btn" title={`${t('Help')} (F1)`} onClick={() => openHelp(contextHelpPage())}>
         <Icon name="help" size={18} />
       </button>
