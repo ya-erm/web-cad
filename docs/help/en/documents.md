@@ -44,6 +44,8 @@ A document consists of tabs, which are shown in the bottom bar:
 
 The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing** or **Assembly** tab. Double-click a tab to rename it. Right-click a tab to open the **Rename** / **Delete** menu (you cannot delete the last tab).
 
+When there are many tabs, scroll the strip with the mouse wheel, a horizontal trackpad gesture, or the arrows at its edges. The **All tabs** button to the right opens a scrollable list with full names and type icons: choose any tab, including one beyond the window edge. The selected tab automatically appears in the visible part of the strip, including after resizing the window. Long names are shortened in the strip; the tooltip and the list show the full name. With a tab focused, `←` / `→` switch tabs, `Home` / `End` select the first / last tab, and `F2` renames it. In the list, use `↑` / `↓`, `Enter` to select, and `Esc` to close.
+
 ## Saving and undo {#saving}
 
 - All changes are saved automatically; the status is shown next to the document name: **Saved** or **Saving…**. The last edits are written also when you go straight back to the document list, open another document, switch to another browser tab, or close the page. With edits not saved yet, the browser asks whether to close the page.

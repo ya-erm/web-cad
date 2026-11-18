@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { LengthUnit } from '../core/types';
 import { useEditor } from '../store/editorStore';
 import { activeAssembly, activeTab, newAssemblyTab, newDrawingTab, newPartStudio, useDoc } from '../store/docStore';
@@ -158,124 +158,318 @@ function BottomBar() {
   const sketch = useEditor((s) => s.sketch);
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [tabList, setTabList] = useState(false);
+  const [scroll, setScroll] = useState({ overflow: false, left: false, right: false });
+  const stripRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listButtonRef = useRef<HTMLButtonElement>(null);
+  // Rebuilding a model must not reset a strip the user is browsing.
+  const tabLayout = JSON.stringify(doc.tabs.map(({ id, name }) => [id, name]));
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    const content = contentRef.current;
+    if (!strip || !content) return;
+    const measure = () => {
+      const max = strip.scrollWidth - strip.clientWidth;
+      const next = { overflow: max > 1, left: strip.scrollLeft > 1, right: strip.scrollLeft < max - 1 };
+      setScroll((prev) => (prev.overflow === next.overflow && prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    const reveal = () => {
+      const tab = content.querySelector<HTMLElement>('.tab.active');
+      if (tab) {
+        // Scroll only the strip, never the editor or the document around it.
+        const left = tab.offsetLeft;
+        if (left < strip.scrollLeft) strip.scrollLeft = left;
+        else if (left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + tab.offsetWidth - strip.clientWidth;
+      }
+      measure();
+    };
+    const wheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || strip.scrollWidth <= strip.clientWidth) return;
+      e.preventDefault();
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 24 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? strip.clientWidth : 1;
+      strip.scrollLeft += e.deltaY * unit;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    observer.observe(content);
+    strip.addEventListener('scroll', measure);
+    strip.addEventListener('wheel', wheel, { passive: false });
+    return () => {
+      observer.disconnect();
+      strip.removeEventListener('scroll', measure);
+      strip.removeEventListener('wheel', wheel);
+    };
+  }, [doc.id, doc.activeTab, tabLayout, renaming]);
+  useEffect(() => {
+    if (!tabList) return;
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLButtonElement>('[aria-current="true"]');
+    selected?.focus();
+    const outside = (e: PointerEvent) => {
+      if (!list?.contains(e.target as Node) && !listButtonRef.current?.contains(e.target as Node)) setTabList(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [tabList]);
+  const selectTab = (id: string) => {
+    if (id !== doc.activeTab)
+      update(
+        (d) => {
+          d.activeTab = id;
+        },
+        { undoable: false },
+      );
+  };
+  const scrollTabs = (direction: number) => {
+    const strip = stripRef.current;
+    if (strip) strip.scrollBy({ left: direction * Math.max(80, strip.clientWidth * 0.75), behavior: 'smooth' });
+  };
   const sv = sketch?.solve;
   const sketchHasEntities = useEditor((s) => (s.editing?.draft.type === 'sketch' ? s.editing.draft.params.entities.length > 0 : false));
   return (
     <div className="bottombar">
-      <div className="menu-wrap" style={{ display: 'flex' }}>
-        <div className="tab" title={t('Add tab')} onClick={() => setMenu(!menu)}>
-          <Icon name="plus" size={14} />
-        </div>
-        {menu && (
-          <div className="dropdown left" style={{ top: 'auto', bottom: 'calc(100% + 4px)' }} onMouseLeave={() => setMenu(false)}>
-            <div
-              className="dropdown-item"
-              onClick={() => {
-                const n = doc.tabs.filter((x) => x.type === 'partStudio').length + 1;
-                const ps = newPartStudio(`Part Studio ${n}`);
-                update((d) => {
-                  d.tabs.push(ps);
-                  d.activeTab = ps.id;
-                });
-                setMenu(false);
-              }}
-            >
-              <Icon name="partStudio" size={16} /> {t('Part Studio')}
-            </div>
-            <div
-              className="dropdown-item"
-              onClick={() => {
-                const n = doc.tabs.filter((x) => x.type === 'drawing').length + 1;
-                const dw = newDrawingTab(`Drawing ${n}`, doc.name);
-                update((d) => {
-                  d.tabs.push(dw);
-                  d.activeTab = dw.id;
-                });
-                setMenu(false);
-              }}
-            >
-              <Icon name="drawing" size={16} /> {t('Drawing')}
-            </div>
-            <div
-              className="dropdown-item"
-              onClick={() => {
-                const n = doc.tabs.filter((x) => x.type === 'assembly').length + 1;
-                const as = newAssemblyTab(`Assembly ${n}`);
-                update((d) => {
-                  d.tabs.push(as);
-                  d.activeTab = as.id;
-                });
-                setMenu(false);
-              }}
-            >
-              <Icon name="assembly" size={16} /> {t('Assembly')}
-            </div>
-          </div>
-        )}
-      </div>
-      {doc.tabs.map((tab) => (
-        <div
-          key={tab.id}
-          className={'tab' + (tab.id === doc.activeTab ? ' active' : '')}
-          onClick={() =>
-            tab.id !== doc.activeTab &&
-            update(
-              (d) => {
-                d.activeTab = tab.id;
-              },
-              { undoable: false },
-            )
-          }
-          onDoubleClick={() => setRenaming(tab.id)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            useEditor.setState({
-              contextMenu: {
-                x: e.clientX,
-                y: e.clientY,
-                items: [
-                  { label: t('Rename'), icon: 'rename', action: () => setRenaming(tab.id) },
-                  {
-                    label: t('Delete'), icon: 'trash',
-                    danger: true,
-                    disabled: doc.tabs.length <= 1,
-                    action: () =>
-                      update((d) => {
-                        d.tabs = d.tabs.filter((x) => x.id !== tab.id);
-                        if (d.activeTab === tab.id) d.activeTab = d.tabs[0].id;
-                      }),
-                  },
-                ],
-              },
-            });
-          }}
-        >
-          <Icon name={tab.type} size={14} />
-          {renaming === tab.id ? (
-            <input
-              className="tree-rename"
-              autoFocus
-              defaultValue={tab.name}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v)
+      <div className="document-tabs">
+        <div className="menu-wrap tab-add-wrap">
+          <button
+            className="tab tab-control"
+            aria-label={t('Add tab')}
+            title={t('Add tab')}
+            aria-expanded={menu}
+            onClick={() => {
+              setMenu(!menu);
+              setTabList(false);
+            }}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+          {menu && (
+            <div className="dropdown left" style={{ top: 'auto', bottom: 'calc(100% + 4px)' }} onMouseLeave={() => setMenu(false)}>
+              <div
+                className="dropdown-item"
+                onClick={() => {
+                  const n = doc.tabs.filter((x) => x.type === 'partStudio').length + 1;
+                  const ps = newPartStudio(`Part Studio ${n}`);
                   update((d) => {
-                    const x = d.tabs.find((y) => y.id === tab.id);
-                    if (x) x.name = v;
+                    d.tabs.push(ps);
+                    d.activeTab = ps.id;
                   });
-                setRenaming(null);
+                  setMenu(false);
+                }}
+              >
+                <Icon name="partStudio" size={16} /> {t('Part Studio')}
+              </div>
+              <div
+                className="dropdown-item"
+                onClick={() => {
+                  const n = doc.tabs.filter((x) => x.type === 'drawing').length + 1;
+                  const dw = newDrawingTab(`Drawing ${n}`, doc.name);
+                  update((d) => {
+                    d.tabs.push(dw);
+                    d.activeTab = dw.id;
+                  });
+                  setMenu(false);
+                }}
+              >
+                <Icon name="drawing" size={16} /> {t('Drawing')}
+              </div>
+              <div
+                className="dropdown-item"
+                onClick={() => {
+                  const n = doc.tabs.filter((x) => x.type === 'assembly').length + 1;
+                  const as = newAssemblyTab(`Assembly ${n}`);
+                  update((d) => {
+                    d.tabs.push(as);
+                    d.activeTab = as.id;
+                  });
+                  setMenu(false);
+                }}
+              >
+                <Icon name="assembly" size={16} /> {t('Assembly')}
+              </div>
+            </div>
+          )}
+        </div>
+        {scroll.overflow && (
+          <button className="tab tab-control" aria-label={t('Scroll tabs left')} title={t('Scroll tabs left')} disabled={!scroll.left} onClick={() => scrollTabs(-1)}>
+            <Icon name="chevronLeft" size={14} />
+          </button>
+        )}
+        <div className="document-tab-strip" ref={stripRef} role="tablist" aria-label={t('Tabs')}>
+          <div className="document-tab-content" ref={contentRef}>
+            {doc.tabs.map((tab) => (
+              <div
+                key={tab.id}
+                className={'tab' + (tab.id === doc.activeTab ? ' active' : '')}
+                role="tab"
+                aria-selected={tab.id === doc.activeTab}
+                tabIndex={tab.id === doc.activeTab ? 0 : -1}
+                title={tab.name}
+                onClick={() => selectTab(tab.id)}
+                onFocus={(e) => {
+                  const strip = stripRef.current;
+                  if (strip) {
+                    const tab = e.currentTarget;
+                    if (tab.offsetLeft < strip.scrollLeft) strip.scrollLeft = tab.offsetLeft;
+                    else if (tab.offsetLeft + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = tab.offsetLeft + tab.offsetWidth - strip.clientWidth;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  e.stopPropagation();
+                  const index = doc.tabs.findIndex((x) => x.id === tab.id);
+                  const next =
+                    e.key === 'ArrowRight'
+                      ? (index + 1) % doc.tabs.length
+                      : e.key === 'ArrowLeft'
+                        ? (index + doc.tabs.length - 1) % doc.tabs.length
+                        : e.key === 'Home'
+                          ? 0
+                          : e.key === 'End'
+                            ? doc.tabs.length - 1
+                            : null;
+                  if (next !== null) {
+                    e.preventDefault();
+                    selectTab(doc.tabs[next].id);
+                    contentRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+                  } else if (e.key === 'F2') {
+                    e.preventDefault();
+                    setRenaming(tab.id);
+                  }
+                }}
+                onDoubleClick={() => setRenaming(tab.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  useEditor.setState({
+                    contextMenu: {
+                      x: e.clientX,
+                      y: e.clientY,
+                      items: [
+                        { label: t('Rename'), icon: 'rename', action: () => setRenaming(tab.id) },
+                        {
+                          label: t('Delete'),
+                          icon: 'trash',
+                          danger: true,
+                          disabled: doc.tabs.length <= 1,
+                          action: () =>
+                            update((d) => {
+                              d.tabs = d.tabs.filter((x) => x.id !== tab.id);
+                              if (d.activeTab === tab.id) d.activeTab = d.tabs[0].id;
+                            }),
+                        },
+                      ],
+                    },
+                  });
+                }}
+              >
+                <Icon name={tab.type} size={14} />
+                {renaming === tab.id ? (
+                  <input
+                    className="tree-rename"
+                    autoFocus
+                    defaultValue={tab.name}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v)
+                        update((d) => {
+                          const x = d.tabs.find((y) => y.id === tab.id);
+                          if (x) x.name = v;
+                        });
+                      setRenaming(null);
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      if (e.key === 'Escape') setRenaming(null);
+                    }}
+                  />
+                ) : (
+                  <span className="document-tab-name">{tab.name}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        {scroll.overflow && (
+          <button className="tab tab-control" aria-label={t('Scroll tabs right')} title={t('Scroll tabs right')} disabled={!scroll.right} onClick={() => scrollTabs(1)}>
+            <Icon name="chevronRight" size={14} />
+          </button>
+        )}
+        <div className="menu-wrap tab-list-wrap">
+          <button
+            ref={listButtonRef}
+            className="tab tab-control"
+            aria-label={t('All tabs')}
+            title={t('All tabs')}
+            aria-expanded={tabList}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setTabList(!tabList);
+              setMenu(false);
+            }}
+          >
+            <Icon name="menu" size={14} />
+          </button>
+          {tabList && (
+            <div
+              ref={listRef}
+              className="dropdown document-tab-list"
+              role="dialog"
+              aria-label={t('All tabs')}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null) && e.relatedTarget !== listButtonRef.current) setTabList(false);
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                if (e.key === 'Escape') setRenaming(null);
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setTabList(false);
+                  listButtonRef.current?.focus();
+                }
+                const items = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+                const index = items.indexOf(document.activeElement as HTMLButtonElement);
+                const next =
+                  e.key === 'ArrowDown'
+                    ? (index + 1) % items.length
+                    : e.key === 'ArrowUp'
+                      ? (index + items.length - 1) % items.length
+                      : e.key === 'Home'
+                        ? 0
+                        : e.key === 'End'
+                          ? items.length - 1
+                          : null;
+                if (next !== null) {
+                  e.preventDefault();
+                  items[next]?.focus();
+                }
               }}
-            />
-          ) : (
-            tab.name
+            >
+              <div className="dropdown-label">
+                {t('All tabs')} ({doc.tabs.length})
+              </div>
+              {doc.tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  className="dropdown-item"
+                  aria-current={tab.id === doc.activeTab}
+                  title={tab.name}
+                  onClick={() => {
+                    selectTab(tab.id);
+                    setTabList(false);
+                    contentRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[doc.tabs.findIndex((x) => x.id === tab.id)]?.focus();
+                  }}
+                >
+                  <Icon name={tab.type} size={16} />
+                  <span>{tab.name}</span>
+                  <span className="menu-icon">{tab.id === doc.activeTab ? '✓' : ''}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
-      ))}
+      </div>
       <div className="status">
         {sketch?.hint && (
           <span className="status-hint" title={t(sketch.hint)}>
@@ -284,15 +478,17 @@ function BottomBar() {
         )}
         {sv && (sketchHasEntities || null) && (
           <span className={'sk-state ' + (!sv.ok || sv.conflicting.length ? 'over' : sv.dof === 0 ? 'full' : 'under')}>
-            {!sv.ok || sv.conflicting.length
-              ? t('Over defined')
-              : sv.dof === 0
-                ? t('Fully defined')
-                : `${t('Under defined')}: ${sv.dof} ${t('degrees of freedom')}`}
+            {!sv.ok || sv.conflicting.length ? t('Over defined') : sv.dof === 0 ? t('Fully defined') : `${t('Under defined')}: ${sv.dof} ${t('degrees of freedom')}`}
           </span>
         )}
-        {building ? <div className="spinner" /> : build && <span title={t('Model rebuild time: how long the last rebuild of the features took')}>{Math.round(build.timeMs)} ms</span>}
-        <span title={`${t('Document units')}: ${doc.units.length}, ${doc.units.angle}\n${t('Numbers without units in fields and dimensions are in these units; change them in Settings')}`}>
+        {building ? (
+          <div className="spinner" />
+        ) : (
+          build && <span title={t('Model rebuild time: how long the last rebuild of the features took')}>{Math.round(build.timeMs)} ms</span>
+        )}
+        <span
+          title={`${t('Document units')}: ${doc.units.length}, ${doc.units.angle}\n${t('Numbers without units in fields and dimensions are in these units; change them in Settings')}`}
+        >
           {doc.units.length}
         </span>
         <span className="app-version" title={appVersionTitle()}>

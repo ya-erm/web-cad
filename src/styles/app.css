@@ -800,6 +800,7 @@ textarea {
 
 .editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   /* top bar, banners (version viewed, compared), toolbar, workspace, status bar */
   grid-template-rows: 40px auto 42px 1fr 30px;
   height: 100%;
@@ -2171,6 +2172,108 @@ body.panel-resizing-y * {
   background: var(--panel);
   font-size: 12px;
 }
+.document-tabs {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tab-add-wrap,
+.tab-list-wrap {
+  display: flex;
+  flex: none;
+}
+.tab-list-wrap {
+  position: static;
+}
+.document-tab-strip {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  container-type: inline-size;
+}
+.document-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.document-tab-content {
+  position: relative;
+  display: flex;
+  width: max-content;
+  height: 100%;
+}
+.document-tab-content .tab {
+  box-sizing: border-box;
+  max-width: min(220px, 100cqi);
+  min-width: 0;
+}
+.document-tab-content .tab > svg {
+  flex: none;
+}
+.document-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-tab-content .tree-rename {
+  min-width: 0;
+  width: 150px;
+}
+.tab.tab-control {
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+.tab.tab-control:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.document-tabs .tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dropdown.document-tab-list {
+  top: auto;
+  bottom: calc(100% + 4px);
+  box-sizing: border-box;
+  width: min(360px, 100%);
+  min-width: 0;
+  max-height: min(400px, 65vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.document-tab-list .dropdown-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+.document-tab-list .dropdown-item > svg,
+.document-tab-list .menu-icon {
+  flex: none;
+}
+.document-tab-list .dropdown-item > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.document-tab-list .dropdown-item[aria-current="true"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.document-tab-list .dropdown-item:hover,
+.document-tab-list .dropdown-item:focus-visible {
+  background: var(--hover);
+}
 .tab {
   display: flex;
   flex: none;
@@ -2195,13 +2298,27 @@ body.panel-resizing-y * {
 .status {
   margin-left: auto;
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
   justify-content: flex-end;
   align-items: center;
   gap: 14px;
   padding: 0 12px;
   color: var(--text-2);
+}
+@media (max-width: 600px) {
+  .bottombar .status {
+    max-width: 25%;
+    gap: 8px;
+    padding: 0 6px;
+  }
+  .bottombar .status-hint,
+  .bottombar .sk-state,
+  .bottombar .app-version {
+    display: none;
+  }
 }
 /* one line each: the sketch's state, the rebuild time, the units, the version; a long hint is cut short (… — its
    whole text in the tooltip) */
