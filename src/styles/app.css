@@ -4318,12 +4318,15 @@ body.panel-resizing-y * {
 .account-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .account-menu > summary::-webkit-details-marker { display: none; }
 .account-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
-.account-initials { display: inline-grid; place-items: center; background: #e5eaf2; color: #35445a; font-size: 12px; }
-.account-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-initials { position: relative; display: inline-grid; place-items: center; background: #e5eaf2; color: #35445a; font-size: 12px; overflow: hidden; }
+.account-portrait { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.account-portrait.loaded { opacity: 1; }
+.account-placeholder { display: inline-grid; place-items: center; width: 30px; height: 30px; }
+.account-placeholder .account-avatar { color: #8c98a8; }
+.account-name { padding: 10px 12px 4px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .account-dropdown { min-width: 240px; max-width: min(320px, 85vw); }
 .account-email { overflow-wrap: anywhere; text-transform: none; letter-spacing: normal; }
 .account-error { font-size: 11px; max-width: 180px; color: #ba3a2d; }
 @media (max-width: 760px) {
-  .account-name { max-width: 72px; }
   .account-error { max-width: 110px; }
 }

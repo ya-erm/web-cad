@@ -12,6 +12,7 @@ export function AccountButton() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [loadedAvatar, setLoadedAvatar] = useState<string | null>(null);
   const menu = useRef<HTMLDetailsElement>(null);
   const requestEpoch = useRef(0);
 
@@ -104,24 +105,31 @@ export function AccountButton() {
       {error && <span className="account-error" role="status" title={t(error)}>{t(error)}</span>}
       {user ? (
         <details className="account-menu" ref={menu}>
-          <summary title={user.email ?? user.displayName}>
-            {avatar ? <img src={avatar} alt="" className="account-avatar" referrerPolicy="no-referrer" />
-              : <span className="account-avatar account-initials" aria-hidden="true">{user.displayName.slice(0, 1).toUpperCase()}</span>}
-            <span className="account-name">{user.displayName}</span>
+          <summary title={user.displayName} aria-label={user.displayName}>
+            <span className="account-avatar account-initials" aria-hidden="true">
+              {user.displayName.slice(0, 1).toUpperCase()}
+              {avatar && <img src={avatar} alt="" className={loadedAvatar === avatar ? 'account-portrait loaded' : 'account-portrait'}
+                referrerPolicy="no-referrer" onLoad={() => setLoadedAvatar(avatar)} onError={() => setLoadedAvatar(null)} />}
+            </span>
           </summary>
           <div className="dropdown account-dropdown">
+            <div className="account-name">{user.displayName}</div>
             {user.email && <div className="dropdown-label account-email">{user.email}</div>}
             <div className="dropdown-note">{t('Documents are currently saved on this device.')}</div>
             {status === 'unavailable' && <div className="dropdown-note">{t('Account unavailable. You can keep working offline.')}</div>}
             <button className="dropdown-item" disabled={busy} onClick={() => void signOut()}>{t('Sign out')}</button>
           </div>
         </details>
+      ) : status === 'loading' ? (
+        <span className="account-placeholder" role="status" aria-label={t('Checking account…')}>
+          <span className="account-avatar account-initials" aria-hidden="true"><Icon name="account" size={16} /></span>
+        </span>
       ) : status === 'unavailable' ? (
         <button className="btn small" title={t('Account unavailable. You can keep working offline.')} onClick={() => setRetry(n => n + 1)}>{t('Retry sign-in')}</button>
       ) : (
-        <button className="btn small" disabled={busy || status === 'loading'} onClick={() => void signIn()}>
+        <button className="btn small" disabled={busy} onClick={() => void signIn()}>
           <Icon name="account" size={16} />
-          {t(status === 'loading' ? 'Checking account…' : 'Sign in with Yandex')}
+          {t('Sign in with Yandex')}
         </button>
       )}
     </div>

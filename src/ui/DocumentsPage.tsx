@@ -829,10 +829,10 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             </button>
           </div>
         )}
-        <AccountButton />
-        <button className="btn small" title={t('Help')} onClick={() => openHelp()}>
-          <Icon name="help" size={14} /> {t('Help')}
+        <button className="icon-btn" title={`${t('Help')} (F1)`} onClick={() => openHelp()}>
+          <Icon name="help" size={18} />
         </button>
+        <AccountButton />
         <AppSettingsButton />
         <LangSwitch />
       </div>

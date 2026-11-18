@@ -38,9 +38,10 @@ Each document has its own address of the form `#/doc/<id>`, which you can bookma
 ## Account {#account}
 
 **Sign in with Yandex** in the top bar of the Documents page and editor opens
-Yandex ID. After you grant access, WebCAD shows your name and avatar, or the first
-letter of your name when no avatar is available. Your email appears in the account
-menu, opened by clicking your avatar or name. **Sign out** ends the current session in this browser.
+Yandex ID. After you grant access, WebCAD shows your avatar, or the first
+letter of your name while the image loads or when no avatar is available. A round
+placeholder appears while the account is being checked. Your name and email appear
+in the account menu, opened by clicking your avatar. **Sign out** ends the current session in this browser.
 
 Signing in is optional. Documents are currently saved on this device: signing in
 does not upload them to the cloud. Signing out does not delete local documents.
