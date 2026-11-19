@@ -79,6 +79,8 @@ The **+** button to the left of the tabs adds a new **Part Studio**, **Drawing**
 
 When there are many tabs, scroll the strip with the mouse wheel, a horizontal trackpad gesture, or the arrows at its edges. The **All tabs** button to the right opens a scrollable list with full names and type icons: choose any tab, including one beyond the window edge. The selected tab automatically appears in the visible part of the strip, including after resizing the window. Long names are shortened in the strip; the tooltip and the list show the full name. With a tab focused, `←` / `→` switch tabs, `Home` / `End` select the first / last tab, and `F2` renames it. In the list, use `↑` / `↓`, `Enter` to select, and `Esc` to close.
 
+Reorder tabs by dragging in the bottom strip or in **All tabs**. With a mouse, drag the tab; on a touch screen, use its drag grip. An insertion marker shows the destination. The current tab stays open, and the order is saved with the document. `Esc` cancels the drag; `Ctrl+Z` undoes a completed move. With the keyboard, use `Alt+Shift+←/→` in the strip and `Alt+Shift+↑/↓` in the list. Reordering is unavailable while editing a sketch, a feature dialog or a tab name, or while viewing a version.
+
 ## Saving and undo {#saving}
 
 - All changes are saved automatically; the status is shown next to the document name: **Saved** or **Saving…**. The last edits are written also when you go straight back to the document list, open another document, switch to another browser tab, or close the page. With edits not saved yet, the browser asks whether to close the page.

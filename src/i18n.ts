@@ -37,6 +37,10 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'Reorder with Alt+Shift+arrow keys.': 'Меняйте порядок клавишами Alt+Shift+стрелки.',
+  'Tab position': 'Положение вкладки',
+  'Drag to reorder tabs. Alt+Shift+arrows also move a tab.': 'Потяните, чтобы переместить вкладку. Alt+Shift+стрелки тоже меняют порядок.',
+
   'API tokens…': 'API-токены…',
   'API tokens': 'API-токены',
   'Tokens let tools access your cloud documents without a browser sign-in. Up to 20 active tokens.': 'Токены дают инструментам доступ к облачным документам без входа в браузере. До 20 активных токенов.',

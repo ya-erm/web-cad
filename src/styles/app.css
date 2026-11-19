@@ -2323,7 +2323,7 @@ body.panel-resizing-y * {
 .document-tab-list .menu-icon {
   flex: none;
 }
-.document-tab-list .dropdown-item > span:first-of-type {
+.document-tab-list .dropdown-item > .document-tab-list-name {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -4510,3 +4510,19 @@ body.panel-resizing-y * {
   .api-token-record { flex-wrap: wrap; }
   .api-token-record-actions { max-width: none; }
 }
+
+/* Touch grips preserve native strip/list scrolling when dragging a tab is not intended. */
+.tab-drag-handle { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; align-self: stretch; touch-action: none; cursor: grab; color: var(--text-3); }
+.tab-drag-handle > svg { pointer-events: none; }
+.document-tab-content .tab, .document-tab-list [data-reorder-tab] { position: relative; }
+.tab-reordering, .tab-reordering * { cursor: grabbing !important; user-select: none !important; }
+.tab-reorder-source { opacity: .55; }
+.document-tab-content .tab-drop-before::before, .document-tab-content .tab-drop-after::after,
+.document-tab-list .tab-drop-before::before, .document-tab-list .tab-drop-after::after { content: ''; position: absolute; z-index: 1; background: var(--accent); pointer-events: none; }
+.document-tab-content .tab-drop-before::before { left: 0; top: 0; bottom: 0; width: 3px; }
+.document-tab-content .tab-drop-after::after { right: 0; top: 0; bottom: 0; width: 3px; }
+.document-tab-list .tab-drop-before::before { top: 0; left: 0; right: 0; height: 3px; }
+.document-tab-list .tab-drop-after::after { bottom: 0; left: 0; right: 0; height: 3px; }
+.document-tab-list .dropdown-item > .tab-drag-handle { flex: none; min-width: 22px; overflow: visible; }
+.document-tab-list .document-tab-list-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tab-reorder-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

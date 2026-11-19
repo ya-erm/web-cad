@@ -36,6 +36,8 @@ import { AccountButton } from './AccountButton';
 import { CompareBanner, VersionBanner, VersionsButton } from './VersionsPanel';
 
 import { APP_VERSION, appVersionTitle } from './version';
+import { reorderTabs } from './tabOrder';
+import { useTabReorder } from './useTabReorder';
 import { contextHelpPage, openHelp } from '../help/context';
 
 /** A document that is a file of a folder on the computer: its file, or a button to allow writing it again. */
@@ -160,6 +162,9 @@ function BottomBar() {
   const building = useEditor((s) => s.building);
   const build = useEditor((s) => s.build);
   const sketch = useEditor((s) => s.sketch);
+  const editing = useEditor((s) => s.editing);
+  const readOnly = useDoc((s) => s.readOnly);
+  const [reorderNotice, setReorderNotice] = useState('');
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [tabList, setTabList] = useState(false);
@@ -168,6 +173,43 @@ function BottomBar() {
   const contentRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listButtonRef = useRef<HTMLButtonElement>(null);
+  const reorderSettling = useRef(false);
+  const reorderFocusFrame = useRef(0);
+  useEffect(() => () => { cancelAnimationFrame(reorderFocusFrame.current); reorderSettling.current = false; }, [doc.id]);
+  const canReorder = !readOnly && !editing && !sketch && !renaming && doc.tabs.length > 1;
+  const moveTab = (source: string, target: string, after: boolean, inList = false) => {
+    const current = useDoc.getState(), editor = useEditor.getState();
+    if (!current.doc || current.doc.id !== doc.id || current.readOnly || editor.editing || editor.sketch || renaming) return;
+    const next = reorderTabs(current.doc.tabs, source, target, after);
+    if (next === current.doc.tabs) return;
+    cancelAnimationFrame(reorderFocusFrame.current);
+    reorderSettling.current = true;
+    current.update((draft) => { draft.tabs = reorderTabs(draft.tabs, source, target, after); });
+    reorderFocusFrame.current = requestAnimationFrame(() => {
+      const surface = inList ? listRef.current : contentRef.current;
+      const element = [...(surface?.querySelectorAll<HTMLElement>('[data-reorder-tab]') ?? [])].find((tab) => tab.dataset.reorderTab === source);
+      element?.focus({ preventScroll: true });
+      reorderSettling.current = false;
+      reorderFocusFrame.current = 0;
+    });
+    setReorderNotice(`${t('Tab position')}: ${next.findIndex((tab) => tab.id === source) + 1} / ${next.length}`);
+  };
+  const reorder = useTabReorder(doc.id, canReorder, moveTab, () => { setTabList(true); setMenu(false); });
+  const orderClass = (id: string, vertical: boolean) =>
+    (reorder.source === id ? ' tab-reorder-source' : '') +
+    (reorder.target?.id === id && reorder.target.vertical === vertical ? ` tab-drop-${reorder.target.after ? 'after' : 'before'}` : '');
+  const reorderKey = (event: React.KeyboardEvent<HTMLElement>, id: string, vertical: boolean) => {
+    if (event.ctrlKey || event.metaKey || !event.altKey || !event.shiftKey || ![vertical ? 'ArrowUp' : 'ArrowLeft', vertical ? 'ArrowDown' : 'ArrowRight'].includes(event.key)) return false;
+    event.preventDefault(); event.stopPropagation();
+    if (canReorder) {
+      const index = doc.tabs.findIndex((tab) => tab.id === id), after = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+      const target = doc.tabs[index + (after ? 1 : -1)];
+      if (target) {
+        moveTab(id, target.id, after, vertical);
+      }
+    }
+    return true;
+  };
   // Rebuilding a model must not reset a strip the user is browsing.
   const tabLayout = JSON.stringify(doc.tabs.map(({ id, name }) => [id, name]));
   useLayoutEffect(() => {
@@ -235,7 +277,8 @@ function BottomBar() {
   const sketchHasEntities = useEditor((s) => (s.editing?.draft.type === 'sketch' ? s.editing.draft.params.entities.length > 0 : false));
   return (
     <div className="bottombar">
-      <div className="document-tabs">
+      <div className="document-tabs" data-reorder-doc={doc.id}>
+        <span className="tab-reorder-announcement" role="status" aria-live="polite">{reorderNotice}</span>
         <div className="menu-wrap tab-add-wrap">
           <button
             className="tab tab-control"
@@ -306,9 +349,15 @@ function BottomBar() {
             {doc.tabs.map((tab) => (
               <div
                 key={tab.id}
-                className={'tab' + (tab.id === doc.activeTab ? ' active' : '')}
+                className={'tab' + (tab.id === doc.activeTab ? ' active' : '') + orderClass(tab.id, false)}
+                data-reorder-tab={tab.id}
+                data-reorder-vertical="false"
+                onPointerDown={(event) => reorder.onPointerDown(event, tab.id)}
+                onClickCapture={reorder.onClickCapture}
                 role="tab"
                 aria-selected={tab.id === doc.activeTab}
+                aria-keyshortcuts={canReorder ? 'Alt+Shift+ArrowLeft Alt+Shift+ArrowRight' : undefined}
+                aria-description={canReorder ? t('Reorder with Alt+Shift+arrow keys.') : undefined}
                 tabIndex={tab.id === doc.activeTab ? 0 : -1}
                 title={tab.name}
                 onClick={() => selectTab(tab.id)}
@@ -322,6 +371,9 @@ function BottomBar() {
                 }}
                 onKeyDown={(e) => {
                   if (e.target !== e.currentTarget) return;
+                  if (reorderKey(e, tab.id, false)) return;
+                  // Global undo/redo must work while a tab keeps focus after reordering.
+                  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY')) return;
                   e.stopPropagation();
                   const index = doc.tabs.findIndex((x) => x.id === tab.id);
                   const next =
@@ -346,6 +398,7 @@ function BottomBar() {
                 onDoubleClick={() => setRenaming(tab.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
+                  if (reorder.dragging.current) return;
                   useEditor.setState({
                     contextMenu: {
                       x: e.clientX,
@@ -368,6 +421,7 @@ function BottomBar() {
                   });
                 }}
               >
+                {canReorder && <span className="tab-drag-handle" title={t('Drag to reorder tabs. Alt+Shift+arrows also move a tab.')} aria-hidden="true"><Icon name="menu" size={12} /></span>}
                 <Icon name={tab.type} size={14} />
                 {renaming === tab.id ? (
                   <input
@@ -404,6 +458,7 @@ function BottomBar() {
         <div className="menu-wrap tab-list-wrap">
           <button
             ref={listButtonRef}
+            data-tab-list-toggle="true"
             className="tab tab-control"
             aria-label={t('All tabs')}
             title={t('All tabs')}
@@ -423,9 +478,10 @@ function BottomBar() {
               role="dialog"
               aria-label={t('All tabs')}
               onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null) && e.relatedTarget !== listButtonRef.current) setTabList(false);
+                if (!reorder.dragging.current && !reorderSettling.current && !e.currentTarget.contains(e.relatedTarget as Node | null) && e.relatedTarget !== listButtonRef.current) setTabList(false);
               }}
               onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY')) return;
                 e.stopPropagation();
                 if (e.key === 'Escape') {
                   e.preventDefault();
@@ -456,8 +512,15 @@ function BottomBar() {
               {doc.tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  className="dropdown-item"
+                  className={'dropdown-item' + orderClass(tab.id, true)}
+                  data-reorder-tab={tab.id}
+                  data-reorder-vertical="true"
+                  onPointerDown={(event) => reorder.onPointerDown(event, tab.id)}
+                  onClickCapture={reorder.onClickCapture}
+                  onKeyDown={(event) => { reorderKey(event, tab.id, true); }}
                   aria-current={tab.id === doc.activeTab}
+                  aria-keyshortcuts={canReorder ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
+                  aria-description={canReorder ? t('Reorder with Alt+Shift+arrow keys.') : undefined}
                   title={tab.name}
                   onClick={() => {
                     selectTab(tab.id);
@@ -465,8 +528,9 @@ function BottomBar() {
                     contentRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[doc.tabs.findIndex((x) => x.id === tab.id)]?.focus();
                   }}
                 >
+                  {canReorder && <span className="tab-drag-handle" title={t('Drag to reorder tabs. Alt+Shift+arrows also move a tab.')} aria-hidden="true"><Icon name="menu" size={12} /></span>}
                   <Icon name={tab.type} size={16} />
-                  <span>{tab.name}</span>
+                  <span className="document-tab-list-name">{tab.name}</span>
                   <span className="menu-icon">{tab.id === doc.activeTab ? '✓' : ''}</span>
                 </button>
               ))}
