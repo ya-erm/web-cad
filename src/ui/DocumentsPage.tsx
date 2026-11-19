@@ -32,7 +32,8 @@ import { documentTime as fmtDate } from './documentTime';
 import { documentsLocation, documentsHash } from './documentsLocation';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
-import { copyDocumentToLibrary } from '../cloud/client';
+import { copyFolderFileToLibrary, type LibrarySourceConflict, type LibrarySourceResolution } from '../store/librarySource';
+import { LibrarySourceConflictDialog } from './LibrarySourceConflictDialog';
 import { recentDocuments } from '../cloud/library';
 import { CloudLibrary, CloudUploadDialog, CloudDirectUpload } from './CloudLibrary';
 import { AccountButton } from './AccountButton';
@@ -244,6 +245,7 @@ function FolderView({
   onGo,
   onOpen,
   onRemoved,
+  onCopy,
   onMove,
   run,
   drop,
@@ -253,6 +255,7 @@ function FolderView({
   onGo: (path: string) => void;
   onOpen: (id: string) => void;
   onRemoved: () => void;
+  onCopy: (folderId: string, path: string) => Promise<void>;
   onMove: (what: Moving) => void;
   run: Run;
   drop: DropTargets;
@@ -410,7 +413,7 @@ function FolderView({
                   {
                     label: t('Copy to My documents'),
                     icon: 'copy',
-                    action: () => void run(async () => onOpen(await copyDocumentToLibrary(await openFolderFile(folderId, f.name)))),
+                    action: () => void run(() => onCopy(folderId, f.name)),
                   },
                 ];
                 return (
@@ -586,6 +589,41 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const [moving, setMoving] = useState<Moving | null>(null);
   const { error, run } = useRun();
   const drop = useDropTargets(run);
+  const [sourceConflict, setSourceConflict] = useState<LibrarySourceConflict | null>(null);
+  const sourceDecision = useRef<((answer: LibrarySourceResolution) => void) | null>(null);
+  const copyingSource = useRef(false);
+  const copyMounted = useRef(true);
+  const [copiedCard, setCopiedCard] = useState<{ localId: string; nonce: number } | null>(null);
+  useEffect(() => {
+    copyMounted.current = true;
+    return () => {
+      copyMounted.current = false;
+      sourceDecision.current?.(null);
+      sourceDecision.current = null;
+    };
+  }, []);
+  const decideSource = (answer: LibrarySourceResolution) => {
+    const resolve = sourceDecision.current;
+    sourceDecision.current = null;
+    setSourceConflict(null);
+    resolve?.(answer);
+  };
+  const copyFromFolder = async (folderId: string, filePath: string) => {
+    if (copyingSource.current) return;
+    copyingSource.current = true;
+    try {
+      const result = await copyFolderFileToLibrary(folderId, filePath, (conflict) => {
+        if (!copyMounted.current) return Promise.resolve(null);
+        setSourceConflict(conflict);
+        return new Promise<LibrarySourceResolution>((resolve) => { sourceDecision.current = resolve; });
+      });
+      if (!result || !copyMounted.current) return;
+      await loadList();
+      if (!copyMounted.current) return;
+      navigate('library', result.folderId);
+      setCopiedCard({ localId: result.localId, nonce: Date.now() });
+    } finally { copyingSource.current = false; }
+  };
   const shownFolder = view.startsWith('folder:') ? folders.find((f) => `folder:${f.id}` === view) : undefined;
   // a subfolder that is gone (removed or renamed by another program): the nearest one above it that is still there
   let shownPath = shownFolder ? path : '';
@@ -597,6 +635,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     if (ready && view.startsWith('folder:') && !shownFolder) navigate('docs');
   }, [ready, view, shownFolder]);
   const navigate = (nextView: string, nextPath = '') => {
+    setCopiedCard(null);
     setView(nextView);
     setPath(nextPath);
     const hash = documentsHash({ view: nextView, path: nextPath });
@@ -698,7 +737,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 {
                   label: t('Copy to My documents'),
                   icon: 'copy',
-                  action: () => void run(async () => onOpen(await copyDocumentToLibrary(d.id))),
+                  action: () => void run(() => copyFromFolder(l.folder, l.name)),
                 },
               ]),
           ...(!l
@@ -1009,6 +1048,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           {error && <div className="docs-error">{error}</div>}
           <CloudLibrary
             key={cloudGeneration}
+            highlight={copiedCard}
             active={view === 'library' || view === 'trash'}
             trash={view === 'trash'}
             heading={libraryHeading}
@@ -1032,6 +1072,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               path={shownPath}
               onGo={(p) => go(shownFolder.id, p)}
               onOpen={onOpen}
+              onCopy={copyFromFolder}
               onRemoved={() => navigate('docs')}
               onMove={setMoving}
               run={run}
@@ -1065,6 +1106,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           />
         )
       )}
+      {sourceConflict && <LibrarySourceConflictDialog conflict={sourceConflict} onChoose={decideSource} />}
       {moving && <MoveDialog what={moving} onClose={() => setMoving(null)} run={run} />}
       <ContextMenu />
     </div>

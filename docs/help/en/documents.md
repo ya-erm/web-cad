@@ -139,6 +139,14 @@ How it works:
 
 > **Limitation.** Deleting or trashing a document in the browser does not touch its file; WebCAD does not delete files or subfolders — use Explorer or Finder for that. New files and subfolders added by other programs appear after **Refresh** (it reads the folder again with all its subfolders). Folders are not available in Firefox and Safari — use project **Export** and **Import project**.
 
+### A file copy in the library {#file-library-copy}
+
+**Copy to My documents** in a file or linked recent-document menu reads the file and shows its copy in the library without opening the model. Its card is highlighted, ready to move into a subfolder. The source file stays unchanged; autosaving the copy does not write to disk. Source projects may be up to 100 MB.
+
+This browser remembers the copy’s source. After another program changes the file, choose **Copy to My documents** again: an unchanged file shows the existing copy; a changed file updates that copy if its content has not been edited. The copy keeps its name, folder and cloud connection. If both have changed, choose **Keep library copy**, **Use file version** or **Keep both**; **Cancel** changes nothing. Replaced content is saved in history. Close an open copy before replacing it; keeping both is available immediately.
+
+Updating is explicit through the menu; disk edits do not each trigger a cloud upload. Subsequent upload follows the cloud sync setting or **Upload to cloud**. The source association stays in this browser; copying on another device creates an independent copy.
+
 ## My documents and folders {#libraries}
 
 **My documents** is one managed library. A document lives on this device and, when cloud storage is connected, has a cloud instance with a shared ID. One card shows its availability and pending cloud changes. **Recent documents** also groups known instances of the same document. The My documents and computer-folder trees remain visible when switching sections. Expanded branches are remembered in this browser; selection highlights only the current section. Click a folder in either tree to open it.

@@ -65,6 +65,7 @@ export function CloudLibrary({
   trash = false,
   active = true,
   uploadBusy = false,
+  highlight,
 }: {
   onOpen: (id: string) => void;
   onUpload: (folderId: string, ids?: string[], direct?: boolean) => void;
@@ -75,6 +76,7 @@ export function CloudLibrary({
   trash?: boolean;
   active?: boolean;
   uploadBusy?: boolean;
+  highlight?: { localId: string; nonce: number } | null;
 }) {
   const localDocs = useDoc((s) => s.docs),
     diskLinks = useFolder((s) => s.links);
@@ -97,6 +99,24 @@ export function CloudLibrary({
   const browserDocs = localDocs.filter((d) => !diskLinks[d.id] || Boolean(d.trashed));
   const view = unifiedLibrary(localFolders, browserDocs, data, trash);
   const current = view.folders.some((f) => f.id === path) ? path : '';
+  const [highlightedCard, setHighlightedCard] = useState('');
+  const highlightedRequest = useRef('');
+  const highlightTarget = active && !trash && highlight
+    ? view.documents.find((d) => d.folderId === current && (d.id === highlight.localId || d.locals.some((l) => l.id === highlight.localId)))?.id
+    : undefined;
+  useEffect(() => {
+    if (!highlightTarget) { setHighlightedCard(''); return; }
+    const key = `${highlight?.localId}:${highlight?.nonce}`;
+    if (highlightedRequest.current === key || Date.now() - (highlight?.nonce ?? 0) > 6000) return;
+    const element = [...document.querySelectorAll<HTMLElement>('[data-library-document]')].find((e) => e.dataset.libraryDocument === highlightTarget);
+    if (!element) return;
+    highlightedRequest.current = key;
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    element.focus({ preventScroll: true });
+    setHighlightedCard(highlightTarget);
+    const timer = setTimeout(() => setHighlightedCard(''), 6000);
+    return () => clearTimeout(timer);
+  }, [highlightTarget, highlight?.localId, highlight?.nonce]);
   const applyRemote = async (remote: CloudList, folders: LibraryFolder[], request: number) => {
     if (request !== epoch.current) return;
     if (useCloudSync.getState().accountId !== remote.userId) {
@@ -164,7 +184,15 @@ export function CloudLibrary({
     void refresh();
     const synchronized = (event: Event) => {
       const remote = (event as CustomEvent<CloudList>).detail;
-      if (!remote || remote.userId !== useCloudSync.getState().accountId) return;
+      if (!remote) {
+        // A local import may reveal a folder changed in another tab; no remote LIST is needed.
+        const request = epoch.current;
+        void listLibraryFolders().then((folders) => {
+          if (request === epoch.current) setLocalFolders(folders);
+        }).catch(() => {});
+        return;
+      }
+      if (remote.userId !== useCloudSync.getState().accountId) return;
       const request = ++epoch.current;
       void (async () => {
         await useDoc.getState().loadList();
@@ -606,7 +634,18 @@ export function CloudLibrary({
               return (
                 <div
                   key={d.id}
-                  className="doc-card"
+                  className={'doc-card' + (highlightedCard === d.id ? ' library-copy-highlight' : '')}
+                  data-library-document={d.id}
+                  data-library-local-ids={JSON.stringify(d.locals.map((l) => l.id))}
+                  tabIndex={0}
+                  aria-label={d.name}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || trash || renaming === key) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      void open(d);
+                    }
+                  }}
                   draggable={!trash && !busy && renaming !== key}
                   onDragStart={(e) => dragStart(e, item, d.name)}
                   onDragEnd={dragEnd}

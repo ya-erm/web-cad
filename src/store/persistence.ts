@@ -4,9 +4,10 @@ import type { CadDocument, DocumentSummary, DocumentVersion, ProjectVersion } fr
 import { validateLibraryChange, type LibraryFolder, type LibraryChange } from './library';
 import type { BuildResult } from '../kernel/protocol';
 import { embedMode, storageBlocked } from '../embed/mode';
+import { contentHash } from '../core/versions';
 
 const DB_NAME = 'webcad';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const FOLDERS = 'libraryFolders';
 const DOCS = 'documents';
 const SUMMARIES = 'summaries';
@@ -14,6 +15,7 @@ const SUMMARIES = 'summaries';
 const VERSIONS = 'versions';
 const VERSION_DATA = 'versionData';
 const PREVIEWS = 'renderPreviews';
+const LIBRARY_SOURCES = 'librarySources';
 
 export interface RenderPreview {
   id: string;
@@ -38,6 +40,7 @@ function db(): Promise<IDBDatabase> {
         if (!d.objectStoreNames.contains(SUMMARIES)) d.createObjectStore(SUMMARIES, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(VERSIONS)) d.createObjectStore(VERSIONS, { keyPath: 'id' }).createIndex('docId', 'docId');
         if (!d.objectStoreNames.contains(VERSION_DATA)) d.createObjectStore(VERSION_DATA, { keyPath: 'id' });
+        if (!d.objectStoreNames.contains(LIBRARY_SOURCES)) d.createObjectStore(LIBRARY_SOURCES, { keyPath: 'id' });
         if (!d.objectStoreNames.contains(PREVIEWS)) d.createObjectStore(PREVIEWS, { keyPath: 'id' }).createIndex('used', 'used');
       };
       req.onsuccess = () => {
@@ -458,6 +461,124 @@ export async function replaceCleanCloudDocument(
     d.onsuccess = apply;
     v.onsuccess = apply;
     transaction.oncomplete = () => resolve(applied);
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+/** Read-only origin of a managed copy. It is deliberately separate from writable disk FileLink records. */
+export interface LibrarySourceRecord {
+  id: string;
+  generation: string;
+  localId: string;
+  folderId: string;
+  path: string;
+  fileHandle: FileSystemFileHandle;
+  sourceHash: string;
+  targetHash: string;
+  ignoredSourceHash?: string;
+  versionMap: Record<string, { id: string; hash: string; mappedHash?: string }>;
+}
+export type LibrarySourceSnapshot = Awaited<ReturnType<typeof cloudUploadSnapshot>>;
+export const librarySourceToken = (records: LibrarySourceRecord[]) => records.map(record => `${record.id}:${record.generation}`).sort().join('|');
+export async function listLibrarySources(): Promise<LibrarySourceRecord[]> {
+  return (await tx<LibrarySourceRecord[]>([LIBRARY_SOURCES], 'readonly', transaction => transaction.objectStore(LIBRARY_SOURCES).getAll())) ?? [];
+}
+/** Organisation and cloud ACKs may change during a read; geometry, workspaces, versions and trash must not. */
+export function sameLibrarySourceTarget(expected: LibrarySourceSnapshot, doc: CadDocument | undefined, summary: DocumentSummary | undefined): boolean {
+  return Boolean(doc && summary && summary.trashed === expected.summary.trashed &&
+    (summary.versionsModified ?? 0) === (expected.summary.versionsModified ?? 0) &&
+    JSON.stringify([doc.units, doc.tabs, doc.workspace ?? null]) === JSON.stringify([expected.doc.units, expected.doc.tabs, expected.doc.workspace ?? null]));
+}
+export interface LibrarySourceChange {
+  sourceToken: string;
+  source: LibrarySourceRecord;
+  expected?: LibrarySourceSnapshot;
+  mode: 'create' | 'replace' | 'remember';
+  doc?: CadDocument;
+  /** Full union: immutable named versions are preserved, incoming workspaces replace their previous mutable state. */
+  versions?: ProjectVersion[];
+  thumbnail?: string;
+  canApply(): boolean;
+}
+/** Atomic managed copy/import. A false result means the caller must reread and reconsider the decision. */
+export async function applyLibrarySourceChange(change: LibrarySourceChange): Promise<{ localId: string; folderId: string } | null> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([LIBRARY_SOURCES, DOCS, SUMMARIES, VERSIONS, VERSION_DATA], 'readwrite');
+    const sources = transaction.objectStore(LIBRARY_SOURCES), docs = transaction.objectStore(DOCS), summaries = transaction.objectStore(SUMMARIES);
+    const all = sources.getAll();
+    const oldDoc = change.expected ? docs.get(change.expected.doc.id) : null;
+    const oldSummary = change.expected ? summaries.get(change.expected.doc.id) : null;
+    const destination = change.mode === 'create' ? docs.get(change.source.localId) : null;
+    const oldVersions = transaction.objectStore(VERSIONS).index('docId').getAll(change.source.localId);
+    let result: {localId:string;folderId:string} | null = null;
+    let remaining = 2 + Number(Boolean(oldDoc)) + Number(Boolean(oldSummary)) + Number(Boolean(destination));
+    const apply = () => {
+      if (--remaining) return;
+      const records = all.result as LibrarySourceRecord[];
+      if (!change.canApply() || librarySourceToken(records) !== change.sourceToken) return;
+      if (change.expected && !sameLibrarySourceTarget(change.expected, oldDoc!.result, oldSummary!.result)) return;
+      if (destination?.result) return;
+      if (records.some(record => record.id !== change.source.id && record.folderId === change.source.folderId && record.path === change.source.path)) return;
+      const current = oldSummary?.result as DocumentSummary | undefined;
+      if (change.mode === 'remember') {
+        if (!current || current.id !== change.source.localId) return;
+        sources.put(change.source);
+        result = {localId: current.id, folderId: current.folderId ?? ''};
+        return;
+      }
+      const incoming = change.doc;
+      if (!incoming || incoming.id !== change.source.localId || (change.mode === 'replace' && (!current || current.trashed))) return;
+      const now = Math.max(Date.now(), (current?.modified ?? 0) + 1);
+      const doc: CadDocument = change.mode === 'replace'
+        ? {...incoming, name: current!.name, created: (oldDoc!.result as CadDocument).created, modified: now}
+        : {...incoming, modified: now};
+      if (change.mode === 'replace') {
+        const backup = 'source-backup-' + crypto.randomUUID();
+        transaction.objectStore(VERSIONS).put({id: backup, docId: doc.id, kind: 'auto', name: '', created: now, hash: contentHash(oldDoc!.result as CadDocument)} satisfies DocumentVersion);
+        transaction.objectStore(VERSION_DATA).put({id: backup, doc: oldDoc!.result});
+      }
+      const existing = new Map((oldVersions.result as DocumentVersion[]).map(version => [version.id,version]));
+      let added = false;
+      for (const version of change.versions ?? []) {
+        const id = version.kind === 'workspace' ? `${doc.id}:${version.id}` : version.id;
+        const previous=existing.get(id);
+        // Named versions stay immutable. Workspaces are mutable and retain their document-scoped identity.
+        if(previous&&version.kind!=='workspace')continue;
+        const snapshot: CadDocument = {...doc, units: version.units, tabs: version.tabs, activeTab: version.activeTab};
+        const writeVersion=()=>{
+          transaction.objectStore(VERSIONS).put({id, docId: doc.id, kind: version.kind ?? 'version', name: version.name,
+            created: version.created, hash: contentHash(snapshot), ...(version.description ? {description:version.description}:{}), ...(version.base ? {base:version.base}:{})} satisfies DocumentVersion);
+          transaction.objectStore(VERSION_DATA).put({id,doc:snapshot});
+        };
+        if(previous){
+          const old=transaction.objectStore(VERSION_DATA).get(id);
+          old.onsuccess=()=>{
+            const before=old.result?.doc as CadDocument|undefined;
+            if(before&&JSON.stringify([previous.name,previous.base??null,before.units,before.tabs])!==JSON.stringify([version.name,version.base??null,version.units,version.tabs])){
+              const backup='source-workspace-backup-'+crypto.randomUUID();
+              const workspace={id:version.id,name:previous.name,...previous.base?{base:previous.base}:{}};
+              transaction.objectStore(VERSIONS).put({id:backup,docId:doc.id,kind:'auto',name:'',created:now,hash:contentHash(before)} satisfies DocumentVersion);
+              transaction.objectStore(VERSION_DATA).put({id:backup,doc:{...before,workspace}});
+            }
+            writeVersion();
+          };
+        }else writeVersion();
+        added=true;
+      }
+      docs.put(doc);
+      const summary: DocumentSummary = change.mode === 'replace'
+        ? {...current!, modified: now, ...(change.thumbnail ? {thumbnail:change.thumbnail}:{}), ...(added ? {versionsModified:Math.max(now,(current!.versionsModified??0)+1)}:{})}
+        : {id: doc.id, name: doc.name, created: doc.created, modified: now, ...(change.thumbnail ? {thumbnail:change.thumbnail}:{}), ...(added ? {versionsModified:now}:{})};
+      summaries.put(summary);
+      sources.put(change.source);
+      result = {localId: doc.id, folderId: summary.folderId ?? ''};
+    };
+    all.onsuccess = apply;oldVersions.onsuccess = apply;
+    if (oldDoc) oldDoc.onsuccess = apply;
+    if (oldSummary) oldSummary.onsuccess = apply;
+    if (destination) destination.onsuccess = apply;
+    transaction.oncomplete = () => resolve(result);
     transaction.onerror = transaction.onabort = () => reject(transaction.error);
   });
 }
