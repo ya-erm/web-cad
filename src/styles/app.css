@@ -291,10 +291,20 @@ textarea {
   gap: 16px;
   margin-bottom: 16px;
 }
-.folder-card .doc-name svg {
-  vertical-align: -2px;
+.folder-meta {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+}
+.folder-meta-icon {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
   color: var(--text-2);
 }
+.folder-meta > .doc-date { grid-column: 2; }
+.folder-meta > .tree-rename { min-width: 0; width: 100%; box-sizing: border-box; }
 /* two to four documents: a 2 × 2 grid; more — three and "+N" */
 .doc-thumb.folder-mosaic {
   grid-template-columns: 1fr 1fr;

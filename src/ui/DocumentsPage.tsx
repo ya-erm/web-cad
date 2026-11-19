@@ -22,7 +22,7 @@ import { copiedVersionIds, importVersions, withCopiedVersions } from '../store/v
 import { baseOf, dirOf, folderSupported, within, type FileLink } from '../store/localFolder';
 import { folderPreview } from './folderPreview';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
-import { CardMenuButton, openCardMenu, RenameInput, FolderPreview } from './DocumentCards';
+import { CardMenuButton, openCardMenu, RenameInput, FolderPreview, FolderCardMeta } from './DocumentCards';
 import { Icon } from './icons';
 import { ContextMenu } from './Overlays';
 import { AppSettingsButton, LangSwitch } from './AppSettings';
@@ -381,9 +381,8 @@ function FolderView({
                     {...drop.props(folder, p)}
                   >
                     <FolderPreview shown={preview.shown.map((f) => thumb(f.name))} more={preview.more} />
-                    <div className="doc-meta">
+                    <FolderCardMeta name={baseOf(p)} count={count}>
                       {renaming === key ? (
-                        // everything in it stays, its documents stay linked to their files
                         <RenameInput
                           value={baseOf(p)}
                           onDone={(v) => {
@@ -391,13 +390,8 @@ function FolderView({
                             if (v) void run(() => moveFolderDir(folderId, p, path, v));
                           }}
                         />
-                      ) : (
-                        <div className="doc-name">
-                          <Icon name="folder" size={14} /> {baseOf(p)}
-                        </div>
-                      )}
-                      <div className="doc-date">{count ? `${t('Documents')}: ${count}` : t('Empty folder')}</div>
-                    </div>
+                      ) : null}
+                    </FolderCardMeta>
                     <CardMenuButton owner={`${folderId}:${key}`} items={menu} />
                   </div>
                 );

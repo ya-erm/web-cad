@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { t } from '../i18n';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
 import { Icon } from './icons';
@@ -81,6 +81,23 @@ export function FolderPreview({ shown, more }: { shown: (string | undefined)[]; 
         </div>
       ))}
       {more > 0 && <div className="folder-tile folder-more">+{more}</div>}
+    </div>
+  );
+}
+
+/** A folder icon spans both text rows; names, counts and inline rename share one column. */
+export function FolderCardMeta({ name, count, children }: { name: string; count: number; children?: ReactNode }) {
+  return (
+    <div className="doc-meta folder-meta">
+      <span className="folder-meta-icon" aria-hidden="true">
+        <Icon name="folder" size={28} />
+      </span>
+      {children ?? (
+        <div className="doc-name" title={name}>
+          {name}
+        </div>
+      )}
+      <div className="doc-date">{count ? `${t('Documents')}: ${count}` : t('Empty folder')}</div>
     </div>
   );
 }

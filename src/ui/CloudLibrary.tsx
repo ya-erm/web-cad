@@ -3,7 +3,7 @@ import { t } from '../i18n';
 import { documentTime } from './documentTime';
 import { Icon } from './icons';
 import { createPortal } from 'react-dom';
-import { CardMenuButton, openCardMenu, RenameInput, FolderPreview } from './DocumentCards';
+import { CardMenuButton, openCardMenu, RenameInput, FolderPreview, FolderCardMeta } from './DocumentCards';
 import { CloudMoveDialog } from './CloudMoveDialog';
 import { canMoveCloudItem, cloudFolderPreview, type CloudItem } from '../cloud/folders';
 import { libraryDocumentStatus, recentDocuments, unifiedLibrary, type UnifiedFolder, type LibraryDocument } from '../cloud/library';
@@ -463,16 +463,9 @@ export function CloudLibrary({
                 onContextMenu={(e) => renaming !== key && openCardMenu(e, key, folderMenu(f))}
               >
                 <FolderPreview shown={preview.shown.map((d) => d.thumbnail)} more={preview.more} />
-                <div className="doc-meta">
-                  {renaming === key ? (
-                    <RenameInput value={f.name} onDone={(value) => void rename(item, value)} />
-                  ) : (
-                    <div className="doc-name">
-                      <Icon name="folder" size={14} /> {f.name}
-                    </div>
-                  )}
-                  <div className="doc-date">{preview.count ? `${t('Documents')}: ${preview.count}` : t('Empty folder')}</div>
-                </div>
+                <FolderCardMeta name={f.name} count={preview.count}>
+                  {renaming === key ? <RenameInput value={f.name} onDone={(value) => void rename(item, value)} /> : null}
+                </FolderCardMeta>
                 <CardMenuButton owner={key} items={() => folderMenu(f)} />
               </div>
             );
