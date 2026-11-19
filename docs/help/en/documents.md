@@ -37,6 +37,8 @@ The thumbnail updates while the document is open and when you return to the docu
 
 Each document has its own address of the form `#/doc/<id>`, which you can bookmark in this browser.
 
+Drag the right edge of the folder sidebar with a mouse or touch to change its width. The size is remembered in this browser independently of the editor panel. Double-click restores the default width. Focus the edge with `Tab`: `←` / `→` resize, `Shift` increases the step, `Home` / `End` select the minimum / maximum, and `Enter` resets. `Esc` cancels an active drag. Narrowing the window temporarily limits the panel to leave room for documents.
+
 ## Account {#account}
 
 **Sign in with Yandex** in the top bar of the Documents page and editor opens

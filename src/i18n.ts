@@ -37,6 +37,8 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'Document folders panel width': 'Ширина панели папок документов',
+  'Drag to resize. Double-click to reset.': 'Потяните для изменения ширины. Двойной щелчок — стандартная ширина.',
   'View version': 'Посмотреть',
   'Restore this document from the trash first.': 'Сначала восстановите документ из корзины.',
   'Click again to delete': 'Нажмите ещё раз для удаления',

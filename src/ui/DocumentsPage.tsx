@@ -36,6 +36,7 @@ import { copyDocumentToLibrary } from '../cloud/client';
 import { recentDocuments } from '../cloud/library';
 import { CloudLibrary, CloudUploadDialog } from './CloudLibrary';
 import { AccountButton } from './AccountButton';
+import { DocumentsSidebar } from './DocumentsSidebar';
 import { listLibraryFolders, changeLibrary } from '../store/persistence';
 import { folderTrail, type LibraryFolder } from '../store/library';
 
@@ -883,7 +884,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
         <LangSwitch />
       </div>
       <div className="docs-body">
-        <div className="docs-side">
+        <DocumentsSidebar>
           <button className="btn primary" onClick={create}>
             <Icon name="plus" size={16} /> {t('Create')}
           </button>
@@ -954,7 +955,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               </button>
             )}
           </div>
-        </div>
+        </DocumentsSidebar>
         <div className="docs-main">
           <div className="docs-title">
             <h2>
