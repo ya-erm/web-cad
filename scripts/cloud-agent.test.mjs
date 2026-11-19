@@ -79,4 +79,10 @@ describe('agent cloud CLI', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it('does not echo invalid project file contents into CLI errors', async () => {
+    const dir='temp/cloud-cli-tests/'+randomUUID();mkdirSync(dir,{recursive:true});const file=dir+'/invalid.json';writeFileSync(file,'PRIVATE-CONTENT-IS-NOT-JSON');
+    try {const h=host();await expect(runCloudCommand(['upload-file',file],h)).rejects.toThrow('Invalid project JSON');expect(h.call).not.toHaveBeenCalled();}
+    finally {rmSync(dir,{recursive:true,force:true});}
+  });
+
 });

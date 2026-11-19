@@ -207,4 +207,17 @@ describe('standalone cloud agent', () => {
       expect(() => readApiToken({ WEBCAD_API_TOKEN: 'very-private-invalid' })).toThrow('Invalid WebCAD');
       expect(readApiToken({})).toBeNull();
     }));
+  it('retries transient reads at most twice and never repeats writes automatically', async () => {
+    const read = vi.fn().mockResolvedValueOnce(Response.json({error:'cloud_unavailable'},{status:503})).mockResolvedValueOnce(Response.json({userId:owner,folders:[],documents:[]}));
+    expect((await createCloudHttp(token,read).list()).userId).toBe(owner);expect(read).toHaveBeenCalledTimes(2);
+    const write = vi.fn().mockResolvedValue(Response.json({error:'cloud_unavailable'},{status:503}));
+    await expect(createCloudHttp(token,write).request('/cloud/folder',{id:'id',name:'Name',parentId:''})).rejects.toThrow('503');expect(write).toHaveBeenCalledTimes(1);
+    const unavailable = vi.fn().mockImplementation(()=>Promise.resolve(Response.json({error:'cloud_unavailable'},{status:503})));
+    await expect(createCloudHttp(token,unavailable).list()).rejects.toThrow('503');expect(unavailable).toHaveBeenCalledTimes(3);
+  });
+  it('rejects invalid sidecar JSON without echoing its private contents', async () => withDir(async dir => {
+    const file=dir+'/model.json';writeFileSync(file,bytes('A'));writeFileSync(file+'.cloud.json',token);const f=fixture();
+    await expect(runHeadlessCloudCommand(['sync-file',file],{token,fetcher:f.fetcher,out:vi.fn()})).rejects.toThrow('Invalid sync sidecar JSON');expect(f.fetcher).not.toHaveBeenCalled();
+  }));
+
 });

@@ -122,30 +122,34 @@ export function createCloudHttp(token, fetcher = fetch) {
   const owner = TOKEN.exec(token)?.[1];
   if (!owner) throw Error('Invalid WebCAD personal API token format');
   const request = async (path, body) => {
-    let r;
-    try {
-      r = await fetcher(API + path, {
-        method: body === undefined ? 'GET' : 'POST',
-        redirect: 'error',
-        headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-        body: body === undefined ? undefined : JSON.stringify({ ...body, expectedUserId: owner }),
-        signal: AbortSignal.timeout(30000),
-      });
-    } catch {
-      throw Error('WebCAD API request failed');
+    const readonly = body === undefined || path === '/cloud/open';
+    for (let attempt = 0; ; attempt++) {
+      let response;
+      try {
+        response = await fetcher(API + path, {
+          method: body === undefined ? 'GET' : 'POST',
+          redirect: 'error',
+          headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+          body: body === undefined ? undefined : JSON.stringify({ ...body, expectedUserId: owner }),
+          signal: AbortSignal.timeout(30000),
+        });
+      } catch {
+        if (!readonly || attempt >= 2) throw Error('WebCAD API request failed');
+      }
+      if (readonly && attempt < 2 && (!response || [502, 503, 504].includes(response.status))) {
+        await response?.body?.cancel().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 250 : 750));
+        continue;
+      }
+      let data;
+      try { data = await response.json(); } catch { throw Error('Invalid WebCAD API response'); }
+      if (!response.ok) {
+        const code = typeof data?.error === 'string' && /^[a-z_]{1,80}$/.test(data.error) ? data.error : 'request_failed';
+        throw Error(`WebCAD API ${response.status}: ${code}`);
+      }
+      if (data.userId !== undefined && data.userId !== owner) throw Error('Cloud account changed');
+      return data;
     }
-    let data;
-    try {
-      data = await r.json();
-    } catch {
-      throw Error('Invalid WebCAD API response');
-    }
-    if (!r.ok) {
-      const code = typeof data?.error === 'string' && /^[a-z_]{1,80}$/.test(data.error) ? data.error : 'request_failed';
-      throw Error(`WebCAD API ${r.status}: ${code}`);
-    }
-    if (data.userId !== undefined && data.userId !== owner) throw Error('Cloud account changed');
-    return data;
   };
   const list = async () => {
     const data = await request('/cloud/list');
@@ -294,7 +298,10 @@ export async function runHeadlessCloudCommand(args, { token, out, fetcher = fetc
         localHash = digest(before),
         metaHash = fingerprint(side);
       project(before);
-      const meta = metaHash === null ? null : JSON.parse(readFileSync(side, 'utf8'));
+      let meta = null;
+      if (metaHash !== null) {
+        try { meta = JSON.parse(readFileSync(side, 'utf8')); } catch { throw Error('Invalid sync sidecar JSON'); }
+      }
       const d = await api.list();
       if (
         meta &&

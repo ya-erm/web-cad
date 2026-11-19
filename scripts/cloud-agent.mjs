@@ -74,7 +74,8 @@ export async function runCloudCommand(args, { call, out }) {
     }
     case 'upload-file': {
       const { positional, options: o } = parse(rest, { '--folder': 'string' }, [1, 1]);
-      const raw = JSON.parse(readFileSync(resolve(positional[0]), 'utf8'));
+      let raw;
+      try { raw = JSON.parse(readFileSync(resolve(positional[0]), 'utf8')); } catch { throw Error('Invalid project JSON or unreadable project file'); }
       return out(await call('cloudUploadFile', raw, o['--folder'] === undefined ? {} : { folderId: o['--folder'] }));
     }
     case 'download': {
