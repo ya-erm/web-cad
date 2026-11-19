@@ -4418,3 +4418,39 @@ body.panel-resizing-y * {
 .cloud-upload-notice-heading, .cloud-upload-notice-actions { display: flex; gap: 8px; align-items: center; }
 .cloud-upload-notice-heading strong { min-width: 0; overflow-wrap: anywhere; }
 .cloud-upload-notice-actions { flex-wrap: wrap; }
+
+/* On phones, cloud upload behaves as a page: only its content scrolls. */
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  .cloud-upload-dialog {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .cloud-upload-dialog > .modal-header,
+  .cloud-upload-dialog > .modal-footer { flex-shrink: 0; }
+  .cloud-upload-dialog > .modal-header {
+    padding: calc(12px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 12px calc(16px + env(safe-area-inset-left, 0px));
+    overflow-wrap: anywhere;
+  }
+  .cloud-upload-heading > svg { flex-shrink: 0; }
+  .cloud-upload-dialog > .modal-body {
+    flex: 1;
+    min-height: 0;
+    align-content: start;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  }
+  .cloud-upload-dialog .upload-destination-tree,
+  .cloud-upload-dialog .cloud-upload-list { max-height: none; overflow: visible; }
+  .cloud-upload-dialog > .modal-footer {
+    padding: 10px calc(16px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  }
+}

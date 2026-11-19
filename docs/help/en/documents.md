@@ -48,7 +48,7 @@ placeholder appears while the account is being checked. Your name and email appe
 in the account menu, opened by clicking your avatar. **Sign out** ends the current session in this browser.
 
 Signing in is optional. Documents are saved on this device: signing in
-does not upload them to the cloud. Upload them explicitly with **Upload to cloud**. Signing out does not delete local documents.
+does not upload them to the cloud. Upload them explicitly with **Upload to cloud**. On phones, the document picker fills the screen: the header and action buttons stay visible while folders, options and upload progress scroll between them. Signing out does not delete local documents.
 If the account service is unavailable or you are offline, editing still works;
 **Retry sign-in** checks the account service again.
 
