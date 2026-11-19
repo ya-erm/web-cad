@@ -78,7 +78,7 @@ package.json, lockfile и установленные зависимости. К�
 со сроком хранения 7 дней, когда Cloud Logging станет доступен.
 
 Функция создана: `d4ec3d7jtmn3ua7pao9e`, каталог `b1gej4nlbqfik932flcc`.
-Версия облачной библиотеки `d4eq9s56j1n31mh8lgf6` (тег `cloud-v1`) развёрнута 19 ноября 2026, статус ACTIVE.
+Версия облачной библиотеки `d4enaadn564den3og2q1` (тег `cloud-v1`) развёрнута 19 ноября 2026, статус ACTIVE.
 Проверено вызовом из облака: `/health` и `/ready` возвращают 200, обе зависимости
 отвечают `ok`. Анонимный запрос к основному URL функции возвращает 403;
 публичных access bindings и политик прогретых экземпляров нет.
@@ -108,3 +108,7 @@ package.json, lockfile и установленные зависимости. К�
 Облачные маршруты: `GET /cloud/list`, POST `/cloud/folder`, `/cloud/prepare`,
 `/cloud/commit`, `/cloud/open`, `/cloud/document` и OPTIONS. Все требуют сессию
 пользователя; изменения требуют Origin приложения.
+
+POST /cloud/document поддерживает переименование и перемещение с проверкой
+revision/modified. /cloud/prepare возвращает userId для связи с локальной записью;
+обновление существующего документа требует expectedRevision и expectedModified.

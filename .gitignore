@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 
 # scratch files of agents (previews, screenshots, op scripts)
 temp

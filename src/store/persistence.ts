@@ -211,7 +211,7 @@ export async function requestPersistentStorage() {
 
 /** Folders in this browser, independent of files on disk. */
 export async function listLibraryFolders(): Promise<LibraryFolder[]> {
-  return (await tx<LibraryFolder[]>([FOLDERS], 'readonly', t => t.objectStore(FOLDERS).getAll())) ?? [];
+  return (await tx<LibraryFolder[]>([FOLDERS], 'readonly', (t) => t.objectStore(FOLDERS).getAll())) ?? [];
 }
 
 /** Validate and apply against one atomic snapshot, including changes from other tabs. */
@@ -219,9 +219,12 @@ export async function changeLibrary(change: LibraryChange): Promise<void> {
   const d = await db();
   await new Promise<void>((resolve, reject) => {
     const t = d.transaction([FOLDERS, SUMMARIES], 'readwrite');
-    const fs = t.objectStore(FOLDERS), ds = t.objectStore(SUMMARIES);
-    const folders = fs.getAll(), docs = ds.getAll();
-    let remaining = 2, error: unknown;
+    const fs = t.objectStore(FOLDERS),
+      ds = t.objectStore(SUMMARIES);
+    const folders = fs.getAll(),
+      docs = ds.getAll();
+    let remaining = 2,
+      error: unknown;
     const apply = () => {
       if (--remaining) return;
       try {
@@ -229,9 +232,13 @@ export async function changeLibrary(change: LibraryChange): Promise<void> {
         if (change.kind === 'folder') fs.put({ ...change.folder, name: change.folder.name.trim() });
         else if (change.kind === 'remove') fs.delete(change.id);
         else ds.put({ ...docs.result.find((v: DocumentSummary) => v.id === change.id), folderId: change.folderId });
-      } catch (e) { error = e; t.abort(); }
+      } catch (e) {
+        error = e;
+        t.abort();
+      }
     };
-    folders.onsuccess = apply; docs.onsuccess = apply;
+    folders.onsuccess = apply;
+    docs.onsuccess = apply;
     t.oncomplete = () => resolve();
     t.onabort = t.onerror = () => reject(error ?? t.error);
   });
@@ -239,8 +246,44 @@ export async function changeLibrary(change: LibraryChange): Promise<void> {
 
 /** Remember a cloud download as a local cache, never overwriting another local document. */
 export async function markCloudCopy(id: string, cloudSource: NonNullable<DocumentSummary['cloudSource']>): Promise<void> {
-  await tx([SUMMARIES], 'readwrite', t => {
-    const s = t.objectStore(SUMMARIES), request = s.get(id);
-    request.onsuccess = () => {if (request.result) s.put({...request.result, cloudSource});};
+  await tx([SUMMARIES], 'readwrite', (t) => {
+    const s = t.objectStore(SUMMARIES),
+      request = s.get(id);
+    request.onsuccess = () => {
+      if (request.result) s.put({ ...request.result, cloudSource });
+    };
+  });
+}
+
+/** Mirror folder metadata without removing local folders or touching document content. */
+export async function rememberLibraryFolders(folders: LibraryFolder[], locations: Record<string, string>): Promise<void> {
+  await tx([FOLDERS, SUMMARIES], 'readwrite', (t) => {
+    const fs = t.objectStore(FOLDERS),
+      ds = t.objectStore(SUMMARIES);
+    for (const folder of folders) fs.put(folder);
+    for (const [id, folderId] of Object.entries(locations)) {
+      const request = ds.get(id);
+      request.onsuccess = () => {
+        if (request.result) ds.put({ ...request.result, folderId });
+      };
+    }
+  });
+}
+
+/** First download can keep the logical ID. Existing local content is never overwritten. */
+export async function addDocumentIfAbsent(doc: CadDocument): Promise<boolean> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const t = d.transaction([DOCS, SUMMARIES], 'readwrite');
+    let added = false;
+    const request = t.objectStore(DOCS).get(doc.id);
+    request.onsuccess = () => {
+      if (request.result) return;
+      t.objectStore(DOCS).add(doc);
+      t.objectStore(SUMMARIES).add({ id: doc.id, name: doc.name, created: doc.created, modified: doc.modified });
+      added = true;
+    };
+    t.oncomplete = () => resolve(added);
+    t.onerror = t.onabort = () => reject(t.error);
   });
 }

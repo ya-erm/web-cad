@@ -50,8 +50,16 @@ export const listCloud = () => cloudRequest<CloudList>('/cloud/list');
 export const saveCloudFolder = (folder: LibraryFolder, expectedModified?: number) =>
   cloudRequest('/cloud/folder', { ...folder, expectedModified });
 export const deleteCloudFolder = (id: string) => cloudRequest('/cloud/folder', { id, remove: true });
+export const renameCloudDocument = (doc: CloudDocument, name: string) =>
+  cloudRequest<{ document: CloudDocument }>('/cloud/document', {
+    id: doc.id,
+    revision: doc.revision,
+    modified: doc.modified,
+    folderId: doc.folderId,
+    name,
+  });
 export const moveCloudDocument = (doc: CloudDocument, folderId: string) =>
-  cloudRequest('/cloud/document', { id: doc.id, revision: doc.revision, modified: doc.modified, folderId });
+  cloudRequest<{ document: CloudDocument }>('/cloud/document', { id: doc.id, revision: doc.revision, modified: doc.modified, folderId });
 
 export async function blobHash(blob: Blob): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]
@@ -76,12 +84,20 @@ export async function cloudThumbnail(source?: string): Promise<Blob | null> {
   }
 }
 
-export async function uploadCloudDocument(summary: DocumentSummary, folderId: string, asCopy = false): Promise<CloudDocument> {
+export async function uploadCloudDocument(
+  summary: DocumentSummary,
+  folderId: string,
+  asCopy = false,
+  expectedRevision?: string,
+  expectedModified?: number,
+): Promise<CloudDocument> {
+  if (!asCopy && summary.cloudSource?.revision && summary.cloudSource.cloudModified === undefined && expectedModified === undefined)
+    throw new Error('Confirm updating the existing cloud version.');
   await useDoc.getState().flushSave();
   if (useDoc.getState().saveError) throw new Error('Save your changes before uploading.');
   const doc = await db.loadDocument(summary.id);
   if (!doc) throw new Error('Document not found');
-  const source = asCopy ? { ...doc, id: crypto.randomUUID() } : doc;
+  const source = { ...doc, id: asCopy ? crypto.randomUUID() : (summary.cloudSource?.documentId ?? doc.id) };
   const text = projectText(source, await fileVersions(doc.id));
   if (new Blob([text]).size > 100 * 1024 * 1024) throw new Error('The project is too large to upload.');
   const compressed = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
@@ -89,16 +105,20 @@ export async function uploadCloudDocument(summary: DocumentSummary, folderId: st
   if (compressed.size > 20 * 1024 * 1024 || (thumbnail?.size ?? 0) > 1024 * 1024) throw new Error('The project is too large to upload.');
   const hash = await blobHash(compressed),
     thumbnailHash = thumbnail ? await blobHash(thumbnail) : '';
-  const prepared = await cloudRequest<{ uploadId: string; projectUrl: string; thumbnailUrl: string | null }>('/cloud/prepare', {
-    documentId: source.id,
-    name: source.name,
-    folderId,
-    expectedRevision: '',
-    size: compressed.size,
-    thumbnailSize: thumbnail?.size ?? 0,
-    hash,
-    thumbnailHash,
-  });
+  const prepared = await cloudRequest<{ userId: string; uploadId: string; projectUrl: string; thumbnailUrl: string | null }>(
+    '/cloud/prepare',
+    {
+      documentId: source.id,
+      name: source.name,
+      folderId,
+      expectedRevision: asCopy ? '' : (expectedRevision ?? summary.cloudSource?.revision ?? ''),
+      expectedModified: asCopy ? undefined : (expectedModified ?? summary.cloudSource?.cloudModified),
+      size: compressed.size,
+      thumbnailSize: thumbnail?.size ?? 0,
+      hash,
+      thumbnailHash,
+    },
+  );
   const put = async (url: string, body: Blob) => {
     const result = await fetch(url, {
       method: 'PUT',
@@ -112,6 +132,16 @@ export async function uploadCloudDocument(summary: DocumentSummary, folderId: st
   await put(prepared.projectUrl, compressed);
   if (thumbnail && prepared.thumbnailUrl) await put(prepared.thumbnailUrl, thumbnail);
   const result = await cloudRequest<{ document: CloudDocument }>('/cloud/commit', { uploadId: prepared.uploadId });
+  if (!asCopy && prepared.userId) {
+    await db.markCloudCopy(summary.id, {
+      userId: prepared.userId,
+      documentId: result.document.id,
+      revision: result.document.revision,
+      savedModified: doc.modified,
+      cloudModified: result.document.modified,
+    });
+    await useDoc.getState().loadList();
+  }
   return result.document;
 }
 
@@ -127,7 +157,7 @@ export async function openCloudDocument(id: string): Promise<string> {
       d.cloudSource.documentId === id &&
       d.cloudSource.revision === result.document.revision,
   );
-  if (existing) return existing.id;
+  if (existing && existing.name === result.document.name && existing.cloudSource?.savedModified === existing.modified) return existing.id;
   const response = await fetch(result.url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(120000) });
   if (!response.ok) throw new Error('Download failed. Try again.');
   const blob = await response.blob();
@@ -149,9 +179,16 @@ export async function openCloudDocument(id: string): Promise<string> {
   }
   const parsed = readProject(JSON.parse(await new Blob(chunks).text()), result.document.name);
   const copies = copiedVersionIds(parsed.versions);
-  const localId = await useDoc.getState().importDocument(withCopiedVersions(parsed.doc, copies));
+  const candidate = { ...withCopiedVersions(parsed.doc, copies), id: result.document.id, name: result.document.name };
+  const localId = (await db.addDocumentIfAbsent(candidate)) ? candidate.id : await useDoc.getState().importDocument(candidate);
   await importVersions(localId, parsed.versions, false, copies);
-  await db.markCloudCopy(localId, { userId: result.userId, documentId: id, revision: result.document.revision });
+  await db.markCloudCopy(localId, {
+    userId: result.userId,
+    documentId: id,
+    revision: result.document.revision,
+    savedModified: (await db.loadDocument(localId))?.modified,
+    cloudModified: result.document.modified,
+  });
   if (result.thumbnailUrl) {
     try {
       const image = await fetch(result.thumbnailUrl, {
@@ -175,4 +212,15 @@ export async function openCloudDocument(id: string): Promise<string> {
   }
   await useDoc.getState().loadList();
   return localId;
+}
+
+/** Explicitly detach a copy of a disk document into the managed library. */
+export async function copyDocumentToLibrary(id: string): Promise<string> {
+  const source = await db.loadDocument(id);
+  if (!source) throw new Error('Document not found');
+  const versions = await fileVersions(id),
+    copies = copiedVersionIds(versions);
+  const copy = await useDoc.getState().importDocument(withCopiedVersions(source, copies), await db.getThumbnail(id));
+  await importVersions(copy, versions, false, copies);
+  return copy;
 }

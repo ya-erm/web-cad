@@ -37,6 +37,27 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'Preserve library folders': 'Сохранить структуру папок',
+  'Cloud connected': 'Подключено облако',
+  'Confirm updating the existing cloud version.': 'Подтвердите обновление существующего облачного варианта.',
+  'Connect to organise cloud documents.': 'Для изменения облачных папок подключитесь к сети и войдите в аккаунт.',
+  "My documents": "Мои документы",
+  "Save to cloud…": "Сохранить в облако…",
+  "Show in My documents": "Показать в «Моих документах»",
+  "Copy to My documents": "Скопировать в «Мои документы»",
+  "Open cloud version": "Открыть облачный вариант",
+  "Local variants…": "Локальные варианты…",
+  "Local variants": "Локальные варианты",
+  "Existing variants are kept. Choose which one to open.": "Существующие варианты сохранены. Выберите, какой открыть.",
+  "On this device and in cloud": "На устройстве и в облаке",
+  "In cloud": "В облаке",
+  "Only on this device": "Только на устройстве",
+  "Local copy; cloud unavailable": "Локально; облако недоступно",
+  "Update existing cloud versions": "Обновить существующие облачные варианты",
+  "Unsaved cloud changes": "Есть изменения на устройстве",
+  "Cloud version changed": "Облачный вариант изменился",
+  "Saved in cloud": "Сохранён в облаке",
+
   'Autosave on this device.': 'Автосохранение на устройстве.',
   Save: 'Сохранить',
   'Works offline. Cloud uploads are optional.': 'Работает офлайн. Загрузка в облако необязательна.',

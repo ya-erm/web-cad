@@ -46,7 +46,7 @@ placeholder appears while the account is being checked. Your name and email appe
 in the account menu, opened by clicking your avatar. **Sign out** ends the current session in this browser.
 
 Signing in is optional. Documents are saved on this device: signing in
-does not upload them to the cloud. Upload them explicitly in **Cloud**. Signing out does not delete local documents.
+does not upload them to the cloud. Upload them explicitly with **Save to cloud…**. Signing out does not delete local documents.
 If the account service is unavailable or you are offline, editing still works;
 **Retry sign-in** checks the account service again.
 
@@ -131,25 +131,37 @@ How it works:
 
 > **Limitation.** Deleting or trashing a document in the browser does not touch its file; WebCAD does not delete files or subfolders — use Explorer or Finder for that. New files and subfolders added by other programs appear after **Refresh** (it reads the folder again with all its subfolders). Folders are not available in Firefox and Safari — use project **Export** and **Import project**.
 
-## Libraries and folders {#libraries}
+## My documents and folders {#libraries}
 
-- **Recent documents** combines documents available in this browser: the browser library, connected computer folders, and cloud copies already opened here. Each card shows its storage location.
-- **In this browser** is the local library without a file on disk. **New folder** creates a folder at the current location. Open it to create nested folders; use the breadcrumb trail to go back.
-- **Cloud** contains your account's documents across devices. Browsing it requires signing in and a network connection.
-- **Folders on this computer** keeps the existing `.webcad.json` file workflow.
+**My documents** is one managed library. A document lives on this device and, when cloud storage is connected, has a cloud instance with a shared ID. One card shows its availability and pending cloud changes. **Recent documents** also groups known instances of the same document.
 
-Use a document's **⋯ → Move to browser folder…** menu to organise the browser library. A folder card's **⋯** opens renaming and parent selection. Only empty folders can be deleted, including having no documents in the trash. Moving items does not change CAD geometry or undo history.
+Folders use the same bar and cards as computer folders:
 
-New and imported documents go into the current browser folder. Existing documents remain at the root. Browser folders stay on this device until you explicitly upload them.
+- Use the breadcrumb bar and left-hand tree to navigate nested folders.
+- **New document in the folder** creates a local document at the current location. **New folder** creates a folder with its name ready to edit. A subfolder inside a connected cloud folder is created in the cloud too.
+- Folder cards show one thumbnail, a mosaic, or **+N**. Counts include nested documents.
+- **⋯** and right-click menus offer renaming, **Move to folder…**, and deleting empty folders.
+- Drag documents or folders onto a folder, a tree item, or an ancestor breadcrumb. Self and descendant moves are rejected. The move dialog supports choosing a destination and **Move**, or double-clicking the destination.
+- Organising connected cloud objects requires a network and sign-in. Local model editing continues to work offline.
 
-## Uploading to the cloud {#cloud}
+Folder names and locations are metadata: moving or renaming them does not rebuild geometry or upload the project again. Existing local documents and folders survive the app update.
 
-Choose **Upload to cloud…** from a document menu, or open **Cloud → Upload documents…**. Select documents and a destination. Browser folder structure is preserved by default. Computer files stay in place; this first version lists documents already opened or imported in this browser.
+Old local copies with a known cloud identity appear under one card. **Local variants…** lets you choose an existing variant. Their data is retained; differing models are not merged automatically. Independent IDs are not merged merely because names match.
 
-Uploading creates a cloud snapshot. An existing document with the same ID is not overwritten: enable **Upload as separate copies** instead. Successful uploads remain available even if the next document in a batch fails.
+## Saving to the cloud {#cloud}
 
-On another device, sign in to the same account, open **Cloud**, use **Refresh** if needed, and select a document. The list and thumbnails load first; the project downloads when opened. WebCAD creates a local copy that can later be opened offline through **Recent documents**. Changed local documents are never replaced. Local copies remain in this browser after signing out.
+Choose **Save to cloud…** from the bar or a document menu. Select documents, a destination, and optionally **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
 
-**Automatic edit synchronisation is not enabled yet.** Local autosave does not upload changes. To transfer an edited variant, upload it as a separate copy. Continuous computer-folder synchronisation, cloud trash, and snapshot history management are later stages.
+On another device, sign in to the same account and open **My documents**. Lists and thumbnails load first; the project downloads when opened. A first download keeps the shared ID if that local ID is free. It then works offline. Existing changed content with that ID is never overwritten.
+
+Normal opening uses the local variant when available. **Open cloud version** explicitly opens the cloud snapshot, preserving changed local data as another variant under the same card. Local data stays in this browser after signing out.
+
+Saving checks both the revision and metadata baseline. A concurrent edit, rename, or move stops an outdated save with a conflict. Open the cloud version first; if replacement is intended, enable **Update existing cloud versions**. Old copies without a recorded baseline also require explicit confirmation.
+
+**Automatic edit uploading is not enabled yet.** Local autosave does not send changes. Bounded technical snapshot retention and background synchronisation are later stages.
 
 Projects include named versions and branches, as gzip archives up to 20 MiB. Thumbnails are separate S3 objects, converted to WebP, up to 1 MiB. Disposable 3D geometry caches and automatic local history are excluded. A broken thumbnail never prevents the project upload. Temporary upload objects expire after 3 days.
+
+## Copying computer files to the library {#disk-library-copy}
+
+Computer files remain a separate source in their own filesystem. **Copy to My documents** in a file card menu creates an independent library document with named versions and a thumbnail. The original file and its folder link are unchanged. Connect the resulting document to cloud storage using the normal save command.

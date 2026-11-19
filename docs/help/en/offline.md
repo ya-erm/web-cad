@@ -29,7 +29,7 @@ If Settings shows **How to install the app** instead of **Install app…**, the 
 - Interface settings (language, rotation mode, showing constraints and expressions) are stored in the browser's local storage.
 - WebCAD asks the browser to make the storage persistent so that data is not deleted when space runs low.
 
-> **Warning.** Local autosave does not automatically sync documents between devices. You can explicitly upload a snapshot and open it elsewhere through [Cloud](documents#cloud). If you clear the site data in the browser, the documents are deleted. Different addresses (for example, `localhost:5173` and `localhost:4173`) are different storages.
+> **Warning.** Local autosave does not automatically sync documents between devices. You can explicitly upload a snapshot and open it elsewhere with [Save to cloud](documents#cloud). If you clear the site data in the browser, the documents are deleted. Different addresses (for example, `localhost:5173` and `localhost:4173`) are different storages.
 
 ## Backups and transfer {#backup}
 

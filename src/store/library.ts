@@ -5,6 +5,7 @@ export interface LibraryFolder {
   name: string;
   created: number;
   modified: number;
+  cloudSource?: { userId: string; folderId: string };
 }
 export type LibraryChange =
   { kind: 'folder'; folder: LibraryFolder } | { kind: 'remove'; id: string } | { kind: 'document'; id: string; folderId: string };

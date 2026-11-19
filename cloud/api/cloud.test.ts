@@ -92,4 +92,33 @@ describe('cloud API ownership and publication', () => {
     expect(r.body).not.toContain('SECRET');
     expect(s.db.close).toHaveBeenCalled();
   });
+  it('requires a metadata baseline when updating an existing snapshot', async () => {
+    const s = setup();
+    const r = await s.request('/cloud/prepare', {
+      documentId: 'doc',
+      name: 'Doc',
+      folderId: '',
+      expectedRevision: 'r1',
+      size: 10,
+      thumbnailSize: 0,
+      hash: 'a'.repeat(64),
+      thumbnailHash: '',
+    });
+    expect(r.statusCode).toBe(400);
+    expect(s.objects.prepare).not.toHaveBeenCalled();
+  });
+  it('does not publish a snapshot over a concurrent rename or move', async () => {
+    const s = setup();
+    s.db.document.mockResolvedValue({ id: 'doc', revision: 'r1', modified: 20 } as never);
+    s.db.pending.mockResolvedValue({ id: 'upload', documentId: 'doc', expectedRevision: 'r1', expectedModified: 19 } as never);
+    expect((await s.request('/cloud/commit', { uploadId: 'upload' })).statusCode).toBe(409);
+    expect(s.objects.seal).not.toHaveBeenCalled();
+  });
+  it('rejects invalid document names before changing metadata', async () => {
+    const s = setup();
+    expect((await s.request('/cloud/document', { id: 'doc', revision: 'r1', modified: 1, folderId: '', name: '../name' })).statusCode).toBe(
+      400,
+    );
+    expect(s.db.move).not.toHaveBeenCalled();
+  });
 });

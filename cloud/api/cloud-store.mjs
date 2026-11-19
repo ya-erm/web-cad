@@ -91,7 +91,7 @@ export async function createCloudStore(connection, token, signal) {
           name: input.name,
           parentId: input.parentId,
           created: old?.created ?? Date.now(),
-          modified: Date.now(),
+          modified: Math.max(Date.now(), (old?.modified ?? 0) + 1),
         };
         await tx`UPSERT INTO cloud_folders (user_id, id, payload) VALUES (${user}, ${input.id}, ${JSON.stringify(folder)})`;
       });
@@ -103,7 +103,8 @@ export async function createCloudStore(connection, token, signal) {
         trail(folders, pending.folderId);
         const result = rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${pending.documentId}`);
         const old = result.length ? JSON.parse(result[0].payload) : null;
-        if ((old?.revision ?? '') !== pending.expectedRevision) throw new CloudError(409, 'revision_conflict');
+        if ((old?.revision ?? '') !== pending.expectedRevision || (old && old.modified !== pending.expectedModified))
+          throw new CloudError(409, 'revision_conflict');
         await tx`INSERT INTO cloud_uploads (user_id, id, payload, expires_at) VALUES (${user}, ${pending.id}, ${JSON.stringify(pending)}, CAST(${new Date(Date.now() + 86400000)} AS Timestamp))`;
       });
     },
@@ -120,7 +121,8 @@ export async function createCloudStore(connection, token, signal) {
         const old = current.length ? JSON.parse(current[0].payload) : null;
         // Retrying a commit whose response was lost is safe.
         if (old?.revision === upload.id) return old;
-        if ((old?.revision ?? '') !== upload.expectedRevision) throw new CloudError(409, 'revision_conflict');
+        if ((old?.revision ?? '') !== upload.expectedRevision || (old && old.modified !== upload.expectedModified))
+          throw new CloudError(409, 'revision_conflict');
         const folders = unpack(rows(await tx`SELECT payload FROM cloud_folders WHERE user_id = ${user}`));
         trail(folders, upload.folderId);
         const doc = {
@@ -142,15 +144,21 @@ export async function createCloudStore(connection, token, signal) {
     },
     /** @param {string} user @param {any} input */
     async move(user, input) {
-      await transaction(async (tx) => {
+      return transaction(async (tx) => {
         const result = rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${input.id}`);
         if (!result.length) throw new CloudError(404, 'document_not_found');
         const old = JSON.parse(result[0].payload);
         if (old.revision !== input.revision || old.modified !== input.modified) throw new CloudError(409, 'revision_conflict');
         const folders = unpack(rows(await tx`SELECT payload FROM cloud_folders WHERE user_id = ${user}`));
         trail(folders, input.folderId);
-        const doc = { ...old, folderId: input.folderId, modified: Date.now() };
+        const doc = {
+          ...old,
+          ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+          folderId: input.folderId,
+          modified: Math.max(Date.now(), old.modified + 1),
+        };
         await tx`UPDATE cloud_documents SET payload = ${JSON.stringify(doc)} WHERE user_id = ${user} AND id = ${input.id}`;
+        return doc;
       });
     },
     async close() {

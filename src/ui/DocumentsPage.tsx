@@ -22,15 +22,17 @@ import { copiedVersionIds, importVersions, withCopiedVersions } from '../store/v
 import { baseOf, dirOf, folderSupported, within, type FileLink } from '../store/localFolder';
 import { folderPreview } from './folderPreview';
 import { useEditor, type ContextMenuItem } from '../store/editorStore';
+import { CardMenuButton, openCardMenu, RenameInput, FolderPreview } from './DocumentCards';
 import { Icon } from './icons';
 import { ContextMenu } from './Overlays';
 import { AppSettingsButton, LangSwitch } from './AppSettings';
 import { t, getLang } from '../i18n';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
-import {CloudLibrary, CloudUploadDialog} from './CloudLibrary';
+import { copyDocumentToLibrary } from '../cloud/client';
+import { recentDocuments } from '../cloud/library';
+import { CloudLibrary, CloudUploadDialog } from './CloudLibrary';
 import { AccountButton } from './AccountButton';
-import { LibraryFolderDialog, LibraryFolderGrid, LibraryMoveDialog, LibraryPath } from './LibraryFolders';
 import { listLibraryFolders, changeLibrary } from '../store/persistence';
 import { folderTrail, type LibraryFolder } from '../store/library';
 
@@ -45,41 +47,6 @@ function fmtDate(ts: number) {
 }
 
 const fmtSize = (n: number) => (n < 1e6 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1e6).toFixed(1)} MB`);
-
-/** The card whose menu is open: its "⋯" then closes the menu instead of opening it again. */
-let menuOwner: string | null = null;
-
-/** The menu of a card: at the cursor on a right click, under the "⋯" button when it is clicked. */
-function openCardMenu(e: React.MouseEvent, owner: string, items: ContextMenuItem[]) {
-  e.preventDefault();
-  e.stopPropagation();
-  let { clientX: x, clientY: y } = e;
-  if (e.type !== 'contextmenu') {
-    const r = e.currentTarget.getBoundingClientRect();
-    x = r.left;
-    y = r.bottom + 4;
-  }
-  menuOwner = owner;
-  useEditor.setState({ contextMenu: { x, y, items } });
-}
-
-/** The "⋯" button in the corner of a card (on hover): the same menu as a right click on the card. */
-function CardMenuButton({ owner, items }: { owner: string; items: () => ContextMenuItem[] }) {
-  /** The press already closed this card's open menu (a press outside the menu closes it). */
-  const wasOpen = useRef(false);
-  return (
-    <div className="doc-actions" onClick={(e) => e.stopPropagation()}>
-      <button
-        className="icon-btn"
-        title={t('Actions')}
-        onPointerDown={() => (wasOpen.current = !!useEditor.getState().contextMenu && menuOwner === owner)}
-        onClick={(e) => !wasOpen.current && openCardMenu(e, owner, items())}
-      >
-        <Icon name="more" size={14} />
-      </button>
-    </div>
-  );
-}
 
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
 
@@ -116,7 +83,8 @@ const endDrag = () => (dragged = null);
 /** What moving the file or subfolder into the subfolder `dir` of a folder does, or null when it cannot go there. */
 function moveAction(m: Moving, f: Folder, dir: string): (() => Promise<unknown>) | null {
   if (!f.access) return null;
-  if (m.kind === 'dir') return m.folder === f.id && !within(dir, m.path) && dirOf(m.path) !== dir ? () => moveFolderDir(f.id, m.path, dir) : null;
+  if (m.kind === 'dir')
+    return m.folder === f.id && !within(dir, m.path) && dirOf(m.path) !== dir ? () => moveFolderDir(f.id, m.path, dir) : null;
   return m.folder === f.id && dirOf(m.name) === dir ? null : () => moveFolderDoc(m.folder, m.name, f.id, dir);
 }
 
@@ -239,7 +207,9 @@ function FolderIntro({ onAdded }: { onAdded: (id: string) => void }) {
       <div className="empty-state">
         <Icon name="folder" size={48} />
         <h3>{t('A folder on this computer')}</h3>
-        <div className="folder-hint">{t('Working with a folder on the computer needs Chrome or Edge. Here, use Import project and Export project.')}</div>
+        <div className="folder-hint">
+          {t('Working with a folder on the computer needs Chrome or Edge. Here, use Import project and Export project.')}
+        </div>
       </div>
     );
   return (
@@ -247,7 +217,9 @@ function FolderIntro({ onAdded }: { onAdded: (id: string) => void }) {
       <Icon name="folder" size={48} />
       <h3>{t('Work in a folder on this computer')}</h3>
       <div className="folder-hint">
-        {t('Choose a folder: its WebCAD documents are files (*.webcad.json) that you can copy, back up or keep in Git or a cloud folder. Changes are saved to the files as you work. You can add several folders.')}
+        {t(
+          'Choose a folder: its WebCAD documents are files (*.webcad.json) that you can copy, back up or keep in Git or a cloud folder. Changes are saved to the files as you work. You can add several folders.',
+        )}
       </div>
       <div style={{ marginTop: 16 }}>
         <button
@@ -264,27 +236,6 @@ function FolderIntro({ onAdded }: { onAdded: (id: string) => void }) {
       </div>
       {error && <div className="docs-error">{error}</div>}
     </div>
-  );
-}
-
-/** The name being edited on a card (a file's or a subfolder's): Enter or leaving the field keeps it, Esc does not. */
-function RenameInput({ value, onDone }: { value: string; onDone: (v: string | null) => void }) {
-  return (
-    <input
-      className="tree-rename"
-      autoFocus
-      defaultValue={value}
-      onClick={(e) => e.stopPropagation()}
-      onFocus={(e) => e.target.select()}
-      onBlur={(e) => {
-        const v = e.target.value.trim();
-        onDone(v && v !== value ? v : null);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        if (e.key === 'Escape') onDone(null);
-      }}
-    />
   );
 }
 
@@ -354,7 +305,11 @@ function FolderView({
           {crumbs.map((c, i) => (
             <Fragment key={c}>
               {i > 0 && <Icon name="chevronRight" size={12} />}
-              <button className={'folder-crumb' + (c === path ? ' current' : '') + drop.over(folder, c)} onClick={() => onGo(c)} {...drop.props(folder, c)}>
+              <button
+                className={'folder-crumb' + (c === path ? ' current' : '') + drop.over(folder, c)}
+                onClick={() => onGo(c)}
+                {...drop.props(folder, c)}
+              >
                 {c ? baseOf(c) : dir.name}
               </button>
             </Fragment>
@@ -403,7 +358,9 @@ function FolderView({
         <div className="empty-state">
           <Icon name="folder" size={40} />
           <h3>{t('No WebCAD documents in this folder yet')}</h3>
-          <div className="folder-hint">{t('Create a document or a folder here, or save one of your documents into the folder from its card.')}</div>
+          <div className="folder-hint">
+            {t('Create a document or a folder here, or save one of your documents into the folder from its card.')}
+          </div>
         </div>
       ) : (
         <>
@@ -462,6 +419,11 @@ function FolderView({
                 const menu = (): ContextMenuItem[] => [
                   { label: t('Rename'), icon: 'rename', action: () => setRenaming(key) },
                   { label: t('Move to folder…'), icon: 'folder', action: () => onMove({ kind: 'file', folder: folderId, name: f.name }) },
+                  {
+                    label: t('Copy to My documents'),
+                    icon: 'copy',
+                    action: () => void run(async () => onOpen(await copyDocumentToLibrary(await openFolderFile(folderId, f.name)))),
+                  },
                 ];
                 return (
                   <div
@@ -474,7 +436,9 @@ function FolderView({
                     onClick={() => renaming !== key && void open(f.name)}
                     onContextMenu={(e) => renaming !== key && openCardMenu(e, `${folderId}:${key}`, menu())}
                   >
-                    <div className="doc-thumb">{src ? <img src={src} alt="" draggable={false} /> : <Icon name="partStudio" size={40} />}</div>
+                    <div className="doc-thumb">
+                      {src ? <img src={src} alt="" draggable={false} /> : <Icon name="partStudio" size={40} />}
+                    </div>
                     <div className="doc-meta">
                       {renaming === key ? (
                         // the file and its document get the new name
@@ -501,31 +465,6 @@ function FolderView({
         </>
       )}
     </>
-  );
-}
-
-/**
- * A subfolder card's picture (`shown` — pictures of its documents, see folderPreview): the only document's picture
- * whole, a 2 × 2 grid of up to four, three and "+N" for the rest; an empty folder — its icon.
- */
-function FolderPreview({ shown, more }: { shown: (string | undefined)[]; more: number }) {
-  const pic = (src: string | undefined, size: number) => (src ? <img src={src} alt="" draggable={false} /> : <Icon name="partStudio" size={size} />);
-  if (shown.length === 0)
-    return (
-      <div className="doc-thumb">
-        <Icon name="folder" size={40} />
-      </div>
-    );
-  if (shown.length === 1) return <div className="doc-thumb">{pic(shown[0], 40)}</div>;
-  return (
-    <div className="doc-thumb folder-mosaic">
-      {shown.map((src, i) => (
-        <div key={i} className="folder-tile">
-          {pic(src, 22)}
-        </div>
-      ))}
-      {more > 0 && <div className="folder-tile folder-more">+{more}</div>}
-    </div>
   );
 }
 
@@ -556,7 +495,13 @@ function FolderNav({
         <button
           className={'docs-nav-item folder-nav' + (shown === path ? ' active' : '') + drop.over(folder, path)}
           style={{ paddingLeft: 4 + depth * 14 }}
-          title={folder.access ? (path ? `${folder.dir.name}/${path}` : name) : `${name}: ${t('The browser asks again for access to the folder')}`}
+          title={
+            folder.access
+              ? path
+                ? `${folder.dir.name}/${path}`
+                : name
+              : `${name}: ${t('The browser asks again for access to the folder')}`
+          }
           onClick={() => onGo(path)}
           {...drop.props(folder, path)}
         >
@@ -611,14 +556,24 @@ const isKeys = (v: unknown): v is string[] => Array.isArray(v) && v.every((k) =>
 export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const all = useDoc((s) => s.docs);
   const [libraryFolders, setLibraryFolders] = useState<LibraryFolder[]>([]);
-  const [folderEdit, setFolderEdit] = useState<LibraryFolder | 'new' | null>(null);
+  const [librarySidebar, setLibrarySidebar] = useState<HTMLDivElement | null>(null);
+  const [uploadFolder, setUploadFolder] = useState('');
   const [uploading, setUploading] = useState<string[] | null>(null);
   const [cloudGeneration, setCloudGeneration] = useState(0);
-  const [libraryMoving, setLibraryMoving] = useState<string | null>(null);
-  const reloadLibrary = async () => { setLibraryFolders(await listLibraryFolders()); await loadList(); };
-  useEffect(() => { void listLibraryFolders().then(setLibraryFolders); }, []);
-  const { loadList, createDocument, deleteDocument, renameDocument, duplicateDocument, importDocument, trashDocument, restoreDocument, emptyTrash } =
-    useDoc.getState();
+  useEffect(() => {
+    void listLibraryFolders().then(setLibraryFolders);
+  }, []);
+  const {
+    loadList,
+    createDocument,
+    deleteDocument,
+    renameDocument,
+    duplicateDocument,
+    importDocument,
+    trashDocument,
+    restoreDocument,
+    emptyTrash,
+  } = useDoc.getState();
   const folders = useFolder((s) => s.folders);
   const links = useFolder((s) => s.links);
   const ready = useFolder((s) => s.ready);
@@ -627,7 +582,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const saved = useState(() => loadJson(() => sessionStorage, VIEW_KEY, isView, { view: 'docs', path: '' }))[0];
   /** Documents, the trash, a folder on the computer (`folder:<id>`) or the page about folders (`folders`). */
-  const [view, setView] = useState<string>(saved.view);
+  const [view, setView] = useState<string>(saved.view === 'browser' || saved.view === 'cloud' ? 'library' : saved.view);
   /** The subfolder of the folder shown ("" — the folder itself). */
   const [path, setPath] = useState(saved.path);
   /** The open branches of the folders' tree: `<folder id>:<subfolder>`. */
@@ -650,7 +605,12 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const go = (folderId: string, to: string) => {
     setView(`folder:${folderId}`);
     setPath(to);
-    const above = to ? to.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
+    const above = to
+      ? to
+          .split('/')
+          .slice(0, -1)
+          .map((_, i, a) => a.slice(0, i + 1).join('/'))
+      : [];
     const keys = (to ? ['', ...above] : []).map((p) => `${folderId}:${p}`);
     setExpanded((x) => (keys.every((k) => x.includes(k)) ? x : [...new Set([...x, ...keys])]));
   };
@@ -685,9 +645,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     return () => clearTimeout(id);
   }, [confirming]);
   const trashed = all.filter((d) => d.trashed).sort((a, b) => (b.trashed ?? 0) - (a.trashed ?? 0));
-  const browserPath = libraryFolders.some(f => f.id === path) ? path : '';
-  const docs = view === 'trash' ? trashed : all.filter(d => !d.trashed && (view !== 'browser' || (!links[d.id] && !d.cloudSource && (d.folderId ?? '') === browserPath)));
-  const goBrowser = (id: string) => {setView('browser'); setPath(id);};
+  const docs = view === 'trash' ? trashed : recentDocuments(all, new Set(Object.keys(links)));
   const confirmThen = (key: string, action: () => void) => {
     if (confirming === key) {
       setConfirming(null);
@@ -706,14 +664,46 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
       : [
           { label: t('Rename'), icon: 'rename', action: () => setRenaming(d.id) },
           { label: t('Duplicate'), icon: 'copy', action: () => void duplicateDocument(d.id) },
-          { label: t('Upload to cloud…'), icon: 'cloud', action: () => setUploading([d.id]) },
-          ...(!l ? [{label: t('Move to browser folder…'), icon: 'folder', action: () => setLibraryMoving(d.id)}] : []),
+          ...(!l
+            ? [
+                {
+                  label: t('Save to cloud…'),
+                  icon: 'cloud',
+                  action: () => {
+                    setUploadFolder(d.folderId ?? '');
+                    setUploading([d.id]);
+                  },
+                },
+              ]
+            : [
+                {
+                  label: t('Copy to My documents'),
+                  icon: 'copy',
+                  action: () => void run(async () => onOpen(await copyDocumentToLibrary(d.id))),
+                },
+              ]),
+          ...(!l
+            ? [
+                {
+                  label: t('Show in My documents'),
+                  icon: 'folder',
+                  action: () => {
+                    setView('library');
+                    setPath(d.folderId ?? '');
+                  },
+                },
+              ]
+            : []),
           // a file of a folder: where it is; a document of the browser goes into a folder: one item per folder
           ...(l
             ? folders.some((f) => f.id === l.folder)
               ? [{ label: t('Show in the folder'), icon: 'folder', action: () => go(l.folder, dirOf(l.name)) }]
               : []
-            : writable.map((f) => ({ label: `${t('Save to the folder')} «${f.dir.name}»`, icon: 'folder', action: () => void run(() => saveToFolder(d.id, f.id)) }))),
+            : writable.map((f) => ({
+                label: `${t('Save to the folder')} «${f.dir.name}»`,
+                icon: 'folder',
+                action: () => void run(() => saveToFolder(d.id, f.id)),
+              }))),
           { separator: true, label: '' },
           {
             label: t('Move to trash'),
@@ -729,7 +719,8 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
 
   const create = async () => {
     const id = await createDocument(t('Untitled document'));
-    if (view === 'browser' && browserPath) await changeLibrary({kind: 'document', id, folderId: browserPath});
+    if (view === 'library' && path && (await listLibraryFolders()).some((f) => f.id === path))
+      await changeLibrary({ kind: 'document', id, folderId: path });
     onOpen(id);
   };
 
@@ -763,7 +754,9 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             onClick={() => !d.trashed && renaming !== d.id && onOpen(d.id)}
             onContextMenu={(e) => renaming !== d.id && openCardMenu(e, d.id, docMenu(d))}
           >
-            <div className="doc-thumb">{d.thumbnail ? <img src={d.thumbnail} alt="" draggable={false} /> : <Icon name="partStudio" size={40} />}</div>
+            <div className="doc-thumb">
+              {d.thumbnail ? <img src={d.thumbnail} alt="" draggable={false} /> : <Icon name="partStudio" size={40} />}
+            </div>
             {linkTitle(d.id) && (
               <span className="doc-folder" title={linkTitle(d.id)}>
                 <Icon name="folder" size={13} />
@@ -792,9 +785,25 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               ) : (
                 <div className="doc-name">{d.name}</div>
               )}
-              <div className="doc-date">{d.trashed ? `${t('Deleted')}: ${fmtDate(d.trashed)}` : `${t('Modified')}: ${fmtDate(d.modified)}`}</div>
-              {view === 'docs' && <div className="doc-date">{d.cloudSource ? t('Cloud copy on this device') : links[d.id] ? linkTitle(d.id) :
-                `${t('In this browser')}${d.folderId && libraryFolders.some(f => f.id === d.folderId) ? ' / '+folderTrail(libraryFolders,d.folderId).map(f => f.name).join(' / ') : ''}`}</div>}
+              <div className="doc-date">
+                {d.trashed ? `${t('Deleted')}: ${fmtDate(d.trashed)}` : `${t('Modified')}: ${fmtDate(d.modified)}`}
+              </div>
+              {view === 'docs' && (
+                <div className="doc-date">
+                  {d.cloudSource
+                    ? t('Cloud copy on this device')
+                    : links[d.id]
+                      ? linkTitle(d.id)
+                      : `${t('In this browser')}${
+                          d.folderId && libraryFolders.some((f) => f.id === d.folderId)
+                            ? ' / ' +
+                              folderTrail(libraryFolders, d.folderId)
+                                .map((f) => f.name)
+                                .join(' / ')
+                            : ''
+                        }`}
+                </div>
+              )}
             </div>
             {d.trashed ? (
               <div className="doc-actions trash-actions" onClick={(e) => e.stopPropagation()}>
@@ -821,8 +830,16 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="docs-page">
       <div className="docs-top">
         <div className="brand">
-          <button className="brand-reload" title={t('Reload the page')} aria-label={`WebCAD — ${t('Reload the page')}`} onClick={() => location.reload()}>
-            <span className="brand-logo" aria-hidden="true">◆</span> WebCAD
+          <button
+            className="brand-reload"
+            title={t('Reload the page')}
+            aria-label={`WebCAD — ${t('Reload the page')}`}
+            onClick={() => location.reload()}
+          >
+            <span className="brand-logo" aria-hidden="true">
+              ◆
+            </span>{' '}
+            WebCAD
           </button>
           <span className="brand-version" title={appVersionTitle()}>
             {APP_VERSION}
@@ -878,7 +895,8 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 const copies = copiedVersionIds(versions);
                 const id = await importDocument(withCopiedVersions(doc, copies), thumbnail);
                 await importVersions(id, versions, false, copies);
-                if (view === 'browser' && browserPath) await changeLibrary({kind: 'document', id, folderId: browserPath});
+                if (view === 'library' && path && (await listLibraryFolders()).some((f) => f.id === path))
+                  await changeLibrary({ kind: 'document', id, folderId: path });
                 onOpen(id);
               } catch {
                 alert('Invalid project file');
@@ -890,12 +908,16 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             <button className={'docs-nav-item' + (view === 'docs' ? ' active' : '')} onClick={() => setView('docs')}>
               <Icon name="document" size={16} /> {t('Recent documents')}
             </button>
-            <button className={'docs-nav-item' + (view === 'browser' ? ' active' : '')} onClick={() => goBrowser('')}>
-              <Icon name="folder" size={16} /> {t('In this browser')}
+            <button
+              className={'docs-nav-item' + (view === 'library' ? ' active' : '')}
+              onClick={() => {
+                setView('library');
+                setPath('');
+              }}
+            >
+              <Icon name="folder" size={16} /> {t('My documents')}
             </button>
-            <button className={'docs-nav-item' + (view === 'cloud' ? ' active' : '')} onClick={() => setView('cloud')}>
-              <Icon name="cloud" size={16} /> {t('Cloud')}
-            </button>
+            {view === 'library' && <div className="library-sidebar" ref={setLibrarySidebar} />}
             <button className={'docs-nav-item' + (view === 'trash' ? ' active' : '')} onClick={() => setView('trash')}>
               <Icon name="trash" size={16} /> {t('Trash')}
               {trashed.length > 0 && <span className="docs-nav-count">{trashed.length}</span>}
@@ -927,23 +949,45 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
         <div className="docs-main">
           <div className="docs-title">
-            <h2>{t(view === 'trash' ? 'Trash' : view === 'docs' ? 'Recent documents' : view === 'browser' ? 'In this browser' : view === 'cloud' ? 'Cloud' : 'Folder on this computer')}</h2>
-            {view === 'browser' && <button className="btn small" onClick={() => setFolderEdit('new')}><Icon name="folder" size={14} /> {t('New folder')}</button>}
+            <h2>
+              {t(
+                view === 'trash'
+                  ? 'Trash'
+                  : view === 'docs'
+                    ? 'Recent documents'
+                    : view === 'library'
+                      ? 'My documents'
+                      : 'Folder on this computer',
+              )}
+            </h2>
             {view === 'trash' && trashed.length > 0 && (
-              <button className={'btn small' + (confirming === 'empty' ? ' danger' : '')} onClick={() => confirmThen('empty', () => void emptyTrash())}>
+              <button
+                className={'btn small' + (confirming === 'empty' ? ' danger' : '')}
+                onClick={() => confirmThen('empty', () => void emptyTrash())}
+              >
                 <Icon name="trash" size={14} /> {t(confirming === 'empty' ? 'Click again to empty the trash' : 'Empty trash')}
               </button>
             )}
           </div>
           {view === 'trash' && (
-            <div className="docs-hint">{t('Documents in the trash can be restored. Deleting them from the trash removes them permanently.')}</div>
+            <div className="docs-hint">
+              {t('Documents in the trash can be restored. Deleting them from the trash removes them permanently.')}
+            </div>
           )}
           {error && <div className="docs-error">{error}</div>}
-          {view === 'cloud' && <CloudLibrary key={cloudGeneration} onOpen={onOpen} onUpload={() => setUploading([])} />}
-          {view === 'browser' && <>
-            <LibraryPath folders={libraryFolders} current={browserPath} label={t('In this browser')} onGo={goBrowser} />
-            <LibraryFolderGrid folders={libraryFolders} current={browserPath} onGo={goBrowser} onEdit={setFolderEdit} />
-          </>}
+          {view === 'library' && (
+            <CloudLibrary
+              key={cloudGeneration}
+              onOpen={onOpen}
+              path={path}
+              onGo={setPath}
+              sidebar={librarySidebar}
+              onUpload={(folderId, ids = []) => {
+                setUploadFolder(folderId);
+                setUploading(ids);
+              }}
+            />
+          )}
           {shownFolder ? (
             <FolderView
               key={shownFolder.id}
@@ -956,23 +1000,25 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               run={run}
               drop={drop}
             />
-          ) : view === 'docs' || view === 'trash' || view === 'browser' ? (
+          ) : view === 'docs' || view === 'trash' ? (
             list
           ) : view === 'folders' ? (
             <FolderIntro onAdded={(id) => go(id, '')} />
           ) : null}
         </div>
       </div>
-      {uploading && <CloudUploadDialog initial={uploading} onClose={() => setUploading(null)} onComplete={() => {setCloudGeneration(n => n+1); setView('cloud');}} />}
-      {folderEdit && <LibraryFolderDialog folders={libraryFolders} initial={folderEdit === 'new' ? undefined : folderEdit} parent={browserPath}
-        onClose={() => setFolderEdit(null)} onSave={async (name, parentId) => {
-          const now = Date.now();
-          await changeLibrary({kind: 'folder', folder: {...(folderEdit === 'new' ? {id: crypto.randomUUID(), created: now} : folderEdit), name, parentId, modified: now}});
-          await reloadLibrary();
-        }} onDelete={folderEdit === 'new' ? undefined : async () => {await changeLibrary({kind: 'remove', id: folderEdit.id}); await reloadLibrary();}} />}
-      {libraryMoving && <LibraryMoveDialog folders={libraryFolders} onClose={() => setLibraryMoving(null)} onSave={async folderId => {
-        await changeLibrary({kind: 'document', id: libraryMoving, folderId}); await reloadLibrary();
-      }} />}
+      {uploading && (
+        <CloudUploadDialog
+          initial={uploading}
+          initialFolder={uploadFolder}
+          onClose={() => setUploading(null)}
+          onComplete={(folderId) => {
+            setCloudGeneration((n) => n + 1);
+            setView('library');
+            setPath(folderId);
+          }}
+        />
+      )}
       {moving && <MoveDialog what={moving} onClose={() => setMoving(null)} run={run} />}
       <ContextMenu />
     </div>

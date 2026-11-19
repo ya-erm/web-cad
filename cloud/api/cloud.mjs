@@ -88,16 +88,22 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
           await db.folder(user, { ...input, name: input.name?.trim() });
           return respond(200, { ok: true });
         case '/cloud/document':
-          if (!id(input.id) || !folder(input.folderId) || !id(input.revision) || !Number.isSafeInteger(input.modified))
+          if (
+            !id(input.id) ||
+            !folder(input.folderId) ||
+            !id(input.revision) ||
+            !Number.isSafeInteger(input.modified) ||
+            (input.name !== undefined && !name(input.name))
+          )
             return respond(400, { error: 'invalid_request' });
-          await db.move(user, input);
-          return respond(200, { ok: true });
+          return respond(200, { document: await db.move(user, input) });
         case '/cloud/prepare': {
           if (
             !id(input.documentId) ||
             !name(input.name) ||
             !folder(input.folderId) ||
             !(input.expectedRevision === '' || id(input.expectedRevision)) ||
+            (input.expectedRevision !== '' && !Number.isSafeInteger(input.expectedModified)) ||
             !Number.isSafeInteger(input.size) ||
             input.size < 1 ||
             input.size > 20 * 1024 * 1024 ||
@@ -110,14 +116,15 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
             return respond(400, { error: 'invalid_request' });
           const upload = { ...input, id: randomUUID(), name: input.name.trim() };
           await db.prepare(user, upload);
-          return respond(200, { uploadId: upload.id, ...(await objects.prepare(user, upload)) });
+          return respond(200, { userId: user, uploadId: upload.id, ...(await objects.prepare(user, upload)) });
         }
         case '/cloud/commit': {
           if (!id(input.uploadId)) return respond(400, { error: 'invalid_request' });
           const pending = await db.pending(user, input.uploadId);
           const current = await db.document(user, pending.documentId);
           if (current?.revision === pending.id) return respond(200, { document: current });
-          if ((current?.revision ?? '') !== pending.expectedRevision) throw new CloudError(409, 'revision_conflict');
+          if ((current?.revision ?? '') !== pending.expectedRevision || (current && current.modified !== pending.expectedModified))
+            throw new CloudError(409, 'revision_conflict');
           await objects.seal(user, pending);
           return respond(200, { document: await db.commit(user, pending) });
         }
