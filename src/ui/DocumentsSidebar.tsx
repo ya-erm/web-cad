@@ -78,6 +78,7 @@ export function DocumentsSidebar({ children }: { children: ReactNode }) {
         aria-valuemax={documentsSidebarWidth(DOCUMENTS_SIDEBAR_MAX, viewport)}
         aria-valuenow={width}
         title={t('Drag to resize. Double-click to reset.')}
+        data-tip-position="cursor"
         onPointerDown={start}
         onPointerMove={(event) => {
           const current = drag.current;
