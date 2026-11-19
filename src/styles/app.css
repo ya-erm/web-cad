@@ -334,6 +334,10 @@ textarea {
 .docs-nav-item.folder-nav {
   gap: 6px;
 }
+/* Long folder names truncate instead of squeezing the folder/lock icon. */
+.folder-nav > svg {
+  flex-shrink: 0;
+}
 .folder-nav .tree-toggle {
   width: 14px;
   margin-right: 0;

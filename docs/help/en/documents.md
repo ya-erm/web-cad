@@ -110,7 +110,7 @@ You can add several folders: they are listed at the left under **Folders on this
 
 A folder can have subfolders nested to any depth — WebCAD finds `*.webcad.json` files at every level (up to 16). Hidden folders (`.git`, `.vscode` and the like) and `node_modules` are not looked into.
 
-- At the left, each folder shows its tree: an arrow opens and closes a branch, a click on a name opens that subfolder. The open branches are remembered.
+- At the left, each folder shows its tree: an arrow opens and closes a branch, a click on a name opens that subfolder. The open branches are remembered. Long names are shortened with an ellipsis while folder icons keep the same size.
 - An open subfolder shows the way to it at the top (**Folder › Parts › Fasteners**): a click on any step goes back to that level. Below are the subfolders as tiles with the number of documents in each (nested ones included) and the cards of the documents of this level. A click on a tile opens the subfolder.
 - A subfolder tile shows the pictures of its documents (nested ones included, the most recently modified first). With one document, its picture fills the tile. Two to four documents are shown in a 2 × 2 grid. With more, the grid shows three pictures and "+N" in the fourth cell, the number of the other documents. An empty subfolder shows a folder icon.
 - **New folder** makes a subfolder at the current level and lets you type its name right away. **New document in the folder** creates a document in the subfolder that is open.
