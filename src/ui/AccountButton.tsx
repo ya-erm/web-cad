@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import { useDoc } from '../store/docStore';
 import { Icon } from './icons';
 import { useCloudSync } from '../cloud/syncState';
+import { ApiTokensDialog } from './ApiTokensDialog';
 import { CloudSyncIndicator } from './CloudSyncIndicator';
 
 const API = 'https://api.cad.ya-erm.ru';
@@ -11,6 +12,8 @@ type User = { id: string; displayName: string; email: string | null; avatarUrl: 
 export function AccountButton() {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const accountId = useCloudSync((state) => state.accountId);
+  const [tokensFor, setTokensFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -112,6 +115,7 @@ export function AccountButton() {
   const signOut = async () => {
     const previous = currentUser.current;
     signingOut.current = true;
+    setTokensFor(null);
     useCloudSync.getState().setAccount(null);
     requestEpoch.current += 1;
     setBusy(true);
@@ -143,6 +147,10 @@ export function AccountButton() {
   return (
     <div className="account-control">
       <CloudSyncIndicator />
+      {user && tokensFor === user.id && accountId === user.id && <ApiTokensDialog key={user.id} userId={user.id} onClose={() => {
+        setTokensFor(null);
+        menu.current?.querySelector('summary')?.focus();
+      }} />}
       {error && (
         <span className="account-error" role="status" title={t(error)}>
           {t(error)}
@@ -170,6 +178,10 @@ export function AccountButton() {
             {user.email && <div className="dropdown-label account-email">{user.email}</div>}
             <div className="dropdown-note">{t('Autosave on this device.')}</div>
             {status === 'unavailable' && <div className="dropdown-note">{t('Account unavailable. You can keep working offline.')}</div>}
+            <button className="dropdown-item" disabled={busy || accountId !== user.id} onClick={() => {
+              if (menu.current) menu.current.open = false;
+              setTokensFor(user.id);
+            }}><Icon name="lock" size={14} />{t('API tokens…')}</button>
             <button className="dropdown-item" disabled={busy} onClick={() => void signOut()}>
               {t('Sign out')}
             </button>

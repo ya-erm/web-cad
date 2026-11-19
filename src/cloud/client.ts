@@ -411,10 +411,23 @@ export async function downloadCloudSnapshot(id: string, signal?: AbortSignal, ex
 }
 
 /** Cloud opening makes a local copy; changed local files and drafts are never replaced. */
-export async function openCloudDocument(id: string): Promise<string> {
-  const result = await cloudRequest<{ userId: string; document: CloudDocument; url: string; thumbnailUrl: string | null }>('/cloud/open', {
-    id,
-  });
+export async function openCloudDocument(id: string, options: { expectedUserId?: string; signal?: AbortSignal } = {}): Promise<string> {
+  const guard = () => {
+    options.signal?.throwIfAborted();
+    if (options.expectedUserId && useCloudSync.getState().accountId !== options.expectedUserId)
+      throw new CloudFailure('account_changed', 409);
+  };
+  guard();
+  const result = await cloudRequest<{ userId: string; document: CloudDocument; url: string; thumbnailUrl: string | null }>(
+    '/cloud/open',
+    {
+      id,
+      ...(options.expectedUserId ? { expectedUserId: options.expectedUserId } : {}),
+    },
+    options.signal,
+  );
+  guard();
+  if (options.expectedUserId && result.userId !== options.expectedUserId) throw new CloudFailure('account_changed', 409);
   const existing = (await db.listDocuments()).find(
     (d) =>
       !d.trashed &&
@@ -422,14 +435,21 @@ export async function openCloudDocument(id: string): Promise<string> {
       d.cloudSource.documentId === id &&
       d.cloudSource.revision === result.document.revision,
   );
+  guard();
+  const active = useDoc.getState();
   if (
     existing &&
     existing.name === result.document.name &&
+    (active.doc?.id !== existing.id || (!active.saving && active.doc.modified === existing.modified)) &&
     existing.cloudSource?.savedModified === existing.modified &&
     (existing.versionsModified ?? 0) === (existing.cloudSource.savedVersionsModified ?? 0)
   )
     return existing.id;
-  const response = await fetch(result.url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(120000) });
+  const response = await fetch(result.url, {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+    signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
+  });
   if (!response.ok) throw new Error('Download failed. Try again.');
   const blob = await response.blob();
   if (blob.size > 20 * 1024 * 1024 || (await blobHash(blob)) !== result.document.hash)
@@ -439,6 +459,7 @@ export async function openCloudDocument(id: string): Promise<string> {
   let length = 0;
   try {
     while (true) {
+      guard();
       const { value, done } = await reader.read();
       if (done) break;
       length += value.length;
@@ -451,7 +472,10 @@ export async function openCloudDocument(id: string): Promise<string> {
   const parsed = readProject(JSON.parse(await new Blob(chunks).text()), result.document.name);
   const copies = copiedVersionIds(parsed.versions);
   const candidate = { ...withCopiedVersions(parsed.doc, copies), id: result.document.id, name: result.document.name };
+  guard();
   const localId = (await db.addDocumentIfAbsent(candidate)) ? candidate.id : await useDoc.getState().importDocument(candidate);
+  // Bind ownership before importing versions. A failed partial import must never auto-overwrite the remote snapshot.
+  await db.markCloudCopy(localId, { userId: result.userId, documentId: id, revision: '', cloudModified: result.document.modified });
   await importVersions(localId, parsed.versions, false, copies);
   const importedSummary = (await db.listDocuments()).find((d) => d.id === localId);
   await db.markCloudCopy(localId, {
@@ -468,7 +492,7 @@ export async function openCloudDocument(id: string): Promise<string> {
       const image = await fetch(result.thumbnailUrl, {
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
-        signal: AbortSignal.timeout(10000),
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
       });
       const picture = await image.blob();
       if (image.ok && picture.size <= 1024 * 1024 && (await blobHash(picture)) === result.document.thumbnailHash) {
@@ -485,6 +509,7 @@ export async function openCloudDocument(id: string): Promise<string> {
     }
   }
   await useDoc.getState().loadList();
+  guard();
   return localId;
 }
 

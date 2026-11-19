@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix cloud/api --ignore-scripts
       - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p test_deploy_cloud_api.py
+      - run: npx tsc -p cloud/api/tsconfig.json --noEmit
       - run: python3 scripts/package-cloud-api.py
       - run: npm test
       - run: npm run build

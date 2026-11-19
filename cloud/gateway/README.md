@@ -5,7 +5,7 @@
 `/auth/yandex/callback`), `GET /auth/session`, `POST /auth/logout` и OPTIONS.
 `/cloud/list` и POST `/cloud/folder`, `/cloud/prepare`, `/cloud/commit`,
 `/cloud/open`, `/cloud/document` опубликованы с тегом `cloud-v1` и требуют
-пользовательскую сессию. `/ready` и `/documents` отсутствуют.
+пользовательскую сессию либо персональный токен агента. Маршруты `/auth/tokens` (GET/POST/OPTIONS) и `/auth/tokens/revoke` (POST/OPTIONS) управляют токенами только через обычную сессию. `/ready` и `/documents` отсутствуют.
 
 ## Размещение
 

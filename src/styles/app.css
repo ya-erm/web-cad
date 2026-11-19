@@ -4479,3 +4479,34 @@ body.panel-resizing-y * {
     padding: 10px calc(16px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
   }
 }
+
+.api-tokens-backdrop { z-index: 500; }
+.api-tokens-dialog { width: min(600px, 94vw); color: var(--text); }
+.api-tokens-dialog .modal-header { gap: 8px; }
+.api-tokens-dialog .modal-header > svg { flex-shrink: 0; }
+.api-tokens-dialog p { margin: 0; }
+.api-token-form, .api-token-form label, .api-token-record-meta, .api-token-secret { display: grid; gap: 6px; }
+.api-token-form { gap: 12px; }
+.api-token-form input, .api-token-form select, .api-token-copy input { width: 100%; min-width: 0; padding: 7px; box-sizing: border-box; }
+.api-token-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.api-token-form > button { justify-self: start; }
+.api-token-secret { padding: 12px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 4px; }
+.api-token-copy { display: flex; gap: 8px; align-items: center; }
+.api-token-copy button { flex-shrink: 0; }
+.api-token-copy input { font-family: monospace; }
+.api-token-list { display: grid; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; }
+.api-token-record { display: flex; align-items: start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.api-token-record-meta { min-width: 0; overflow-wrap: anywhere; }
+.api-token-record-meta span, .api-token-record-meta small { color: var(--text-2); }
+.api-token-record-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; max-width: 200px; flex-shrink: 0; }
+.api-token-record-actions > span { width: 100%; text-align: right; }
+@media (max-width: 640px), (max-width: 900px) and (max-height: 500px) {
+  .api-tokens-dialog { position: fixed; inset: 0; width: 100%; max-width: none; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
+  .api-tokens-dialog > .modal-header, .api-tokens-dialog > .modal-footer { flex-shrink: 0; }
+  .api-tokens-dialog > .modal-header { padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+  .api-tokens-dialog > .modal-footer { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .api-tokens-dialog > .modal-body { flex: 1; min-height: 0; overscroll-behavior-y: contain; }
+  .api-tokens-dialog > * { padding-left: calc(16px + env(safe-area-inset-left, 0px)); padding-right: calc(16px + env(safe-area-inset-right, 0px)); }
+  .api-token-record { flex-wrap: wrap; }
+  .api-token-record-actions { max-width: none; }
+}

@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLOUD_USAGE, runCloudCommand } from './cloud-agent.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const URLS = process.env.WEBCAD_URL ? [process.env.WEBCAD_URL] : ['http://localhost:5173', 'http://localhost:4173'];
@@ -36,6 +37,8 @@ Live (the app must be open in a browser tab served by \`npm run dev\` or \`npm r
                                   export the open document; pdf / svg / dxf — a drawing (the active one by default)
   call <method> [json args…]      any window.webcad method
 
+${CLOUD_USAGE}
+
 Headless (no browser):
   build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f.stl] [--step f.step]
         [--pdf f.pdf] [--svg f.svg] [--dxf f.dxf] [--drawing "<name>"] [--lang ru|en] [--name "Doc name"]
@@ -44,7 +47,12 @@ Headless (no browser):
                                   a drawing of it (the active one, else the first; or --drawing); --lang — the
                                   language of its title block, section letters, callouts (default: the system's)
 
-Environment: WEBCAD_URL (default http://localhost:5173, then :4173)`;
+Environment: WEBCAD_URL (default http://localhost:5173, then :4173)
+  WEBCAD_CDP_URL=http://127.0.0.1:9222 (optional Chrome remote debugging endpoint; Node.js 22+)
+  WEBCAD_API_TOKEN or WEBCAD_API_TOKEN_FILE (personal token; cloud commands run without a browser)
+  Token mode: cloud status/list/mkdir/upload-file/download/sync-file <file.webcad.json> [--folder id]
+  upload-file: new copy by default; update only with --document id --expected-revision rev --expected-modified ms
+  sync-file: one safe two-way pass using <file>.cloud.json; concurrent local/cloud edits cause a conflict.`;
 
 function readJsonArg(a) {
   if (a === undefined) throw new Error('JSON argument expected');
@@ -80,6 +88,10 @@ async function post(base, path, body) {
 }
 
 async function server() {
+  if (process.env.WEBCAD_CDP_URL) {
+    const { cdpStatus } = await import('./webcad-cdp.mjs');
+    return cdpStatus(process.env.WEBCAD_CDP_URL);
+  }
   const errors = [];
   for (const base of URLS) {
     try {
@@ -95,6 +107,10 @@ async function server() {
 let TAB = process.env.WEBCAD_TAB;
 
 async function call(method, ...args) {
+  if (process.env.WEBCAD_CDP_URL) {
+    const { cdpCall } = await import('./webcad-cdp.mjs');
+    return cdpCall(process.env.WEBCAD_CDP_URL, TAB, method, args);
+  }
   const { base } = await server();
   const { status: code, json } = await post(base, 'rpc', { method, args, tab: TAB });
   if (code !== 200) {
@@ -153,6 +169,11 @@ async function main() {
       return out(USAGE);
     case 'status':
       return out(await server());
+    case 'cloud': {
+      const {readApiToken, runHeadlessCloudCommand} = await import('./cloud-http.mjs');
+      const token = readApiToken();
+      return token ? runHeadlessCloudCommand(args, {token, out}) : runCloudCommand(args, {call, out});
+    }
     case 'docs':
       return out(await call('documents'));
     case 'open':

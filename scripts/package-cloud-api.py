@@ -18,12 +18,13 @@ output = project / 'temp' / 'webcad-api.zip'
 if not (source / 'node_modules' / 'esbuild').is_dir():
     raise SystemExit('Run npm ci --ignore-scripts --prefix cloud/api (including devDependencies) first')
 application = ('index.js', 'index.mjs', 'probes.mjs', 'auth.mjs', 'cloud.mjs', 'cloud-store.mjs',
-               'cloud-storage.mjs', 'auth-store.mjs', 'auth-policy.mjs', 'yandex.mjs')
+               'cloud-storage.mjs', 'auth-store.mjs', 'auth-policy.mjs', 'yandex.mjs',
+               'newapi-token.mjs', 'newapi-token-store.mjs')
 output.parent.mkdir(parents=True, exist_ok=True)
 with TemporaryDirectory(prefix='cloud-api-package-', dir=output.parent) as work:
     staging = Path(work)
     subprocess.run([args.node, str(project / 'scripts' / 'bundle-cloud-vendor.mjs'), str(staging)], check=True)
-    for name in (*application, 'auth-schema.sql', 'cloud-schema.sql'):
+    for name in (*application, 'auth-schema.sql', 'cloud-schema.sql', 'newapi-token-schema.sql'):
         path = source / name
         if path.is_symlink():
             raise SystemExit(f'Unexpected symlink: {path}')

@@ -27,7 +27,7 @@ npm run agent -- run '[
   {"op":"extrude","depth":10},
   {"op":"fillet","edges":{"dir":"z"},"radius":3}
 ]'
-npm run agent -- shot /tmp/plate.png iso  # PNG графической области
+npm run agent -- shot temp/plate.png iso  # PNG графической области
 npm run agent -- run '[{"op":"setVariable","name":"w","value":60}]'
 ```
 
@@ -57,6 +57,97 @@ build <ops.json> [--doc in.webcad.json] [--out out.webcad.json] [--stl f] [--ste
 `run` применяет все операции **одним шагом отмены**. По умолчанию он атомарный: если какая-то
 операция не разобрана (ошибка запроса, нет фичи) или фича не построилась ядром, документ не
 меняется, а в отчёте есть `error` / `failed`. `--keep-failed` сохраняет результат с ошибками.
+
+## Облачные документы и токены {#cloud}
+
+Облачный HTTP API уже используется приложением. Агент может работать двумя способами:
+
+- **Без браузера:** персональный токен и команды `cloud`. Моделирование остаётся в `build`, затем готовый файл отправляется в облако.
+- **В авторизованной вкладке:** методы `window.webcad.cloud*`. Сессия остаётся в браузере. Для CLI на опубликованном сайте используется необязательный CDP-транспорт; обычный локальный мост не переносит вход с другого origin.
+
+### Режим без браузера
+
+Войдите на `https://cad.ya-erm.ru`, откройте меню аккаунта → **API-токены…**. Укажите название, права (чтение либо чтение/запись) и срок. По умолчанию90 дней, максимум365; до 20действующих токенов на аккаунт. Значение показывается только при выпуске; сохраните его в защищённом хранилище. Отзыв в этом же окне запрещает последующие API-запросы. Уже выданные ссылки на объекты действуют до своего истечения (до 10минут).
+
+CLI читает `WEBCAD_API_TOKEN` или файл из `WEBCAD_API_TOKEN_FILE`. Файл должен содержать только токен, иметь права 0600 и находиться вне репозитория. Не используйте здесь токен доски задач, OAuth client secret, ключи S3 или IAM. Значение не передаётся в аргументах команд и не выводится CLI. Если задан персональный токен, `cloud` выбирает самостоятельный режим независимо от CDP.
+
+```bash
+export WEBCAD_API_TOKEN_FILE="$HOME/.config/webcad/agent-token"
+npm run agent -- cloud status
+npm run agent -- cloud list
+npm run agent -- cloud mkdir "Детали"
+npm run agent -- build ops.json --out temp/plate.webcad.json
+npm run agent -- cloud upload-file temp/plate.webcad.json --folder CLOUD_FOLDER_ID
+npm run agent -- cloud download CLOUD_DOCUMENT_ID temp/downloaded.webcad.json
+npm run agent -- cloud sync-file temp/plate.webcad.json --folder CLOUD_FOLDER_ID
+```
+
+`upload-file` создаёт независимый облачный документ, сохраняя файл на диске. Повторное обновление существующего ID требует **всех трёх** параметров `--document ID --expected-revision REV --expected-modified MS` из свежего `cloud list`; изменение модели, имени или папки приводит к 409. Подмена свежими часами ради обхода конфликта допустима только по явной просьбе пользователя. Именованные версии и рабочие пространства входят в файл проекта. Поддерживаемая встроенная миниатюра PNG/JPEG/WebP до 1 МиБ отправляется отдельно; неподдерживаемая пропускается с `thumbnailSkipped`, сама модель загружается.
+
+`download` проверяет SHA-256, ограничения размера и gzip до записи. Существующий путь требует `--overwrite`; изменение файла во время запроса останавливает замену.
+
+`sync-file` — **один проход**, без фонового наблюдателя. При первой отправке создаёт рядом `<имя-файла>.cloud.json` с владельцем, ID, ревизией, временем и хешем локальных байтов, без секрета. Следующие вызовы:
+
+| Изменения | Действие |
+| --- | --- |
+| Нет | `action: "unchanged"` |
+| Только локальный файл | Отправка с записанной исходной ревизией |
+| Только облако | Скачивание с проверкой, что локальный файл не изменился в ходе запроса |
+| Обе стороны | Конфликт; файл и облачный документ не заменяются |
+
+Не удаляйте sidecar, чтобы продолжать ту же связь: без него следующий вызов создаёт новую облачную копию. `--folder` задаёт назначение только при первой синхронизации. Чужой аккаунт, удалённый облачный документ или облачная корзина останавливают синхронизацию. Для восстановления после конфликта сохраните обе версии отдельными файлами и согласуйте действие с пользователем.
+
+### Авторизованная вкладка
+
+Доступно на опубликованном сайте из console/browser automation; выбор нужной вкладки обязателен, если их несколько:
+
+```js
+await webcad.cloudStatus();
+await webcad.cloudList();
+await webcad.cloudUpload('local-document-id');
+await webcad.cloudUpload('local-document-id', { asCopy: true, folderId: 'cloud-folder-id' });
+await webcad.cloudDownload('cloud-document-id'); // {fileName,mime,base64}, без открытия и изменения локальной модели
+await webcad.cloudOpen('cloud-document-id');     // безопасная локальная копия и открытие
+await webcad.cloudUploadFile(projectJson, { folderId: 'cloud-folder-id' }); // отдельная копия в библиотеке
+await webcad.cloudCreateFolder('Детали', 'parent-cloud-folder-id');
+await webcad.cloudSync({ waitMs: 60000 });
+await webcad.cloudSync({ enabled: false });
+```
+
+Список и статусы не раскрывают ключи или подписанные S3-ссылки. `cloudUpload()` без ID отправляет открытый документ; имя принимается только при единственном совпадении. По умолчанию сохраняется облачная папка связанного документа; у нового воссоздаётся вложенная структура библиотеки. Для намеренной замены требуются вместе `expectedRevision` и `expectedModified`; `asCopy` с ними несовместим. Неудачная загрузка импортированного файла сохраняет локальную копию, привязанную к исходному аккаунту.
+
+`cloudSync` управляет существующей очередью с обычными ограничениями частоты. Без `enabled:true` выключенная синхронизация не включается. `waitMs` от 0 до 120000; `completed:false` означает ожидание, конфликт, ошибку или паузу. Проверяйте возвращённый статус: сам запрос не означает, что все документы уже отправлены. `cloudOpen` не открывает модель поверх редактируемого эскиза/диалога; завершите правку. Изменённые локальные варианты сохраняются.
+
+Для CLI через уже открытый Chrome используйте Node.js 22+ и явно настроенный локальный debugging endpoint браузера:
+
+```bash
+export WEBCAD_CDP_URL=http://127.0.0.1:9222
+npm run agent -- status
+npm run agent -- --tab TARGET_ID cloud list
+npm run agent -- --tab TARGET_ID cloud upload LOCAL_DOCUMENT_ID
+npm run agent -- --tab TARGET_ID cloud download CLOUD_DOCUMENT_ID temp/project.webcad.json
+npm run agent -- --tab TARGET_ID cloud sync --wait 60000
+```
+
+Браузер должен быть заранее запущен пользователем с remote debugging и отдельным профилем, а целевая вкладка — открыта и авторизована. CLI не запускает Chrome, не входит в аккаунт и не извлекает cookie. Не публикуйте debugging port в интернет; для удалённого браузера используйте локальный туннель. CDP ID из `status` отличается от ID обычного Vite-моста. На локальном origin production-вход обычно недоступен из-за настроек cookie/CORS — для облака выбирайте вкладку `https://cad.ya-erm.ru` либо персональный токен.
+
+### HTTP-контракт для самостоятельных клиентов
+
+Только `https://api.cad.ya-erm.ru/cloud/*`, `Authorization: Bearer <personal-token>`, без cookie и без Origin. Перенаправления с токеном запрещены. Не передавайте Authorization подписанным URL S3.
+
+| Метод / маршрут | Назначение / поля |
+| --- | --- |
+| `GET /cloud/list` | `{userId,folders,documents}`; чтение |
+| `POST /cloud/open` | `{id,expectedUserId}` → `{userId,document,url,thumbnailUrl}`; чтение |
+| `POST /cloud/folder` | `{id,name,parentId,expectedUserId}`; для изменения нужен `expectedModified`; запись |
+| `POST /cloud/prepare` | `{documentId,name,folderId,expectedRevision,expectedModified?,size,hash,thumbnailSize,thumbnailHash,expectedUserId}` → `{userId,uploadId,projectUrl,thumbnailUrl}`; запись |
+| `POST /cloud/commit` | `{uploadId,expectedUserId}` → `{document}`; после успешных PUT; запись |
+| `POST /cloud/document` | Обновление метаданных с `{id,revision,modified,folderId,name,expectedUserId}`; запись |
+
+Проект — gzip до 20МиБ (распакованный JSON до 100МиБ); миниатюра до 1 МиБ. Хеши — SHA-256 передаваемых байтов. `prepare` выдаёт временные PUT-ссылки; сначала передайте объекты, затем вызовите `commit`. Незавершённая загрузка не публикуется. Срок ссылок —10минут. Папки — метаданные, S3 LIST для обхода библиотеки не требуется. Ошибки 401/403 означают недействующий токен/недостаточные права, 409 — конфликт или смену аккаунта, 429 — приостановку из-за накопившихся снимков. Не обходите защиту автоматическим обновлением исходной ревизии.
+
+Выпуск, список и отзыв токенов (`/auth/tokens`, `/auth/tokens/revoke`) требуют обычную браузерную сессию; персональный токен не может выпустить другой токен. На сервере хранится только хеш, данные разделены по владельцу, истечение проверяется при запросе независимо от TTL.
+
 
 ## Соглашения
 

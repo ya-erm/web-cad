@@ -1,3 +1,5 @@
+import { apiAuthorization } from './newapi-token.mjs';
+import { createApiTokenStore } from './newapi-token-store.mjs';
 import { randomUUID } from 'node:crypto';
 import { createCloudStore, CloudError, retiredCandidates } from './cloud-store.mjs';
 import { createCloudStorage } from './cloud-storage.mjs';
@@ -47,8 +49,8 @@ export async function collectRetired(db, objects, user, documents, signal) {
   }
 }
 
-/** @param {{store?: typeof createCloudStore, storage?: typeof createCloudStorage}} dependencies */
-export function createCloudHandler({ store = createCloudStore, storage = createCloudStorage } = {}) {
+/** @param {{store?: typeof createCloudStore, storage?: typeof createCloudStorage, tokenStore?: typeof createApiTokenStore}} dependencies */
+export function createCloudHandler({ store = createCloudStore, storage = createCloudStorage, tokenStore = createApiTokenStore } = {}) {
   /** @param {import('./auth.mjs').AuthEvent & {body?: string, isBase64Encoded?: boolean}} event @param {{token?:{access_token?: string}}} context */
   return async (event, context) => {
     const origin = header(event, 'origin'),
@@ -68,16 +70,18 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
         return respond(403, { error: 'origin_not_allowed' });
       Object.assign(headers, {
         'Access-Control-Allow-Methods': expected,
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Max-Age': '600',
       });
       return { ...respond(204, {}), body: '' };
     }
     if (method !== expected) return respond(405, { error: 'method_not_allowed' });
-    if ((origin && origin !== APP_ORIGIN) || (method === 'POST' && origin !== APP_ORIGIN))
+    const authorization = apiAuthorization(event);
+    if (authorization.present && !authorization.token) return respond(401, { error: 'invalid_api_token' });
+    if ((origin && origin !== APP_ORIGIN) || (!authorization.present && method === 'POST' && origin !== APP_ORIGIN))
       return respond(403, { error: 'origin_not_allowed' });
     const secret = cookie(event, SESSION_COOKIE);
-    if (!secret) return respond(401, { error: 'sign_in_required' });
+    if (!authorization.present && !secret) return respond(401, { error: 'sign_in_required' });
     if (!context.token?.access_token) return respond(503, { error: 'service_credentials_unavailable' });
     /** @type {Awaited<ReturnType<typeof createCloudStore>>|undefined} */ let db;
     /** @type {ReturnType<typeof createCloudStorage>|undefined} */ let objects;
@@ -101,8 +105,23 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
           return respond(400, { error: 'invalid_request' });
       }
       const signal = AbortSignal.timeout(12000);
-      db = await store(process.env.YDB_CONNECTION_STRING ?? '', context.token.access_token, signal);
-      const user = await db.authenticate(hashSecret(secret));
+      let user;
+      if (authorization.token) {
+        const tokens = await tokenStore(process.env.YDB_CONNECTION_STRING ?? '', context.token.access_token, signal);
+        try {
+          const identity = await tokens.authenticate(authorization.token, Date.now());
+          if (!identity) return respond(401, { error: 'invalid_api_token' });
+          const scope = event.path === '/cloud/list' || event.path === '/cloud/open' ? 'read' : 'write';
+          if (!identity.scopes.includes(scope)) return respond(403, { error: 'insufficient_scope' });
+          user = identity.userId;
+        } finally {
+          await tokens.close();
+        }
+        db = await store(process.env.YDB_CONNECTION_STRING ?? '', context.token.access_token, signal);
+      } else {
+        db = await store(process.env.YDB_CONNECTION_STRING ?? '', context.token.access_token, signal);
+        user = await db.authenticate(hashSecret(/** @type {string} */ (secret)));
+      }
       if (!user) return respond(401, { error: 'sign_in_required' });
       if (input.expectedUserId !== undefined && input.expectedUserId !== user) return respond(409, { error: 'account_changed' });
       const objectStorage = storage(process.env.S3_BUCKET ?? '', context.token.access_token, signal);

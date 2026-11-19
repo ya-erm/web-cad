@@ -16,6 +16,11 @@ describe('private cloud API', () => {
     const result = await handler({ httpMethod: 'GET', path: '/health' }, {});
     expect(result.statusCode).toBe(200);
   });
+  it('routes browser token management through its authentication checks', async () => {
+    const { handle } = setup();
+    expect((await handle({ path: '/auth/tokens', httpMethod: 'GET' }, {})).statusCode).toBe(401);
+    expect((await handle({ path: '/auth/tokens/revoke', httpMethod: 'POST' }, {})).statusCode).toBe(403);
+  });
   it('liveness does not depend on cloud credentials or availability', async () => {
     const { handle, settings, ydb, storage } = setup();
     const result = await handle({ httpMethod: 'GET', path: '/health' }, {});
@@ -38,7 +43,9 @@ describe('private cloud API', () => {
   it('fails closed without service credentials or valid configuration', async () => {
     const { handle, settings, ydb } = setup();
     expect((await handle({ httpMethod: 'GET', path: '/ready' }, {})).statusCode).toBe(503);
-    settings.mockImplementation(() => { throw new Error('private configuration'); });
+    settings.mockImplementation(() => {
+      throw new Error('private configuration');
+    });
     const result = await handle({ httpMethod: 'GET', path: '/ready' }, { token: { access_token: 'secret' } });
     expect(result.statusCode).toBe(503);
     expect(result.body).not.toContain('private configuration');

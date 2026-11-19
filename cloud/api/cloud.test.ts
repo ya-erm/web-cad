@@ -24,8 +24,10 @@ function setup() {
     close: vi.fn(),
   };
   const store = vi.fn(async () => db);
+  const tokens = { authenticate: vi.fn(async () => ({ userId: 'owner', scopes: ['read', 'write'] })), close: vi.fn(async () => {}) };
+  const tokenStore = vi.fn(async () => tokens);
   // The mock models only the fields used by each test.
-  const handle = createCloudHandler({ store: store as never, storage: (() => objects) as never });
+  const handle = createCloudHandler({ store: store as never, storage: (() => objects) as never, tokenStore: tokenStore as never });
   const request = (path: string, body?: object, origin = APP_ORIGIN) =>
     handle(
       {
@@ -36,7 +38,7 @@ function setup() {
       },
       ctx,
     );
-  return { db, objects, store, handle, request };
+  return { db, objects, store, tokens, tokenStore, handle, request };
 }
 describe('cloud API ownership and publication', () => {
   it('rejects anonymous requests before touching data', async () => {
@@ -215,5 +217,85 @@ describe('automatic upload ownership and cleanup budget', () => {
     expect(JSON.parse(response.body).documents[0].retired).toBeUndefined();
     expect(s.db.cleaned).not.toHaveBeenCalled();
     expect(response.body).not.toContain('secret');
+  });
+});
+
+const bearerToken = 'wcad_pat_v1.aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.' + 'a'.repeat(43);
+function bearerEvent(path: string, body?: object, authorization = 'Bearer ' + bearerToken) {
+  return {
+    path,
+    httpMethod: body ? 'POST' : 'GET',
+    headers: { Authorization: authorization, 'Content-Type': 'application/json', Cookie: `${SESSION_COOKIE}=${'a'.repeat(43)}` },
+    body: body ? JSON.stringify(body) : undefined,
+  };
+}
+describe('headless scoped bearer cloud access', () => {
+  it('uses only the token owner without requiring Origin or trusting cookies/body owner', async () => {
+    const s = setup();
+    const result = await s.handle(bearerEvent('/cloud/list'), ctx);
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body).userId).toBe('owner');
+    expect(s.db.list).toHaveBeenCalledWith('owner');
+    expect(s.db.authenticate).not.toHaveBeenCalled();
+    expect(s.tokens.authenticate).toHaveBeenCalledWith(bearerToken, expect.any(Number));
+    expect(s.tokens.close).toHaveBeenCalledOnce();
+    expect((await s.handle(bearerEvent('/cloud/folder', { id: 'f', name: 'Parts', parentId: '', userId: 'victim' }), ctx)).statusCode).toBe(
+      200,
+    );
+    expect(s.db.folder.mock.calls[0][0]).toBe('owner');
+  });
+  it.each(['/cloud/prepare', '/cloud/commit', '/cloud/folder', '/cloud/document'])(
+    'blocks read-only token on %s before cloud data/storage access',
+    async (path) => {
+      const s = setup();
+      s.tokens.authenticate.mockResolvedValue({ userId: 'owner', scopes: ['read'] });
+      const result = await s.handle(bearerEvent(path, {}), ctx);
+      expect(result.statusCode).toBe(403);
+      expect(JSON.parse(result.body).error).toBe('insufficient_scope');
+      expect(s.store).not.toHaveBeenCalled();
+      expect(s.objects.prepare).not.toHaveBeenCalled();
+      expect(s.objects.seal).not.toHaveBeenCalled();
+      expect(s.db.folder).not.toHaveBeenCalled();
+    },
+  );
+  it('allows read-only list and POST open but keeps cross-account reads hidden', async () => {
+    const s = setup();
+    s.tokens.authenticate.mockResolvedValue({ userId: 'owner', scopes: ['read'] });
+    expect((await s.handle(bearerEvent('/cloud/list'), ctx)).statusCode).toBe(200);
+    expect((await s.handle(bearerEvent('/cloud/open', { id: 'foreign' }), ctx)).statusCode).toBe(404);
+    expect(s.db.document).toHaveBeenCalledWith('owner', 'foreign');
+    expect(s.objects.download).not.toHaveBeenCalled();
+    s.db.document.mockResolvedValue({ id: 'owned', thumbnailSize: 0 } as never);
+    expect((await s.handle(bearerEvent('/cloud/open', { id: 'owned' }), ctx)).statusCode).toBe(200);
+    expect(s.objects.download).toHaveBeenCalledWith('owner', expect.objectContaining({ id: 'owned' }));
+  });
+  it.each(['', 'Basic anything', 'Bearer malformed'])('never falls back to valid cookies for invalid Authorization %s', async (value) => {
+    const s = setup();
+    expect((await s.handle(bearerEvent('/cloud/list', undefined, value), ctx)).statusCode).toBe(401);
+    expect(s.store).not.toHaveBeenCalled();
+    expect(s.tokenStore).not.toHaveBeenCalled();
+  });
+  it('rejects expired/revoked/wrong-secret tokens without session fallback', async () => {
+    const s = setup();
+    s.tokens.authenticate.mockResolvedValue(null as never);
+    expect((await s.handle(bearerEvent('/cloud/list'), ctx)).statusCode).toBe(401);
+    expect(s.store).not.toHaveBeenCalled();
+    expect(s.db.authenticate).not.toHaveBeenCalled();
+    expect(s.tokens.close).toHaveBeenCalledOnce();
+  });
+  it('applies expected account guard to bearer mutations before writing', async () => {
+    const s = setup();
+    expect(
+      (await s.handle(bearerEvent('/cloud/folder', { id: 'f', name: 'Parts', parentId: '', expectedUserId: 'different' }), ctx)).statusCode,
+    ).toBe(409);
+    expect(s.db.folder).not.toHaveBeenCalled();
+  });
+  it('retains Origin protections for browser bearer calls and cookie writes', async () => {
+    const s = setup(),
+      event = bearerEvent('/cloud/list');
+    event.headers = { ...event.headers, Origin: 'https://evil.test' } as typeof event.headers;
+    expect((await s.handle(event, ctx)).statusCode).toBe(403);
+    expect(s.tokenStore).not.toHaveBeenCalled();
+    expect((await s.request('/cloud/folder', { id: 'f', name: 'Parts', parentId: '' }, '')).statusCode).toBe(403);
   });
 });

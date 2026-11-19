@@ -2,6 +2,7 @@
 // (vite.config.ts) that lets command-line agents call it: `npm run agent -- run ops.json`.
 
 import type { Draft } from 'immer';
+import * as agentCloud from './cloud';
 import type { CadDocument, ConfigInput, DocTab, DrawingTab, Feature, PartStudioTab } from '../core/types';
 import { browserSourceOf } from '../drawing/DrawingEditor';
 import { drawSheet, sheetFile } from '../drawing/drawingModel';
@@ -206,6 +207,13 @@ type ViewName = (typeof VIEWS)[number] | 'fit';
 
 const HELP = `WebCAD agent API (window.webcad, or \`npm run agent -- call <method> <json args>\` via the dev server).
 Methods:
+  cloudStatus() / cloudList()       account/queue status; cloud folders and documents (no credentials or signed URLs)
+  cloudUpload(idOrName?, options?)   upload local document; options: folderId, asCopy, explicit revision+modified baseline
+  cloudUploadFile(project, options?) import a separate library copy and upload it; options: folderId
+  cloudDownload(id)                 readonly project file {fileName,mime,base64}, including named versions
+  cloudOpen(id)                     safely cache the cloud document and open it
+  cloudSync({enabled?,retry?,waitMs?}) request the normal throttled queue; completed is explicit
+  cloudCreateFolder(name,parentId?) create a cloud folder
   documents()                       list documents in this browser
   open(idOrName) / create(name)     open or create a document (shows it in the app)
   state()                           features (status), variables, parts (bbox, volume), sketch frames — or, on an
@@ -232,6 +240,18 @@ Ops reference with examples: docs/agent-api.md in the WebCAD repository.`;
 
 export const webcadApi = {
   version: 1,
+
+  ...agentCloud,
+  cloudUpload(idOrName: string | null = null, options: agentCloud.CloudUploadOptions = {}) {
+    return agentCloud.cloudUpload(idOrName ?? undefined, options);
+  },
+  async cloudOpen(id: string) {
+    if (useEditor.getState().editing) throw new AgentError('Finish the feature dialog or sketch before opening a cloud document.');
+    const result = await agentCloud.cloudOpen(id);
+    location.hash = `#/doc/${result.localId}`;
+    await waitFor(() => useDoc.getState().doc?.id === result.localId, 'the cloud document to open');
+    return result;
+  },
 
   help(): string {
     return HELP;

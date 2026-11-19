@@ -9,6 +9,12 @@ const fixtures = vi.hoisted(() => ({
   trash: vi.fn(),
   restore: vi.fn(),
   put: vi.fn(),
+  add: vi.fn(),
+  read: vi.fn(),
+  loadDoc: vi.fn(),
+  importDoc: vi.fn(),
+  importVersions: vi.fn(),
+  memory: null as { id: string; modified: number } | null,
 }));
 vi.mock('./uploadProgress', () => ({ putCloudObject: fixtures.put }));
 vi.mock('../store/persistence', () => ({
@@ -16,24 +22,28 @@ vi.mock('../store/persistence', () => ({
   markCloudCopy: fixtures.mark,
   listDocuments: fixtures.list,
   compareCloudSummary: fixtures.compare,
+  addDocumentIfAbsent: fixtures.add,
+  loadDocument: fixtures.loadDoc,
 }));
 vi.mock('../store/docStore', () => ({
   useDoc: {
     getState: () => ({
-      doc: { id: 'other-open-document' },
+      doc: fixtures.memory ?? { id: 'other-open-document' },
+      saving: !!fixtures.memory,
       flushSave: fixtures.flush,
       loadList: fixtures.load,
       trashDocument: fixtures.trash,
       restoreDocument: fixtures.restore,
+      importDocument: fixtures.importDoc,
     }),
   },
 }));
-vi.mock('../store/folderStore', () => ({ projectText: JSON.stringify, readProject: JSON.parse }));
+vi.mock('../store/folderStore', () => ({ projectText: JSON.stringify, readProject: fixtures.read }));
 vi.mock('../store/versions', () => ({
   fileVersions: vi.fn(),
-  importVersions: vi.fn(),
-  copiedVersionIds: vi.fn(),
-  withCopiedVersions: vi.fn(),
+  importVersions: fixtures.importVersions,
+  copiedVersionIds: () => new Map(),
+  withCopiedVersions: (doc: unknown) => doc,
 }));
 vi.mock('./syncState', () => ({ useCloudSync: { getState: () => ({ accountId: 'u' }) } }));
 vi.mock('./uploadLock', () => ({
@@ -45,7 +55,7 @@ vi.mock('./uploadLock', () => ({
   ) => fn(o?.signal),
   recordCloudUploadTime: vi.fn(),
 }));
-import { uploadCloudDocument, setDocumentTrash } from './client';
+import { uploadCloudDocument, setDocumentTrash, openCloudDocument } from './client';
 const options = { automatic: true, expectedUserId: 'u' };
 let storage: Map<string, string>, fetcher: ReturnType<typeof vi.fn>;
 const json = (value: unknown, status = 200) =>
@@ -69,6 +79,7 @@ function successfulCommit() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  fixtures.memory = null;
   storage = new Map();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -84,6 +95,11 @@ beforeEach(() => {
   });
   fixtures.list.mockResolvedValue([{ id: 'a', modified: 101 }]);
   fixtures.load.mockResolvedValue(undefined);
+  fixtures.add.mockResolvedValue(false);
+  fixtures.importDoc.mockResolvedValue('new-copy');
+  fixtures.loadDoc.mockResolvedValue({ modified: 100 });
+  fixtures.importVersions.mockResolvedValue(0);
+  fixtures.read.mockImplementation((doc) => ({ doc, versions: [] }));
 });
 describe('snapshot upload and lost acknowledgements', () => {
   it('acknowledges the saved snapshot while edits during PUT stay dirty; never flushes another open document', async () => {
@@ -207,5 +223,46 @@ describe('snapshot upload and lost acknowledgements', () => {
     expect(completed.loaded).toBe(completed.total);
     expect(completed.total).toBeGreaterThan(0);
     expect(fixtures.mark).toHaveBeenCalledWith('a', expect.objectContaining({ savedModified: 100, savedVersionsModified: 99 }));
+  });
+  it.each(['model', 'version', 'memory'] as const)('guarded open keeps a dirty %s cache and materializes a separate copy', async (kind) => {
+    const raw = { id: 'a', name: 'Model', modified: 100, tabs: [] };
+    if (kind === 'memory') fixtures.memory = { id: 'a', modified: 101 };
+    const packed = await new Response(new Blob([JSON.stringify(raw)]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await packed.arrayBuffer()))]
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
+    fixtures.list.mockResolvedValue([
+      {
+        id: 'a',
+        name: 'Model',
+        modified: 100,
+        versionsModified: kind === 'version' ? 1 : 0,
+        cloudSource: { userId: 'u', documentId: 'a', revision: 'r2', savedModified: kind === 'model' ? 99 : 100, savedVersionsModified: 0 },
+      },
+    ]);
+    fetcher.mockImplementation(async (url: string) =>
+      url.endsWith('/open')
+        ? json({ userId: 'u', document: { ...document, hash }, url: 'https://s3.invalid/project', thumbnailUrl: null })
+        : new Response(packed),
+    );
+    const id = await openCloudDocument('a', { expectedUserId: 'u' });
+    expect(id).toBe('new-copy');
+    expect(fixtures.importDoc).toHaveBeenCalled();
+    expect(fixtures.mark.mock.calls.every(([id]) => id === 'new-copy')).toBe(true);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).expectedUserId).toBe('u');
+  });
+  it('does not materialize a signed download after its account epoch is aborted', async () => {
+    const controller = new AbortController();
+    fetcher.mockResolvedValue(json({ userId: 'other', document, url: 'https://s3.invalid/project', thumbnailUrl: null }));
+    await expect(openCloudDocument('a', { expectedUserId: 'u', signal: controller.signal })).rejects.toMatchObject({
+      code: 'account_changed',
+    });
+    expect(fixtures.add).not.toHaveBeenCalled();
+    fetcher.mockImplementation(async () => {
+      controller.abort();
+      return json({ userId: 'u', document, url: 'https://s3.invalid/project', thumbnailUrl: null });
+    });
+    await expect(openCloudDocument('a', { expectedUserId: 'u', signal: controller.signal })).rejects.toBeDefined();
+    expect(fixtures.add).not.toHaveBeenCalled();
   });
 });

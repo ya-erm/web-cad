@@ -321,6 +321,80 @@
           "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
         }
       }
+    },
+    "/auth/tokens": {
+      "get": {
+        "operationId": "auth_tokens_get",
+        "responses": {
+          "200": {
+            "description": "Personal API token response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "post": {
+        "operationId": "auth_tokens_post",
+        "responses": {
+          "200": {
+            "description": "Personal API token response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "auth_tokens_options",
+        "responses": {
+          "204": {
+            "description": "Personal API token response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
+    },
+    "/auth/tokens/revoke": {
+      "post": {
+        "operationId": "auth_tokens_revoke_post",
+        "responses": {
+          "200": {
+            "description": "Personal API token response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      },
+      "options": {
+        "operationId": "auth_tokens_revoke_options",
+        "responses": {
+          "204": {
+            "description": "Personal API token response"
+          }
+        },
+        "x-yc-apigateway-integration": {
+          "type": "cloud_functions",
+          "function_id": "d4ec3d7jtmn3ua7pao9e",
+          "tag": "cloud-v1",
+          "service_account_id": "__GATEWAY_SERVICE_ACCOUNT_ID__"
+        }
+      }
     }
   }
 }

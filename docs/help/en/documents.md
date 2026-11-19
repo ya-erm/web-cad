@@ -56,6 +56,8 @@ A session lasts 180 days and renews when you use the app, at most once per day.
 After 180 days of inactivity you need to sign in again. Cancelling on the Yandex
 page returns to WebCAD with a “Sign-in was cancelled” message.
 
+The account menu → **API tokens…** issues time-limited access for an agent without a browser: read only or read/write. The value is shown once; tokens can be revoked. See [Agent API](agent-api#cloud).
+
 ## Trash and recovery {#trash}
 
 1. Click **Trash** on the left of the Documents page.

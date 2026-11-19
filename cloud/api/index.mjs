@@ -1,6 +1,7 @@
 import { checkStorage, checkYdb } from './probes.mjs';
 import { CLOUD_ROUTES, cloudHandler } from './cloud.mjs';
 import { AUTH_ROUTES, authHandler } from './auth.mjs';
+import { API_TOKEN_ROUTES, apiTokenHandler } from './newapi-token.mjs';
 
 /** @typedef {import('./auth.mjs').AuthEvent} HttpEvent */
 /** @typedef {{token?: {access_token?: string}}} FunctionContext */
@@ -29,12 +30,16 @@ export function readSettings(env = process.env) {
  *   log?: (entry: Record<string, unknown>) => void
  * }} dependencies
  */
-export function createHandler({ settings = readSettings, ydb = checkYdb, storage = checkStorage,
+export function createHandler({
+  settings = readSettings,
+  ydb = checkYdb,
+  storage = checkStorage,
   log = (entry) => console.info(JSON.stringify(entry)),
 } = {}) {
   /** @param {HttpEvent} event @param {FunctionContext} context */
   return async (event, context) => {
     const path = event.path;
+    if (API_TOKEN_ROUTES.has(path ?? '')) return apiTokenHandler(event, context);
     if (CLOUD_ROUTES.has(path ?? '')) return cloudHandler(event, context);
     if (AUTH_ROUTES.has(path ?? '')) return authHandler(event, context);
     if (path !== '/health' && path !== '/ready') return response(404, { error: 'not_found' });
@@ -51,18 +56,14 @@ export function createHandler({ settings = readSettings, ydb = checkYdb, storage
       return response(503, { error: 'service_configuration_invalid' });
     }
     const signal = AbortSignal.timeout(5000);
-    const results = await Promise.allSettled([
-      ydb(config.ydbConnectionString, token, signal),
-      storage(config.bucket, token, signal),
-    ]);
+    const results = await Promise.allSettled([ydb(config.ydbConnectionString, token, signal), storage(config.bucket, token, signal)]);
     const checks = {
       ydb: results[0].status === 'fulfilled' ? 'ok' : 'unavailable',
       storage: results[1].status === 'fulfilled' ? 'ok' : 'unavailable',
     };
     const ok = checks.ydb === 'ok' && checks.storage === 'ok';
     // SDK errors may contain tokens, endpoints or object names. Never return or log them.
-    log({ level: ok ? 'INFO' : 'WARN', message: 'Readiness check',
-      checks, duration_ms: Math.round(performance.now() - started) });
+    log({ level: ok ? 'INFO' : 'WARN', message: 'Readiness check', checks, duration_ms: Math.round(performance.now() - started) });
     return response(ok ? 200 : 503, { status: ok ? 'ok' : 'unavailable', checks });
   };
 }

@@ -32,6 +32,23 @@ npm run agent -- export pdf plate.pdf   # the drawing as a PDF
 
 On an open page, the same methods are available in the console as `window.webcad`.
 
+## Cloud access and API tokens {#cloud}
+
+Open the account menu → **API tokens…** to issue a token for an agent running without a browser: read only or read/write. The default lifetime is90 days, the maximum365 days, with up to 20active tokens. The value is shown only when issued; keep it in a protected store outside the project. After closing the dialog it cannot be retrieved again; issue another token instead. Revocation requires confirmation. Previously issued file URLs can remain valid for up to 10 minutes after revocation.
+
+The CLI reads `WEBCAD_API_TOKEN` or a private `WEBCAD_API_TOKEN_FILE` with permissions 0600:
+
+```bash
+npm run agent -- cloud list
+npm run agent -- cloud upload-file temp/model.webcad.json
+npm run agent -- cloud download CLOUD_ID temp/downloaded.webcad.json
+npm run agent -- cloud sync-file temp/model.webcad.json
+```
+
+`upload-file` creates a separate cloud copy. `download` requires `--overwrite` to replace an existing file. `sync-file` performs one pass: it stores the connection in an adjacent `.cloud.json`, uploads local-only changes or downloads cloud-only changes, and stops without replacing data when both sides changed. Named versions are included in the project. Keep the connection file to continue updating the same cloud document.
+
+An authenticated tab exposes `webcad.cloudList()`, `cloudUpload()`, `cloudDownload()`, `cloudOpen()` and `cloudSync()`. The session stays in the browser. The CLI can attach to a selected production tab through an explicitly configured CDP endpoint (Node.js 22+). The complete contract, commands and conflict rules are in `docs/agent-api.md`.
+
 ## For developers {#reference}
 
 The full reference of operations, queries and the report format is the `docs/agent-api.md` file in the WebCAD repository. It is intended for developers and agents, so it is not part of this help.
