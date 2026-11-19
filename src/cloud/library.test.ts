@@ -62,6 +62,8 @@ describe('one managed document across browser and cloud', () => {
     const local = { ...doc('same'), cloudSource: { userId: 'user', documentId: 'same', revision: 'r1', savedModified: 2 } };
     const entry = unifiedLibrary([], [local], { userId: 'user', folders: [], documents: [cloud('same')] }).documents[0];
     expect(libraryDocumentStatus(entry)).toBe('Saved in cloud');
+    entry.locals = [{ ...local, versionsModified: 3 }];
+    expect(libraryDocumentStatus(entry)).toBe('Unsaved cloud changes');
     entry.locals = [{ ...local, modified: 3 }];
     expect(libraryDocumentStatus(entry)).toBe('Unsaved cloud changes');
     entry.cloud = { ...entry.cloud!, revision: 'r2' };
@@ -70,13 +72,19 @@ describe('one managed document across browser and cloud', () => {
 });
 
 describe('logical document trash', () => {
-  it('hides a remote trashed document and all variants from the active library', () => {
-    const local = doc('logical'),
-      copy = { ...doc('copy'), cloudSource: { userId: 'user', documentId: 'logical', revision: 'r1' } };
+  it('hides a remote trashed document and clean variants from the active library', () => {
+    const local = { ...doc('logical'), cloudSource: { userId: 'user', documentId: 'logical', revision: 'r1', savedModified: 2 } },
+      copy = { ...doc('copy'), cloudSource: { userId: 'user', documentId: 'logical', revision: 'r1', savedModified: 2 } };
     const remote: CloudList = { userId: 'user', folders: [], documents: [{ ...cloud('logical'), trashed: 100 }] };
     expect(unifiedLibrary([], [local, copy], remote).documents).toHaveLength(0);
     expect(unifiedLibrary([], [local, copy], remote, true).documents[0].locals).toHaveLength(2);
     expect(unifiedLibrary([], [], remote, true).documents).toHaveLength(1);
+  });
+  it('keeps unsynced local work visible when another device trashed the cloud copy', () => {
+    const local = { ...doc('copy'), modified: 3, cloudSource: { userId: 'user', documentId: 'logical', revision: 'r1', savedModified: 2 } };
+    const remote: CloudList = { userId: 'user', folders: [], documents: [{ ...cloud('logical'), trashed: 100 }] };
+    expect(unifiedLibrary([], [local], remote).documents[0].locals[0].id).toBe('copy');
+    expect(unifiedLibrary([], [local], remote, true).documents).toHaveLength(1);
   });
   it('shows local trash offline and respects an explicitly restored cloud document', () => {
     const local = { ...doc('logical'), trashed: 100 };

@@ -241,10 +241,7 @@ export type ViewRef = SelRef & { cut?: true };
 
 export type StdPlane = 'top' | 'front' | 'right';
 
-export type PlaneRef =
-  | { kind: 'std'; name: StdPlane }
-  | { kind: 'feature'; featureId: string }
-  | { kind: 'face'; ref: SelRef };
+export type PlaneRef = { kind: 'std'; name: StdPlane } | { kind: 'feature'; featureId: string } | { kind: 'face'; ref: SelRef };
 
 /** Orthonormal frame of a plane in world coordinates. */
 export interface PlaneFrame {
@@ -1040,7 +1037,8 @@ export interface AssemblyInstance {
 }
 
 /** Onshape mate types: degrees of freedom left between the two mate connectors. */
-export type AssemblyMateType = 'fastened' | 'revolute' | 'slider' | 'cylindrical' | 'planar' | 'ball' | 'parallel' | 'pinSlot' | 'tangent' | 'width';
+export type AssemblyMateType =
+  'fastened' | 'revolute' | 'slider' | 'cylindrical' | 'planar' | 'ball' | 'parallel' | 'pinSlot' | 'tangent' | 'width';
 
 /** Where a mate attaches on an instance: an explicit mate connector of its part, or an implicit one on its geometry. */
 export type MateConnectorRef = { kind: 'connector'; featureId: string } | { kind: 'face' | 'edge' | 'vertex'; index: number };
@@ -1180,7 +1178,18 @@ export interface Workspace {
 export interface DocumentSummary {
   /** Folder in the browser library (not a path on disk). */
   folderId?: string;
-  cloudSource?: {userId: string; documentId: string; revision: string; savedModified?:number; cloudModified?:number};
+  cloudSource?: {
+    userId: string;
+    documentId: string;
+    revision: string;
+    savedModified?: number;
+    cloudModified?: number;
+    savedName?: string;
+    savedFolderId?: string;
+    savedVersionsModified?: number;
+  };
+  /** Named versions/workspaces changed independently of the model. */
+  versionsModified?: number;
   id: string;
   name: string;
   created: number;

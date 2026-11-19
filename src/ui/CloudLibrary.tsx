@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
+import { useCloudSync } from '../cloud/syncState';
+import { dirtyDocument } from '../cloud/syncCore';
 import { documentTime } from './documentTime';
 import { Icon } from './icons';
 import { createPortal } from 'react-dom';
@@ -11,7 +13,7 @@ import type { ContextMenuItem } from '../store/editorStore';
 import { folderTrail, validateLibraryChange, type LibraryFolder } from '../store/library';
 import { useDoc } from '../store/docStore';
 import { useFolder } from '../store/folderStore';
-import { markCloudCopy, changeLibrary, rememberLibraryFolders, listLibraryFolders, setTrashed } from '../store/persistence';
+import { markCloudCopy, changeLibrary, rememberLibraryFolders, listLibraryFolders, compareCloudSummary } from '../store/persistence';
 import {
   CloudFailure,
   listCloud,
@@ -90,9 +92,50 @@ export function CloudLibrary({
   const epoch = useRef(0),
     working = useRef(false),
     previousTrash = useRef(trash);
+  const deferredRemote = useRef<CloudList | null>(null);
+  const knownAccount = useRef(Boolean(useCloudSync.getState().accountId));
   const browserDocs = localDocs.filter((d) => !diskLinks[d.id] || Boolean(d.trashed));
   const view = unifiedLibrary(localFolders, browserDocs, data, trash);
   const current = view.folders.some((f) => f.id === path) ? path : '';
+  const applyRemote = async (remote: CloudList, folders: LibraryFolder[], request: number) => {
+    if (request !== epoch.current) return;
+    if (useCloudSync.getState().accountId !== remote.userId) {
+      // A first metadata response may beat the profile check, especially with auto sync disabled.
+      if (!knownAccount.current && !useCloudSync.getState().accountId) deferredRemote.current = remote;
+      return;
+    }
+    const allowed = () => request === epoch.current && useCloudSync.getState().accountId === remote.userId;
+    const local = useDoc.getState().docs.filter((d) => !useFolder.getState().links[d.id]);
+    const merged = unifiedLibrary(folders, local, remote);
+    for (const summary of local) {
+      if (!allowed()) return;
+      const source = summary.cloudSource;
+      if (!source || source.userId !== remote.userId) continue;
+      const cloud = remote.documents.find((d) => d.id === source.documentId);
+      if (!cloud || (source.cloudModified ?? 0) > cloud.modified) continue;
+      const patch: Partial<typeof summary> = {};
+      if (Boolean(summary.trashed) !== Boolean(cloud.trashed) && (!cloud.trashed || !dirtyDocument(summary))) patch.trashed = cloud.trashed;
+      if (!dirtyDocument(summary)) {
+        const location = merged.documents.find((d) => d.cloud?.id === cloud.id)?.folderId;
+        if (location !== undefined && location !== (summary.folderId ?? '')) {
+          patch.folderId = location;
+          if (source.savedFolderId !== undefined) patch.cloudSource = { ...source, savedFolderId: location };
+        }
+      }
+      if (Object.keys(patch).length)
+        await compareCloudSummary(summary, patch, () => allowed() && (!patch.trashed || useDoc.getState().doc?.id !== summary.id));
+    }
+    if (!allowed()) return;
+    const mirrored = merged.folders.map(({ cloudId, ...folder }) => ({
+      ...folder,
+      ...(cloudId ? { cloudSource: { userId: remote.userId, folderId: cloudId } } : {}),
+    }));
+    await rememberLibraryFolders(mirrored, {}, allowed);
+    if (!allowed()) return;
+    setData(remote);
+    setLocalFolders(mirrored);
+    await useDoc.getState().loadList();
+  };
   const refresh = async () => {
     const request = ++epoch.current;
     setBusy(true);
@@ -104,23 +147,7 @@ export function CloudLibrary({
     try {
       const remote = await listCloud();
       if (request !== epoch.current) return;
-      const local = useDoc.getState().docs.filter((d) => !useFolder.getState().links[d.id]);
-      for (const d of local) {
-        const remoteDoc = remote.documents.find((r) => r.id === d.cloudSource?.documentId && d.cloudSource.userId === remote.userId);
-        if (remoteDoc && Boolean(d.trashed) !== Boolean(remoteDoc.trashed)) await setTrashed(d.id, remoteDoc.trashed ?? null);
-      }
-      const merged = unifiedLibrary(folders, local, remote),
-        locations: Record<string, string> = {};
-      for (const d of merged.documents) if (d.cloud) for (const local of d.locals) locations[local.id] = d.folderId;
-      const mirrored = merged.folders.map(({ cloudId, ...f }) => ({
-        ...f,
-        ...(cloudId ? { cloudSource: { userId: remote.userId, folderId: cloudId } } : {}),
-      }));
-      await rememberLibraryFolders(mirrored, locations);
-      if (request !== epoch.current) return;
-      setData(remote);
-      setLocalFolders(mirrored);
-      await useDoc.getState().loadList();
+      await applyRemote(remote, folders, request);
     } catch (e) {
       if (request !== epoch.current) return;
       if (e instanceof CloudFailure && e.status === 401) setData(null);
@@ -135,10 +162,44 @@ export function CloudLibrary({
       void refresh();
     };
     void refresh();
+    const synchronized = (event: Event) => {
+      const remote = (event as CustomEvent<CloudList>).detail;
+      if (!remote || remote.userId !== useCloudSync.getState().accountId) return;
+      const request = ++epoch.current;
+      void (async () => {
+        await useDoc.getState().loadList();
+        const folders = await listLibraryFolders();
+        await applyRemote(remote, folders, request);
+      })()
+        .catch((error) => {
+          if (request === epoch.current) setError(errorText(error));
+        })
+        .finally(() => {
+          if (request === epoch.current && !working.current) setBusy(false);
+        });
+    };
+    const accountChanged = useCloudSync.subscribe((next, previous) => {
+      if (next.accountId === previous.accountId) return;
+      epoch.current++;
+      if (!next.accountId) {
+        deferredRemote.current = null;
+        setData(null);
+        return;
+      }
+      knownAccount.current = true;
+      setData((current) => (current?.userId === next.accountId ? current : null));
+      const pending = deferredRemote.current;
+      deferredRemote.current = null;
+      if (pending?.userId === next.accountId) synchronized(new CustomEvent('webcad:cloud-changed', { detail: pending }));
+      else void refresh();
+    });
     window.addEventListener('webcad:account-changed', changed);
+    window.addEventListener('webcad:cloud-changed', synchronized);
     return () => {
       epoch.current++;
+      accountChanged();
       window.removeEventListener('webcad:account-changed', changed);
+      window.removeEventListener('webcad:cloud-changed', synchronized);
     };
   }, []);
   useEffect(() => {
@@ -758,7 +819,7 @@ export function CloudDirectUpload({
         if (doc.cloudSource && doc.cloudSource.userId !== data.userId) throw new Error('Connect to organise cloud documents.');
         const existing = data.documents.find((d) => d.id === (doc.cloudSource?.documentId ?? doc.id));
         const target = existing?.folderId ?? (await uploadFolders(folders, data).ensureTarget(doc.folderId ?? ''));
-        await uploadCloudDocument(doc, target, false, undefined, undefined, { onProgress: setProgress });
+        await uploadCloudDocument(doc, target, false, undefined, undefined, { onProgress: setProgress, expectedUserId: data.userId });
         onComplete(doc.folderId ?? '');
         onClose();
       } catch (e) {
@@ -868,6 +929,16 @@ export function CloudUploadDialog({
       })
       .catch((e) => setError(errorText(e)));
   }, []);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) onClose();
+    };
+    document.addEventListener('keydown', escape, true);
+    return () => document.removeEventListener('keydown', escape, true);
+  }, [busy, onClose]);
   const needsReplacement =
     !!data &&
     docs.some(
@@ -915,7 +986,7 @@ export function CloudUploadDialog({
           copy,
           replaceExisting ? existing?.revision : undefined,
           replaceExisting ? existing?.modified : undefined,
-          { onProgress: setProgress },
+          { onProgress: setProgress, expectedUserId: data.userId },
         );
         done.push(id);
       }

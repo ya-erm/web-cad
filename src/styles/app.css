@@ -4391,6 +4391,31 @@ body.panel-resizing-y * {
   .docs-sidebar-resizer::after { left: 6px; }
 }
 
+/* Sync status shares the compact account controls; details stay out of the status bar. */
+.cloud-sync-menu { position: relative; }
+.cloud-sync-menu > summary { width: 28px; height: 30px; display: grid; place-items: center; list-style: none; cursor: pointer; border-radius: 4px; color: var(--text-2); }
+.cloud-sync-menu > summary::-webkit-details-marker { display: none; }
+.cloud-sync-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cloud-sync-menu[open] > summary, .cloud-sync-menu > summary:hover { background: var(--hover); }
+.cloud-sync-menu.phase-syncing > summary { color: var(--accent); }
+.cloud-sync-menu.phase-error > summary, .cloud-sync-menu.phase-conflict > summary, .cloud-sync-menu.needs-attention > summary { color: var(--warn, #9c6500); }
+.cloud-sync-symbol { position: relative; display: inline-flex; }
+.cloud-sync-mark { position: absolute; right: -4px; bottom: -3px; display: inline-flex; background: var(--panel); border-radius: 3px; }
+.cloud-sync-mark.spinner { width: 10px; height: 10px; }
+.cloud-sync-dropdown { width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 12px; font-size: 12px; }
+.cloud-sync-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; margin-bottom: 8px; }
+.cloud-sync-status { margin-bottom: 12px; }
+.cloud-sync-toggle, .cloud-sync-setting { display: flex; align-items: center; gap: 8px; }
+.cloud-sync-note { color: var(--text-3); font-size: 11px; margin-top: 6px; }
+.cloud-sync-details { display: grid; gap: 6px; margin: 12px 0; }
+.cloud-sync-details > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.cloud-sync-details dt { color: var(--text-3); flex: none; }
+.cloud-sync-details dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
+.cloud-sync-error { color: var(--danger); margin: 10px 0; overflow-wrap: anywhere; }
+.cloud-sync-item { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.cloud-sync-item > span { color: var(--text-2); }
+.cloud-sync-item > button { justify-self: start; }
+.cloud-sync-retry { margin-top: 10px; }
 /* Cloud upload keeps source and destination hierarchies separate and scrollable. */
 .cloud-upload-dialog { width: min(680px, 94vw); }
 .cloud-upload-heading { display: flex; align-items: center; gap: 10px; }

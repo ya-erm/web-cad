@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createCloudStore, CloudError } from './cloud-store.mjs';
+import { createCloudStore, CloudError, retiredCandidates } from './cloud-store.mjs';
 import { createCloudStorage } from './cloud-storage.mjs';
 import { APP_ORIGIN, SESSION_COOKIE, header, cookie } from './auth.mjs';
 import { hashSecret } from './yandex.mjs';
@@ -18,6 +18,35 @@ const id = (value) => typeof value === 'string' && ID.test(value);
 const folder = (value) => value === '' || id(value);
 /** @param {any} value */
 const name = (value) => typeof value === 'string' && value.trim().length > 0 && value.length <= 120 && !/[\\/\u0000-\u001f]/.test(value);
+/** Internal object references are never part of the browser protocol. @param {any} document */
+function publicDocument(document) {
+  if (!document) return document;
+  const { retired, ...result } = document;
+  return result;
+}
+/** Cleanup is bounded and optional: it cannot turn a successful read/save into an error.
+ * @param {Awaited<ReturnType<typeof createCloudStore>>} db @param {ReturnType<typeof createCloudStorage>} objects
+ * @param {string} user @param {any[]} documents @param {AbortSignal} signal */
+export async function collectRetired(db, objects, user, documents, signal) {
+  const cleanupSignal = AbortSignal.any([signal, AbortSignal.timeout(1500)]);
+  const candidates = documents
+    .flatMap((document) => retiredCandidates(document).map((snapshot) => ({ id: document.id, revision: snapshot.revision })))
+    .slice(0, 2);
+  for (const candidate of candidates) {
+    if (cleanupSignal.aborted) return;
+    try {
+      // Recheck after listing: a concurrent rename/upload must not be overwritten by the acknowledgement.
+      const latest = await db.document(user, candidate.id, cleanupSignal);
+      const snapshot = retiredCandidates(latest).find((entry) => entry.revision === candidate.revision);
+      if (!snapshot) continue;
+      await objects.removeRetired(user, latest, snapshot, cleanupSignal);
+      await db.cleaned(user, latest.id, [snapshot.revision], cleanupSignal);
+    } catch {
+      /* Keep metadata for a later retry. Do not log SDK errors or private object names. */
+    }
+  }
+}
+
 /** @param {{store?: typeof createCloudStore, storage?: typeof createCloudStorage}} dependencies */
 export function createCloudHandler({ store = createCloudStore, storage = createCloudStorage } = {}) {
   /** @param {import('./auth.mjs').AuthEvent & {body?: string, isBase64Encoded?: boolean}} event @param {{token?:{access_token?: string}}} context */
@@ -63,30 +92,39 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
         } catch {
           return respond(400, { error: 'invalid_request' });
         }
-        if (!input || typeof input !== 'object' || Array.isArray(input)) return respond(400, { error: 'invalid_request' });
+        if (
+          !input ||
+          typeof input !== 'object' ||
+          Array.isArray(input) ||
+          (input.expectedUserId !== undefined && !id(input.expectedUserId))
+        )
+          return respond(400, { error: 'invalid_request' });
       }
       const signal = AbortSignal.timeout(12000);
       db = await store(process.env.YDB_CONNECTION_STRING ?? '', context.token.access_token, signal);
       const user = await db.authenticate(hashSecret(secret));
       if (!user) return respond(401, { error: 'sign_in_required' });
+      if (input.expectedUserId !== undefined && input.expectedUserId !== user) return respond(409, { error: 'account_changed' });
       const objectStorage = storage(process.env.S3_BUCKET ?? '', context.token.access_token, signal);
       objects = objectStorage;
       switch (event.path) {
         case '/cloud/list': {
           const result = await db.list(user);
+          await collectRetired(db, objects, user, result.documents, signal);
           const documents = await Promise.all(
             result.documents.map(async (d) => ({
-              ...d,
+              ...publicDocument(d),
               thumbnailUrl: d.thumbnailSize ? await objectStorage.download(user, d, true) : null,
             })),
           );
           return respond(200, { userId: user, folders: result.folders, documents });
         }
-        case '/cloud/folder':
+        case '/cloud/folder': {
           if (!id(input.id) || (!input.remove && (!name(input.name) || !folder(input.parentId))))
             return respond(400, { error: 'invalid_request' });
-          await db.folder(user, { ...input, name: input.name?.trim() });
-          return respond(200, { ok: true });
+          const savedFolder = await db.folder(user, { ...input, name: input.name?.trim() });
+          return respond(200, { ok: true, ...(savedFolder ? { folder: savedFolder } : {}) });
+        }
         case '/cloud/document':
           if (
             !id(input.id) ||
@@ -97,10 +135,11 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
             (input.trashed !== undefined && typeof input.trashed !== 'boolean')
           )
             return respond(400, { error: 'invalid_request' });
-          return respond(200, { document: await db.move(user, input) });
+          return respond(200, { document: publicDocument(await db.move(user, input)) });
         case '/cloud/prepare': {
           if (
             !id(input.documentId) ||
+            (input.auto !== undefined && typeof input.auto !== 'boolean') ||
             !name(input.name) ||
             !folder(input.folderId) ||
             !(input.expectedRevision === '' || id(input.expectedRevision)) ||
@@ -116,18 +155,31 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
           )
             return respond(400, { error: 'invalid_request' });
           const upload = { ...input, id: randomUUID(), name: input.name.trim() };
-          await db.prepare(user, upload);
+          try {
+            await db.prepare(user, upload);
+          } catch (error) {
+            if (!(error instanceof CloudError) || error.message !== 'storage_cleanup_pending' || input.auto !== true) throw error;
+            // The first transaction rejected before inserting upload metadata. A bounded cleanup can unblock this retry.
+            const current = await db.document(user, input.documentId);
+            if (current) await collectRetired(db, objects, user, [current], signal);
+            await db.prepare(user, upload);
+          }
           return respond(200, { userId: user, uploadId: upload.id, ...(await objects.prepare(user, upload)) });
         }
         case '/cloud/commit': {
           if (!id(input.uploadId)) return respond(400, { error: 'invalid_request' });
           const pending = await db.pending(user, input.uploadId);
           const current = await db.document(user, pending.documentId);
-          if (current?.revision === pending.id) return respond(200, { document: current });
+          if (current?.revision === pending.id) {
+            await collectRetired(db, objects, user, [current], signal);
+            return respond(200, { document: publicDocument(current) });
+          }
           if ((current?.revision ?? '') !== pending.expectedRevision || (current && current.modified !== pending.expectedModified))
             throw new CloudError(409, 'revision_conflict');
           await objects.seal(user, pending);
-          return respond(200, { document: await db.commit(user, pending) });
+          const document = await db.commit(user, pending);
+          await collectRetired(db, objects, user, [document], signal);
+          return respond(200, { document: publicDocument(document) });
         }
         case '/cloud/open': {
           if (!id(input.id)) return respond(400, { error: 'invalid_request' });
@@ -136,7 +188,7 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
           if (document.trashed) return respond(410, { error: 'document_trashed' });
           return respond(200, {
             userId: user,
-            document,
+            document: publicDocument(document),
             url: await objects.download(user, document),
             thumbnailUrl: document.thumbnailSize ? await objects.download(user, document, true) : null,
           });
@@ -144,7 +196,10 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
       }
       return respond(404, { error: 'not_found' });
     } catch (e) {
-      if (e instanceof CloudError) return respond(e.status, { error: e.message });
+      if (e instanceof CloudError) {
+        if (e.status === 429) headers['Retry-After'] = '60';
+        return respond(e.status, { error: e.message, ...(e.status === 429 ? { retryAfter: 60 } : {}) });
+      }
       return respond(503, { error: 'cloud_unavailable' });
     } finally {
       objects?.close();

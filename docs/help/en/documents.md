@@ -47,8 +47,8 @@ letter of your name while the image loads or when no avatar is available. A roun
 placeholder appears while the account is being checked. Your name and email appear
 in the account menu, opened by clicking your avatar. **Sign out** ends the current session in this browser.
 
-Signing in is optional. Documents are saved on this device: signing in
-does not upload them to the cloud. Upload them explicitly with **Upload to cloud**. On phones, the document picker fills the screen: the header and action buttons stay visible while folders, options and upload progress scroll between them. Signing out does not delete local documents.
+Signing in is optional. Documents are saved on this device. After sign-in, enabled
+**Automatic cloud sync** uploads library documents and their folders in the background. You can disable it in settings, including before signing in. Signing out pauses sync and keeps local documents.
 If the account service is unavailable or you are offline, editing still works;
 **Retry sign-in** checks the account service again.
 
@@ -158,6 +158,8 @@ Card modification dates use local time in **DD.MM.YYYY HH:mm:ss** format, with h
 
 **Upload to cloud** in the bar opens the selection dialog. Documents appear with thumbnails inside their folders: expand branches and select individual documents or entire folders. Choose a destination in its separate folder tree. Optionally enable **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
 
+On phones, the document picker fills the screen: the header and action buttons stay visible while folders, options and upload progress scroll between them.
+
 **Upload to cloud** in a document menu starts uploading immediately, without the selection dialog. A connected document keeps its cloud location; a new one recreates its library folders. If the original cloud version has changed, the upload stops: the notification lets you explicitly open the selection dialog to confirm replacement or create a separate copy.
 
 The progress bar shows project preparation, file transfer, and server confirmation. Multiple uploads show overall progress and the current document name. Transferred bytes alone do not mean completion: the upload completes after server confirmation. Errors leave local data intact.
@@ -168,7 +170,19 @@ Normal opening uses the local variant when available. **Open cloud version** exp
 
 Saving checks both the revision and metadata baseline. A concurrent edit, rename, or move stops an outdated save with a conflict. Open the cloud version first; if replacement is intended, enable **Update existing cloud versions**. Old copies without a recorded baseline also require explicit confirmation.
 
-**Automatic edit uploading is not enabled yet.** Local autosave does not send changes. Bounded technical snapshot retention and background synchronisation are later stages.
+### Automatic sync
+
+**Automatic cloud sync** is enabled by default and can be switched off in settings. It works while signed in, online, and with the app open. Library documents and their nested folders upload automatically. Files in connected computer folders and documents belonging to another account are excluded.
+
+Local saving stays fast and works offline. Uploads start after 30 seconds without edits, at most once a minute per document, with at least 15 seconds between uploads overall. Continuous editing makes the queue check the document after 2 minutes. One project uploads at a time; browser tabs coordinate the queue. Closing the app stops background uploads. On the next launch, unsent changes rejoin the queue.
+
+The cloud icon beside your account opens queue status, errors, and retry actions. Network failures retry with an increasing delay. Edits made during an upload remain queued for another snapshot. Named versions and branches also count as changes.
+
+When another device changes a cloud document, a clean closed local copy updates during a list check. An open model is never silently replaced: a notice offers the newer cloud version. Concurrent local and cloud edits pause automatic upload for that document. Open the cloud version or explicitly confirm replacement through a manual upload. Uploading a separate copy creates another document and does not itself resolve the original conflict.
+
+Autosync does not download the entire cloud library: documents not yet opened on this device download when you select their cards.
+
+Technical autosaves do not form an unlimited history: the cloud keeps the current and previous snapshots and cleans up older ones in the background after 10 minutes. Frequent edits can temporarily leave several snapshots. Named versions inside the project are retained.
 
 Projects include named versions and branches, as gzip archives up to 20 MiB. Thumbnails are separate S3 objects, converted to WebP, up to 1 MiB. Disposable 3D geometry caches and automatic local history are excluded. A broken thumbnail never prevents the project upload. Temporary upload objects expire after 3 days.
 

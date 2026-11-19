@@ -549,7 +549,18 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   const [uploading, setUploading] = useState<string[] | null>(null);
   const [cloudGeneration, setCloudGeneration] = useState(0);
   useEffect(() => {
-    void listLibraryFolders().then(setLibraryFolders);
+    let active = true;
+    const refresh = () => {
+      void listLibraryFolders().then((folders) => {
+        if (active) setLibraryFolders(folders);
+      });
+    };
+    refresh();
+    window.addEventListener('webcad:cloud-changed', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('webcad:cloud-changed', refresh);
+    };
   }, []);
   const { loadList, createDocument, deleteDocument, renameDocument, duplicateDocument, importDocument, restoreDocument } =
     useDoc.getState();

@@ -13,11 +13,13 @@ function setup() {
     pending: vi.fn(async () => ({ id: 'upload', documentId: 'doc', expectedRevision: '' })),
     commit: vi.fn(async () => ({ id: 'doc', revision: 'upload' })),
     move: vi.fn(async () => {}),
+    cleaned: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
   };
   const objects = {
     prepare: vi.fn(async () => ({ projectUrl: 'signed-upload', thumbnailUrl: null })),
     seal: vi.fn(async () => {}),
+    removeRetired: vi.fn(async () => {}),
     download: vi.fn(async () => 'signed-download'),
     close: vi.fn(),
   };
@@ -137,5 +139,81 @@ describe('cloud trash contract', () => {
     expect(s.db.move).not.toHaveBeenCalled();
     expect((await s.request('/cloud/document', { ...body, trashed: false })).statusCode).toBe(200);
     expect(s.db.move.mock.calls[0]).toEqual(['owner', { ...body, trashed: false }]);
+  });
+});
+
+describe('automatic upload ownership and cleanup budget', () => {
+  const body = {
+    documentId: 'doc',
+    name: 'Doc',
+    folderId: '',
+    expectedRevision: '',
+    size: 10,
+    thumbnailSize: 0,
+    hash: 'a'.repeat(64),
+    thumbnailHash: '',
+  };
+  it('rejects a changed account before granting direct upload links', async () => {
+    const s = setup();
+    expect((await s.request('/cloud/prepare', { ...body, auto: true, expectedUserId: 'other-owner' })).statusCode).toBe(409);
+    expect(s.db.prepare).not.toHaveBeenCalled();
+    expect(s.objects.prepare).not.toHaveBeenCalled();
+  });
+  it.each(['/cloud/folder', '/cloud/document'])('also guards session changes before %s mutations', async (path) => {
+    const s = setup();
+    const response = await s.request(path, {
+      id: 'folder',
+      name: 'Name',
+      parentId: '',
+      folderId: '',
+      revision: 'r',
+      modified: 1,
+      expectedUserId: 'other-owner',
+    });
+    expect(response.statusCode).toBe(409);
+    expect(s.db.folder).not.toHaveBeenCalled();
+    expect(s.db.move).not.toHaveBeenCalled();
+  });
+  it.each([{ auto: 'yes' }, { expectedUserId: 12 }])('rejects invalid automatic upload fields (%j)', async (extra) => {
+    const s = setup();
+    expect((await s.request('/cloud/prepare', { ...body, ...extra })).statusCode).toBe(400);
+    expect(s.objects.prepare).not.toHaveBeenCalled();
+  });
+  it('returns the canonical folder record without changing delete responses', async () => {
+    const s = setup();
+    const canonical = { id: 'folder', name: 'Parts', parentId: '', created: 1, modified: 2 };
+    s.db.folder.mockResolvedValueOnce(canonical as never);
+    const saved = await s.request('/cloud/folder', { id: 'folder', name: 'Parts', parentId: '', expectedUserId: 'owner' });
+    expect(JSON.parse(saved.body)).toEqual({ ok: true, folder: canonical });
+    const removed = await s.request('/cloud/folder', { id: 'folder', remove: true, expectedUserId: 'owner' });
+    expect(JSON.parse(removed.body)).toEqual({ ok: true });
+  });
+  it('gives a finite retry hint when cleanup backlog blocks automatic upload', async () => {
+    const s = setup();
+    s.db.prepare.mockRejectedValue(new CloudError(429, 'storage_cleanup_pending'));
+    const response = await s.request('/cloud/prepare', { ...body, auto: true, expectedUserId: 'owner' });
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['Retry-After']).toBe('60');
+    expect(JSON.parse(response.body).retryAfter).toBe(60);
+  });
+  it('returns successful lists even when cleanup fails and keeps internal history private', async () => {
+    const s = setup();
+    const doc = {
+      id: 'doc',
+      revision: 'current',
+      thumbnailSize: 0,
+      retired: [
+        { revision: 'previous', retiredAt: 0 },
+        { revision: 'old', retiredAt: 0 },
+      ],
+    };
+    s.db.list.mockResolvedValue({ folders: [], documents: [doc] } as never);
+    s.db.document.mockResolvedValue(doc as never);
+    s.objects.removeRetired.mockRejectedValue(new Error('secret object URL'));
+    const response = await s.request('/cloud/list');
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).documents[0].retired).toBeUndefined();
+    expect(s.db.cleaned).not.toHaveBeenCalled();
+    expect(response.body).not.toContain('secret');
   });
 });

@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, CopyObjectCommand, getSignedUrl } from './vendor.mjs';
-import { CloudError } from './cloud-store.mjs';
+import { CloudError, retiredCandidates } from './cloud-store.mjs';
 
 /** @param {string} bucket @param {string} token @param {AbortSignal} signal */
 export function createCloudStorage(bucket, token, signal) {
@@ -76,6 +76,27 @@ export function createCloudStorage(bucket, token, signal) {
           Key: key(user, { documentId: doc.id, id: doc.revision }, thumbnail ? 'thumbnail' : 'project.gz'),
         }),
         { expiresIn: 600 },
+      );
+    },
+    /** Delete only an explicitly retired immutable revision; never list a prefix.
+     * @param {string} user @param {any} doc @param {any} snapshot @param {AbortSignal} cleanupSignal */
+    async removeRetired(user, doc, snapshot, cleanupSignal) {
+      const valid = /^[A-Za-z0-9_-]{1,100}$/;
+      if (!valid.test(user) || !valid.test(doc.id) || !retiredCandidates(doc).some((entry) => entry.revision === snapshot.revision))
+        throw new CloudError(409, 'invalid_cleanup_snapshot');
+      const parts = ['project.gz', ...(snapshot.thumbnailSize ? ['thumbnail'] : [])];
+      await Promise.all(
+        parts.map(async (part) => {
+          const object = key(user, { documentId: doc.id, id: snapshot.revision }, part);
+          const response = await fetch(`https://storage.yandexcloud.net/${bucket}/${object}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.any([signal, cleanupSignal]),
+            redirect: 'error',
+          });
+          await response.body?.cancel();
+          if (!response.ok && response.status !== 404) throw new CloudError(503, 'storage_cleanup_failed');
+        }),
       );
     },
     close() {

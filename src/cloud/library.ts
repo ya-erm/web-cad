@@ -1,6 +1,7 @@
 import type { DocumentSummary } from '../core/types';
 import { folderTrail, type LibraryFolder } from '../store/library';
 import type { CloudDocument, CloudList } from './client';
+import { dirtyDocument } from './syncCore';
 export interface UnifiedFolder extends LibraryFolder {
   cloudId?: string;
 }
@@ -83,6 +84,7 @@ export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: Do
       groups.set(key, group);
     }
     group.locals.push(local);
+    if (group.cloud?.trashed && !local.trashed && dirtyDocument(local)) group.folderId = local.folderId ?? '';
     group.modified = Math.max(group.modified, local.modified);
     group.thumbnail ??= local.thumbnail;
     if (!group.cloud && (local.id === identity || !primaryIds.has(identity))) group.name = local.name;
@@ -92,7 +94,11 @@ export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: Do
   return {
     folders,
     documents: [...groups.values()]
-      .filter((g) => Boolean(g.cloud ? g.cloud.trashed : g.locals.length && g.locals.every((l) => l.trashed)) === trash)
+      .filter((group) => {
+        const trashed = Boolean(group.cloud ? group.cloud.trashed : group.locals.length && group.locals.every((local) => local.trashed));
+        const dirtySurvivor = Boolean(group.cloud?.trashed) && group.locals.some((local) => !local.trashed && dirtyDocument(local));
+        return trashed === trash || (!trash && dirtySurvivor);
+      })
       .sort((a, b) => b.modified - a.modified),
   };
 }
@@ -112,9 +118,12 @@ export function libraryDocumentStatus(doc: LibraryDocument): string {
   if (!doc.cloud) return local?.cloudSource ? 'Local copy; cloud unavailable' : 'Only on this device';
   if (!local) return 'In cloud';
   if (local.cloudSource) {
-    if (local.cloudSource.revision !== doc.cloud.revision) return 'Cloud version changed';
-    if (local.cloudSource.savedModified !== undefined)
-      return local.modified === local.cloudSource.savedModified ? 'Saved in cloud' : 'Unsaved cloud changes';
+    if (
+      local.cloudSource.revision !== doc.cloud.revision ||
+      (local.cloudSource.cloudModified !== undefined && local.cloudSource.cloudModified !== doc.cloud.modified)
+    )
+      return 'Cloud version changed';
+    if (local.cloudSource.savedModified !== undefined) return dirtyDocument(local) ? 'Unsaved cloud changes' : 'Saved in cloud';
   }
   return 'On this device and in cloud';
 }

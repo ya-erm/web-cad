@@ -10,6 +10,7 @@ import { startLinkChecks } from './store/linkedSources';
 import { TooltipLayer } from './ui/Tooltip';
 import { documentsHash } from './ui/documentsLocation';
 import { isHelpHash } from './help/toc';
+import { startCloudSync } from './cloud/sync';
 
 // Help (#/help/<lang>/<page>) is a separate chunk, loaded only when opened.
 const HelpPage = lazy(() => import('./help/HelpPage'));
@@ -29,6 +30,7 @@ export default function App() {
     void requestPersistentStorage();
     // the last edits saved when the page is hidden or closed
     startSaveGuards();
+    const stopCloudSync = startCloudSync();
     // a folder on the computer chosen earlier (Chrome / Edge): its linked documents are saved to their files
     void startFolder();
     // versions and history of the open document
@@ -41,7 +43,10 @@ export default function App() {
       setHelp(isHelpHash(location.hash));
     };
     window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      stopCloudSync();
+    };
   }, []);
 
   useEffect(() => {

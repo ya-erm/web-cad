@@ -7,6 +7,68 @@ export class CloudError extends Error {
     this.status = status;
   }
 }
+export const RETIRED_GRACE_MS = 10 * 60 * 1000;
+export const RETIRED_BACKLOG_LIMIT = 32;
+const SNAPSHOT_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+/** Remember immutable snapshots, newest predecessor first. Never infer history by listing S3.
+ * @param {any} previous @param {number} now */
+export function retireSnapshot(previous, now) {
+  if (!previous) return [];
+  const newest = { revision: previous.revision, retiredAt: now, thumbnailSize: previous.thumbnailSize ?? 0 };
+  const unique = new Map();
+  for (const entry of [newest, ...(Array.isArray(previous.retired) ? previous.retired : [])])
+    if (typeof entry?.revision === 'string' && SNAPSHOT_ID.test(entry.revision) && !unique.has(entry.revision))
+      unique.set(entry.revision, entry);
+  return [...unique.values()];
+}
+
+/** The current snapshot and newest predecessor remain protected, even when malformed old metadata repeats them.
+ * @param {any} document @param {number} [now] @param {number} [limit] @returns {any[]} */
+export function retiredCandidates(document, now = Date.now(), limit = 2) {
+  /** @type {any[]} */
+  const history = Array.isArray(document?.retired) ? document.retired : [];
+  const newest = history[0];
+  // Corrupt predecessor metadata makes its identity/ordering ambiguous: keep every object until repaired.
+  if (
+    !newest ||
+    typeof newest.revision !== 'string' ||
+    !SNAPSHOT_ID.test(newest.revision) ||
+    newest.revision === document.revision ||
+    !Number.isSafeInteger(newest.retiredAt)
+  )
+    return [];
+  const protectedRevision = newest.revision;
+  const seen = new Set();
+  return history
+    .filter((entry) => {
+      if (
+        !entry ||
+        typeof entry.revision !== 'string' ||
+        !SNAPSHOT_ID.test(entry.revision) ||
+        entry.revision === document.revision ||
+        entry.revision === protectedRevision ||
+        seen.has(entry.revision) ||
+        !Number.isSafeInteger(entry.retiredAt) ||
+        entry.retiredAt > now - RETIRED_GRACE_MS
+      )
+        return false;
+      seen.add(entry.revision);
+      return true;
+    })
+    .slice(0, Math.min(2, Math.max(0, limit)));
+}
+
+/** Apply acknowledgements to the freshly reread row, preserving all concurrent model/metadata changes.
+ * @param {any} latest @param {string[]} revisions */
+export function cleanedSnapshotMetadata(latest, revisions) {
+  /** @type {any[]} */
+  const history = Array.isArray(latest.retired) ? latest.retired : [];
+  const previous = history[0]?.revision;
+  const removed = new Set(revisions.filter((revision) => revision !== latest.revision && revision !== previous));
+  return { ...latest, retired: history.filter((entry) => !removed.has(entry.revision)) };
+}
+
 /** @param {unknown[][]} result @returns {any[]} */
 const rows = (result) => result[0] ?? [];
 /** @param {any[]} result */
@@ -34,10 +96,10 @@ export async function createCloudStore(connection, token, signal) {
     driver.close();
     throw e;
   }
-  /** @template T @param {(tx: import('@ydbjs/query').TX) => Promise<T>} fn */
-  const transaction = async (fn) => {
+  /** @template T @param {(tx: import('@ydbjs/query').TX) => Promise<T>} fn @param {AbortSignal} [requestSignal] */
+  const transaction = async (fn, requestSignal = signal) => {
     try {
-      return await sql.begin({ idempotent: true, signal }, fn);
+      return await sql.begin({ idempotent: true, signal: requestSignal }, fn);
     } catch (error) {
       let cause = error;
       for (let n = 0; n < 8 && cause instanceof Error; n++) {
@@ -61,9 +123,9 @@ export async function createCloudStore(connection, token, signal) {
         documents: unpack(rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user}`)),
       }));
     },
-    /** @param {string} user @param {string} id */
-    async document(user, id) {
-      const result = rows(await sql`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${id}`.signal(signal));
+    /** @param {string} user @param {string} id @param {AbortSignal} [requestSignal] */
+    async document(user, id, requestSignal = signal) {
+      const result = rows(await sql`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${id}`.signal(requestSignal));
       return result.length ? JSON.parse(result[0].payload) : null;
     },
     /** @param {string} user @param {any} input */
@@ -92,6 +154,7 @@ export async function createCloudStore(connection, token, signal) {
           modified: Math.max(Date.now(), (old?.modified ?? 0) + 1),
         };
         await tx`UPSERT INTO cloud_folders (user_id, id, payload) VALUES (${user}, ${input.id}, ${JSON.stringify(folder)})`;
+        return folder;
       });
     },
     /** @param {string} user @param {any} pending */
@@ -104,6 +167,8 @@ export async function createCloudStore(connection, token, signal) {
         if (old?.trashed) throw new CloudError(409, 'document_trashed');
         if ((old?.revision ?? '') !== pending.expectedRevision || (old && old.modified !== pending.expectedModified))
           throw new CloudError(409, 'revision_conflict');
+        if (pending.auto === true && (old?.retired?.length ?? 0) >= RETIRED_BACKLOG_LIMIT)
+          throw new CloudError(429, 'storage_cleanup_pending');
         await tx`INSERT INTO cloud_uploads (user_id, id, payload, expires_at) VALUES (${user}, ${pending.id}, ${JSON.stringify(pending)}, CAST(${new Date(Date.now() + 86400000)} AS Timestamp))`;
       });
     },
@@ -125,13 +190,16 @@ export async function createCloudStore(connection, token, signal) {
           throw new CloudError(409, 'revision_conflict');
         const folders = unpack(rows(await tx`SELECT payload FROM cloud_folders WHERE user_id = ${user}`));
         trail(folders, upload.folderId);
+        const now = Date.now();
         const doc = {
           id: upload.documentId,
           name: upload.name,
           folderId: upload.folderId,
           revision: upload.id,
           created: old?.created ?? Date.now(),
-          modified: Date.now(),
+          modified: Math.max(now, (old?.modified ?? 0) + 1),
+          uploadedAt: now,
+          retired: retireSnapshot(old, now),
           size: upload.size,
           thumbnailSize: upload.thumbnailSize,
           hash: upload.hash,
@@ -163,6 +231,17 @@ export async function createCloudStore(connection, token, signal) {
         await tx`UPDATE cloud_documents SET payload = ${JSON.stringify(doc)} WHERE user_id = ${user} AND id = ${input.id}`;
         return doc;
       });
+    },
+    /** @param {string} user @param {string} id @param {string[]} revisions @param {AbortSignal} [requestSignal] */
+    async cleaned(user, id, revisions, requestSignal = signal) {
+      return transaction(async (tx) => {
+        const result = rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${id}`);
+        if (!result.length) return;
+        const latest = JSON.parse(result[0].payload);
+        const next = cleanedSnapshotMetadata(latest, revisions);
+        if (JSON.stringify(next.retired) === JSON.stringify(latest.retired ?? [])) return;
+        await tx`UPDATE cloud_documents SET payload = ${JSON.stringify(next)} WHERE user_id = ${user} AND id = ${id}`;
+      }, requestSignal);
     },
     async close() {
       try {

@@ -25,11 +25,11 @@ If Settings shows **How to install the app** instead of **Install app…**, the 
 
 ## Where documents are stored {#storage}
 
-- Documents, their thumbnails and unsaved edits are stored in this browser's **IndexedDB**, separately for each site address. They are sent to the cloud only when you explicitly choose to upload them.
+- Documents, their thumbnails and unsaved edits are stored in this browser's **IndexedDB**, separately for each site address. Cloud uploads require sign-in and enabled automatic sync or a manual upload.
 - Interface settings (language, rotation mode, showing constraints and expressions) are stored in the browser's local storage.
 - WebCAD asks the browser to make the storage persistent so that data is not deleted when space runs low.
 
-> **Warning.** Local autosave does not automatically sync documents between devices. You can explicitly upload a snapshot and open it elsewhere with [Save to cloud](documents#cloud). If you clear the site data in the browser, the documents are deleted. Different addresses (for example, `localhost:5173` and `localhost:4173`) are different storages.
+> **Warning.** Offline edits are saved on this device. Enabled [cloud autosync](documents#cloud) sends them after connectivity returns while the app is open and signed in. Export a project file for an independent backup. If you clear the site data in the browser, the documents are deleted. Different addresses (for example, `localhost:5173` and `localhost:4173`) are different storages.
 
 ## Backups and transfer {#backup}
 

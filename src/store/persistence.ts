@@ -1,6 +1,6 @@
 // Local persistence in IndexedDB: no accounts, everything stays in the browser.
 
-import type { CadDocument, DocumentSummary, DocumentVersion } from '../core/types';
+import type { CadDocument, DocumentSummary, DocumentVersion, ProjectVersion } from '../core/types';
 import { validateLibraryChange, type LibraryFolder, type LibraryChange } from './library';
 import type { BuildResult } from '../kernel/protocol';
 import { embedMode, storageBlocked } from '../embed/mode';
@@ -114,6 +114,7 @@ export async function saveDocument(doc: CadDocument, thumbnail?: string): Promis
         ...(prev?.folderId ? { folderId: prev.folderId } : {}),
         ...(prev?.cloudSource ? { cloudSource: prev.cloudSource } : {}),
         ...(prev?.trashed ? { trashed: prev.trashed } : {}),
+        ...(prev?.versionsModified ? { versionsModified: prev.versionsModified } : {}),
       } satisfies DocumentSummary);
     };
   });
@@ -162,7 +163,8 @@ export async function listVersions(docId: string): Promise<DocumentVersion[]> {
 }
 
 export async function saveVersion(version: DocumentVersion, doc: CadDocument): Promise<void> {
-  await tx([VERSIONS, VERSION_DATA], 'readwrite', (t) => {
+  await tx([VERSIONS, VERSION_DATA, SUMMARIES], 'readwrite', (t) => {
+    if (version.kind !== 'auto') touchVersions(t, version.docId);
     t.objectStore(VERSIONS).put(version);
     t.objectStore(VERSION_DATA).put({ id: version.id, doc });
   });
@@ -174,10 +176,23 @@ export async function loadVersion(id: string): Promise<CadDocument | undefined> 
   return r?.doc;
 }
 
+function touchVersions(t: IDBTransaction, docId: string) {
+  const store = t.objectStore(SUMMARIES),
+    request = store.get(docId);
+  request.onsuccess = () => {
+    const current = request.result as DocumentSummary | undefined;
+    if (current) store.put({ ...current, versionsModified: Math.max(Date.now(), (current.versionsModified ?? 0) + 1) });
+  };
+}
 export async function deleteVersions(ids: string[]): Promise<void> {
   if (!ids.length) return;
-  await tx([VERSIONS, VERSION_DATA], 'readwrite', (t) => {
+  await tx([VERSIONS, VERSION_DATA, SUMMARIES], 'readwrite', (t) => {
     for (const id of ids) {
+      const request = t.objectStore(VERSIONS).get(id);
+      request.onsuccess = () => {
+        const old = request.result as DocumentVersion | undefined;
+        if (old && old.kind !== 'auto') touchVersions(t, old.docId);
+      };
       t.objectStore(VERSIONS).delete(id);
       t.objectStore(VERSION_DATA).delete(id);
     }
@@ -255,16 +270,54 @@ export async function markCloudCopy(id: string, cloudSource: NonNullable<Documen
   });
 }
 
+/** Adopt metadata only if the persisted baseline did not change since the remote request. */
+export async function compareCloudSummary(
+  expected: DocumentSummary,
+  patch: Partial<DocumentSummary>,
+  canApply: () => boolean,
+): Promise<boolean> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([SUMMARIES], 'readwrite'),
+      store = transaction.objectStore(SUMMARIES),
+      request = store.get(expected.id);
+    let applied = false;
+    request.onsuccess = () => {
+      const current = request.result as DocumentSummary | undefined;
+      if (
+        !current ||
+        !canApply() ||
+        current.modified !== expected.modified ||
+        current.name !== expected.name ||
+        current.folderId !== expected.folderId ||
+        current.trashed !== expected.trashed ||
+        current.versionsModified !== expected.versionsModified ||
+        JSON.stringify(current.cloudSource) !== JSON.stringify(expected.cloudSource)
+      )
+        return;
+      store.put({ ...current, ...patch });
+      applied = true;
+    };
+    transaction.oncomplete = () => resolve(applied);
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+  });
+}
+
 /** Mirror folder metadata without removing local folders or touching document content. */
-export async function rememberLibraryFolders(folders: LibraryFolder[], locations: Record<string, string>): Promise<void> {
+export async function rememberLibraryFolders(
+  folders: LibraryFolder[],
+  locations: Record<string, string>,
+  canApply: () => boolean = () => true,
+): Promise<void> {
   await tx([FOLDERS, SUMMARIES], 'readwrite', (t) => {
+    if (!canApply()) return;
     const fs = t.objectStore(FOLDERS),
       ds = t.objectStore(SUMMARIES);
     for (const folder of folders) fs.put(folder);
     for (const [id, folderId] of Object.entries(locations)) {
       const request = ds.get(id);
       request.onsuccess = () => {
-        if (request.result) ds.put({ ...request.result, folderId });
+        if (request.result && canApply()) ds.put({ ...request.result, folderId });
       };
     }
   });
@@ -285,5 +338,126 @@ export async function addDocumentIfAbsent(doc: CadDocument): Promise<boolean> {
     };
     t.oncomplete = () => resolve(added);
     t.onerror = t.onabort = () => reject(t.error);
+  });
+}
+
+/** A consistent model, named versions and summary, read in one IndexedDB transaction. */
+export async function cloudUploadSnapshot(id: string): Promise<{ doc: CadDocument; summary: DocumentSummary; versions: ProjectVersion[] }> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([DOCS, SUMMARIES, VERSIONS, VERSION_DATA], 'readonly');
+    let doc: CadDocument | undefined, summary: DocumentSummary | undefined;
+    const versions: ProjectVersion[] = [];
+    const d = transaction.objectStore(DOCS).get(id),
+      s = transaction.objectStore(SUMMARIES).get(id),
+      v = transaction.objectStore(VERSIONS).index('docId').getAll(id);
+    d.onsuccess = () => {
+      doc = d.result;
+    };
+    s.onsuccess = () => {
+      summary = s.result;
+    };
+    v.onsuccess = () => {
+      const records = (v.result as DocumentVersion[])
+        .filter((r) => r.kind !== 'auto')
+        .sort((a, b) => Number(a.kind === 'workspace') - Number(b.kind === 'workspace') || a.created - b.created);
+      for (const record of records) {
+        const data = transaction.objectStore(VERSION_DATA).get(record.id);
+        data.onsuccess = () => {
+          const snap = data.result?.doc as CadDocument | undefined;
+          if (snap)
+            versions.push({
+              id: record.kind === 'workspace' ? record.id.slice(id.length + 1) : record.id,
+              ...(record.kind === 'workspace' ? { kind: 'workspace' as const, ...(record.base ? { base: record.base } : {}) } : {}),
+              name: record.name,
+              ...(record.description ? { description: record.description } : {}),
+              created: record.created,
+              units: snap.units,
+              tabs: snap.tabs,
+              activeTab: snap.activeTab,
+            });
+        };
+      }
+    };
+    transaction.oncomplete = () => (doc && summary ? resolve({ doc, summary, versions }) : reject(new Error('Document not found')));
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+/** Update a closed, unchanged cloud cache atomically; keep a local recovery snapshot and old version data. */
+export async function replaceCleanCloudDocument(
+  expected: DocumentSummary,
+  doc: CadDocument,
+  versions: ProjectVersion[],
+  cloudSource: NonNullable<DocumentSummary['cloudSource']>,
+  folderId: string,
+  canApply: () => boolean,
+): Promise<boolean> {
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([DOCS, SUMMARIES, VERSIONS, VERSION_DATA], 'readwrite');
+    let applied = false;
+    const s = transaction.objectStore(SUMMARIES).get(expected.id),
+      d = transaction.objectStore(DOCS).get(expected.id),
+      v = transaction.objectStore(VERSIONS).index('docId').getAll(expected.id);
+    let ready = 0;
+    const apply = () => {
+      if (++ready !== 3) return;
+      const current = s.result as DocumentSummary | undefined;
+      if (
+        !current ||
+        !canApply() ||
+        current.trashed ||
+        current.modified !== expected.modified ||
+        current.name !== expected.name ||
+        current.folderId !== expected.folderId ||
+        current.versionsModified !== expected.versionsModified ||
+        JSON.stringify(current.cloudSource) !== JSON.stringify(expected.cloudSource)
+      )
+        return;
+      const source = current.cloudSource;
+      if (!source || source.savedModified !== current.modified || (current.versionsModified ?? 0) !== (source.savedVersionsModified ?? 0))
+        return;
+      const backup = 'cloud-backup-' + crypto.randomUUID();
+      transaction
+        .objectStore(VERSIONS)
+        .put({ id: backup, docId: doc.id, kind: 'auto', name: '', created: Date.now(), hash: '' } satisfies DocumentVersion);
+      transaction.objectStore(VERSION_DATA).put({ id: backup, doc: d.result });
+      for (const old of v.result as DocumentVersion[]) if (old.kind !== 'auto') transaction.objectStore(VERSIONS).delete(old.id);
+      for (const version of versions) {
+        const id = version.kind === 'workspace' ? doc.id + ':' + version.id : version.id;
+        const snap: CadDocument = { ...doc, name: '', units: version.units, tabs: version.tabs, activeTab: version.activeTab };
+        transaction
+          .objectStore(VERSIONS)
+          .put({
+            id,
+            docId: doc.id,
+            kind: version.kind ?? 'version',
+            name: version.name,
+            created: version.created,
+            hash: '',
+            ...(version.description ? { description: version.description } : {}),
+            ...(version.base ? { base: version.base } : {}),
+          } satisfies DocumentVersion);
+        transaction.objectStore(VERSION_DATA).put({ id, doc: snap });
+      }
+      transaction.objectStore(DOCS).put(doc);
+      transaction
+        .objectStore(SUMMARIES)
+        .put({
+          ...current,
+          name: doc.name,
+          modified: doc.modified,
+          folderId,
+          versionsModified: cloudSource.savedVersionsModified ?? 0,
+          cloudSource,
+        });
+      applied = true;
+    };
+    s.onsuccess = apply;
+    d.onsuccess = apply;
+    v.onsuccess = apply;
+    transaction.oncomplete = () => resolve(applied);
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
   });
 }

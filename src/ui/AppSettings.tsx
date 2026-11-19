@@ -9,12 +9,14 @@ import { openHelp } from '../help/context';
 import { installApp, useInstallState } from '../pwa';
 import { Icon } from './icons';
 import { isIPad } from './inputDevice';
+import { useCloudSync } from '../cloud/syncState';
 
 /** Rotation, Language and App items of a settings dropdown. */
 export function AppSettingsItems() {
   const rotationMode = useEditor((s) => s.rotationMode);
   const touchNavigation = useEditor((s) => s.touchNavigation);
   const install = useInstallState();
+  const sync = useCloudSync();
   return (
     <>
       <div className="dropdown-label">{t('Rotation')}</div>
@@ -49,6 +51,14 @@ export function AppSettingsItems() {
           <div className="dropdown-sep" />
         </>
       )}
+      <div className="dropdown-label">{t('Cloud sync')}</div>
+      <label className="dropdown-item cloud-sync-setting">
+        <input type="checkbox" checked={sync.enabled} onChange={(event) => sync.setEnabled(event.target.checked)} />
+        {t('Automatic cloud sync')}
+      </label>
+      <div className="dropdown-note">{t('Browser documents; computer folders stay separate.')}</div>
+      {!sync.accountId && <div className="dropdown-note">{t('Sign in to sync documents.')}</div>}
+      <div className="dropdown-sep" />
       <div className="dropdown-label">{t('Language')}</div>
       {(['ru', 'en'] as const).map((l) => (
         <div
