@@ -926,7 +926,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             >
               <Icon name="folder" size={16} /> {t('My documents')}
             </button>
-            {view === 'library' && <div className="library-sidebar" ref={setLibrarySidebar} />}
+            <div className="library-sidebar" ref={setLibrarySidebar} />
             <button className={'docs-nav-item' + (view === 'trash' ? ' active' : '')} onClick={() => navigate('trash')}>
               <Icon name="trash" size={16} /> {t('Trash')}
               {trashed.length > 0 && <span className="docs-nav-count">{trashed.length}</span>}
@@ -990,21 +990,20 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             </div>
           )}
           {error && <div className="docs-error">{error}</div>}
-          {(view === 'library' || view === 'trash') && (
-            <CloudLibrary
-              key={String(view) + cloudGeneration}
-              trash={view === 'trash'}
-              heading={libraryHeading}
-              onOpen={onOpen}
-              path={path}
-              onGo={(id) => navigate('library', id)}
-              sidebar={librarySidebar}
-              onUpload={(folderId, ids = []) => {
-                setUploadFolder(folderId);
-                setUploading(ids);
-              }}
-            />
-          )}
+          <CloudLibrary
+            key={cloudGeneration}
+            active={view === 'library' || view === 'trash'}
+            trash={view === 'trash'}
+            heading={libraryHeading}
+            onOpen={onOpen}
+            path={view === 'library' ? path : ''}
+            onGo={(id) => navigate('library', id)}
+            sidebar={librarySidebar}
+            onUpload={(folderId, ids = []) => {
+              setUploadFolder(folderId);
+              setUploading(ids);
+            }}
+          />
           {shownFolder ? (
             <FolderView
               key={shownFolder.id}

@@ -41,6 +41,17 @@ function errorText(error: unknown): string {
   return t(error instanceof Error && !(error instanceof TypeError) ? error.message : 'Cloud is unavailable. Local documents are safe.');
 }
 
+const LIBRARY_TREE_KEY = 'webcad.library.expanded';
+function loadLibraryTree(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LIBRARY_TREE_KEY) ?? '[]');
+    if (Array.isArray(value) && value.every((id) => typeof id === 'string')) return value;
+  } catch {
+    /* Folder navigation remains available without browser storage. */
+  }
+  return [];
+}
+
 export function CloudLibrary({
   onOpen,
   onUpload,
@@ -49,6 +60,7 @@ export function CloudLibrary({
   sidebar,
   heading,
   trash = false,
+  active = true,
 }: {
   onOpen: (id: string) => void;
   onUpload: (folderId: string, ids?: string[]) => void;
@@ -57,6 +69,7 @@ export function CloudLibrary({
   sidebar?: HTMLElement | null;
   heading?: HTMLElement | null;
   trash?: boolean;
+  active?: boolean;
 }) {
   const localDocs = useDoc((s) => s.docs),
     diskLinks = useFolder((s) => s.links);
@@ -70,9 +83,10 @@ export function CloudLibrary({
     [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [dragged, setDragged] = useState<CloudItem | null>(null),
     [over, setOver] = useState<string | null>(null),
-    [expanded, setExpanded] = useState<string[]>([]);
+    [expanded, setExpanded] = useState<string[]>(loadLibraryTree);
   const epoch = useRef(0),
-    working = useRef(false);
+    working = useRef(false),
+    previousTrash = useRef(trash);
   const browserDocs = localDocs.filter((d) => !diskLinks[d.id] || Boolean(d.trashed));
   const view = unifiedLibrary(localFolders, browserDocs, data, trash);
   const current = view.folders.some((f) => f.id === path) ? path : '';
@@ -128,6 +142,27 @@ export function CloudLibrary({
     if (!current) return;
     setExpanded((s) => [...new Set([...s, ...folderTrail(view.folders, current).map((f) => f.id)])]);
   }, [current]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIBRARY_TREE_KEY, JSON.stringify(expanded));
+    } catch {
+      /* Optional persistence. */
+    }
+  }, [expanded]);
+  useEffect(() => {
+    if (active && !trash) return;
+    setRenaming(null);
+    setMoving(null);
+    setVariants(null);
+    setConfirmDelete(null);
+    setDragged(null);
+    setOver(null);
+  }, [active, trash]);
+  useEffect(() => {
+    // The trash has no toolbar: opening it still refreshes cross-device deletions.
+    if (trash && !previousTrash.current && !busy) void refresh();
+    previousTrash.current = trash;
+  }, [trash]);
   const act = async (fn: () => Promise<void>) => {
     if (working.current) return;
     working.current = true;
@@ -306,14 +341,31 @@ export function CloudLibrary({
   };
   const folderMenu = (f: UnifiedFolder): ContextMenuItem[] => [
     { label: t('Open'), icon: 'folder', action: () => onGo(f.id) },
-    { label: t('Rename'), icon: 'rename', disabled: busy, action: () => setRenaming('folder:' + f.id) },
-    { label: t('Move to folder…'), icon: 'folder', disabled: busy, action: () => setMoving({ kind: 'folder', id: f.id }) },
+    {
+      label: t('Rename'),
+      icon: 'rename',
+      disabled: busy,
+      action: () => {
+        onGo(f.parentId);
+        setRenaming('folder:' + f.id);
+      },
+    },
+    {
+      label: t('Move to folder…'),
+      icon: 'folder',
+      disabled: busy,
+      action: () => {
+        onGo(f.parentId);
+        setMoving({ kind: 'folder', id: f.id });
+      },
+    },
     {
       label: t('Delete empty folder'),
       icon: 'trash',
       danger: true,
       disabled: busy,
-      action: () =>
+      action: () => {
+        onGo(f.parentId);
         void act(async () => {
           await ensureLocal();
           const preview = cloudFolderPreview(view.folders, view.documents, f.id);
@@ -322,7 +374,8 @@ export function CloudLibrary({
           if (f.cloudId) await deleteCloudFolder(f.cloudId);
           await changeLibrary({ kind: 'remove', id: f.id });
           await refresh();
-        }),
+        });
+      },
     },
   ];
   const changeTrash = async (d: LibraryDocument, remove: boolean) =>
@@ -366,7 +419,7 @@ export function CloudLibrary({
         return (
           <Fragment key={f.id}>
             <button
-              className={'docs-nav-item folder-nav' + (current === f.id ? ' active' : '') + dropClass(f.id)}
+              className={'docs-nav-item folder-nav' + (active && !trash && current === f.id ? ' active' : '') + dropClass(f.id)}
               style={{ paddingLeft: 4 + depth * 14 }}
               onClick={() => onGo(f.id)}
               {...dropProps(f.id)}
@@ -396,7 +449,8 @@ export function CloudLibrary({
     moving?.kind === 'folder' ? view.folders.find((f) => f.id === moving.id)?.name : view.documents.find((d) => d.id === moving?.id)?.name;
   return (
     <>
-      {heading &&
+      {active &&
+        heading &&
         createPortal(
           <span className="library-loading" role={busy ? 'status' : undefined} aria-label={busy ? t('Loading…') : undefined}>
             {busy && <span className="spinner" />}
@@ -404,206 +458,210 @@ export function CloudLibrary({
           heading,
         )}
       {sidebar && createPortal(<div className="library-sidebar-tree">{node('')}</div>, sidebar)}
-      {!trash && (
-        <div className="folder-bar">
-          <Icon name="folder" size={16} />
-          <nav className="folder-crumbs" aria-label={t('Folder path')}>
-            {crumbs.map((c, i) => (
-              <Fragment key={c.id}>
-                {i > 0 && <Icon name="chevronRight" size={12} />}
-                <button
-                  className={'folder-crumb' + (current === c.id ? ' current' : '') + dropClass(c.id)}
-                  onClick={() => onGo(c.id)}
-                  {...dropProps(c.id)}
-                >
-                  {c.name}
-                </button>
-              </Fragment>
-            ))}
-          </nav>
-          <span className="spacer" />
-          <button className="btn small primary" disabled={busy} onClick={createDocument}>
-            <Icon name="plus" size={14} />
-            {t('New document in the folder')}
-          </button>
-          <button className="btn small" disabled={busy} onClick={createFolder}>
-            <Icon name="folder" size={14} />
-            {t('New folder')}
-          </button>
-          <button className="btn small" disabled={busy} onClick={() => void refresh()}>
-            <Icon name="refresh" size={14} />
-            {t('Refresh')}
-          </button>
-          <button className="btn small" disabled={busy || !data} onClick={() => onUpload(current)}>
-            <Icon name="cloud" size={14} />
-            {t('Upload to cloud')}
-          </button>
-        </div>
-      )}
-      {error && (
-        <div className="docs-error" role="alert">
-          {error}
-        </div>
-      )}
-      {children.length > 0 && (
-        <div className="folder-grid">
-          {children.map((f) => {
-            const item: CloudItem = { kind: 'folder', id: f.id },
-              key = 'folder:' + f.id,
-              preview = cloudFolderPreview(view.folders, view.documents, f.id);
-            return (
-              <div
-                key={f.id}
-                className={'doc-card folder-card' + dropClass(f.id)}
-                draggable={!trash && !busy && renaming !== key}
-                onDragStart={(e) => dragStart(e, item, f.name)}
-                onDragEnd={dragEnd}
-                {...dropProps(f.id)}
-                onClick={() => renaming !== key && onGo(f.id)}
-                onContextMenu={(e) => renaming !== key && openCardMenu(e, key, folderMenu(f))}
-              >
-                <FolderPreview shown={preview.shown.map((d) => d.thumbnail)} more={preview.more} />
-                <FolderCardMeta name={f.name} count={preview.count}>
-                  {renaming === key ? <RenameInput value={f.name} onDone={(value) => void rename(item, value)} /> : null}
-                </FolderCardMeta>
-                <CardMenuButton owner={key} items={() => folderMenu(f)} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div className="docs-grid">
-        {documents.map((d) => {
-          const item: CloudItem = { kind: 'document', id: d.id },
-            key = 'document:' + d.id;
-          return (
-            <div
-              key={d.id}
-              className="doc-card"
-              draggable={!trash && !busy && renaming !== key}
-              onDragStart={(e) => dragStart(e, item, d.name)}
-              onDragEnd={dragEnd}
-              onClick={() => !trash && renaming !== key && void open(d)}
-              onContextMenu={(e) => renaming !== key && openCardMenu(e, key, documentMenu(d))}
-            >
-              <div className="doc-thumb">
-                {d.thumbnail ? (
-                  <img src={d.thumbnail} alt="" draggable={false} loading="lazy" referrerPolicy="no-referrer" />
-                ) : (
-                  <Icon name="partStudio" size={40} />
-                )}
-              </div>
-              {(d.cloud || d.locals.some((l) => l.cloudSource)) && (
-                <span className="doc-folder" title={t('Cloud connected')}>
-                  <Icon name="cloud" size={13} />
-                </span>
-              )}
-              <div className="doc-meta">
-                {renaming === key ? (
-                  <RenameInput value={d.name} onDone={(value) => void rename(item, value)} />
-                ) : (
-                  <div className="doc-name">{d.name}</div>
-                )}
-                <div className="doc-date">
-                  {t('Modified')}: {documentTime(d.modified)}
-                </div>
-                <div className="doc-date library-document-state">
-                  <Icon name={d.cloud ? 'cloud' : 'document'} size={12} />
-                  {t(libraryDocumentStatus(d))}
-                  {d.locals.length > 1 && ` · ${t('Local variants')}: ${d.locals.length}`}
-                </div>
-              </div>
-              {trash && (
-                <div className="doc-actions trash-actions">
-                  <button
-                    className="btn small"
-                    disabled={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void changeTrash(d, false);
-                    }}
-                  >
-                    <Icon name="undo" size={13} />
-                    {t('Restore')}
-                  </button>
-                  {!d.cloud && !d.locals.some((l) => l.cloudSource) && (
+      {active && (
+        <>
+          {!trash && (
+            <div className="folder-bar">
+              <Icon name="folder" size={16} />
+              <nav className="folder-crumbs" aria-label={t('Folder path')}>
+                {crumbs.map((c, i) => (
+                  <Fragment key={c.id}>
+                    {i > 0 && <Icon name="chevronRight" size={12} />}
                     <button
-                      className="btn small danger"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirmDelete !== d.id) {
-                          setConfirmDelete(d.id);
-                          return;
-                        }
-                        void act(async () => {
-                          for (const local of d.locals) await useDoc.getState().deleteDocument(local.id);
-                          setConfirmDelete(null);
-                          await refresh();
-                        });
-                      }}
+                      className={'folder-crumb' + (current === c.id ? ' current' : '') + dropClass(c.id)}
+                      onClick={() => onGo(c.id)}
+                      {...dropProps(c.id)}
                     >
-                      {t(confirmDelete === d.id ? 'Click again to delete' : 'Delete permanently')}
+                      {c.name}
                     </button>
-                  )}
-                </div>
-              )}
-              <CardMenuButton owner={key} items={() => documentMenu(d)} />
-            </div>
-          );
-        })}
-      </div>
-      {!children.length && !documents.length && !busy && (
-        <div className="empty-state">
-          <Icon name="folder" size={40} />
-          <h3>{t(trash ? 'The trash is empty' : 'No WebCAD documents in this folder yet')}</h3>
-          <div className="folder-hint">
-            {!trash && t('Create a document or a folder here, or save one of your documents into the folder from its card.')}
-          </div>
-        </div>
-      )}
-      {moving && (
-        <CloudMoveDialog
-          folders={view.folders}
-          documents={view.documents}
-          item={moving}
-          name={movingName ?? ''}
-          onClose={() => setMoving(null)}
-          onSave={(target) => finishMove(moving, target)}
-        />
-      )}
-      {variants && (
-        <div className="modal-backdrop" onPointerDown={() => setVariants(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('Local variants…')}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <div className="modal-header">{t('Local variants…')}</div>
-            <div className="modal-body">
-              <div className="docs-hint">{t('Existing variants are kept. Choose which one to open.')}</div>
-              {variants.locals.map((local) => (
-                <button
-                  key={local.id}
-                  className="btn"
-                  onClick={() => {
-                    setVariants(null);
-                    onOpen(local.id);
-                  }}
-                >
-                  {local.name} · {new Date(local.modified).toLocaleString()}
-                </button>
-              ))}
-            </div>
-            <div className="modal-footer">
-              <button className="btn" onClick={() => setVariants(null)}>
-                {t('Close')}
+                  </Fragment>
+                ))}
+              </nav>
+              <span className="spacer" />
+              <button className="btn small primary" disabled={busy} onClick={createDocument}>
+                <Icon name="plus" size={14} />
+                {t('New document in the folder')}
+              </button>
+              <button className="btn small" disabled={busy} onClick={createFolder}>
+                <Icon name="folder" size={14} />
+                {t('New folder')}
+              </button>
+              <button className="btn small" disabled={busy} onClick={() => void refresh()}>
+                <Icon name="refresh" size={14} />
+                {t('Refresh')}
+              </button>
+              <button className="btn small" disabled={busy || !data} onClick={() => onUpload(current)}>
+                <Icon name="cloud" size={14} />
+                {t('Upload to cloud')}
               </button>
             </div>
+          )}
+          {error && (
+            <div className="docs-error" role="alert">
+              {error}
+            </div>
+          )}
+          {children.length > 0 && (
+            <div className="folder-grid">
+              {children.map((f) => {
+                const item: CloudItem = { kind: 'folder', id: f.id },
+                  key = 'folder:' + f.id,
+                  preview = cloudFolderPreview(view.folders, view.documents, f.id);
+                return (
+                  <div
+                    key={f.id}
+                    className={'doc-card folder-card' + dropClass(f.id)}
+                    draggable={!trash && !busy && renaming !== key}
+                    onDragStart={(e) => dragStart(e, item, f.name)}
+                    onDragEnd={dragEnd}
+                    {...dropProps(f.id)}
+                    onClick={() => renaming !== key && onGo(f.id)}
+                    onContextMenu={(e) => renaming !== key && openCardMenu(e, key, folderMenu(f))}
+                  >
+                    <FolderPreview shown={preview.shown.map((d) => d.thumbnail)} more={preview.more} />
+                    <FolderCardMeta name={f.name} count={preview.count}>
+                      {renaming === key ? <RenameInput value={f.name} onDone={(value) => void rename(item, value)} /> : null}
+                    </FolderCardMeta>
+                    <CardMenuButton owner={key} items={() => folderMenu(f)} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="docs-grid">
+            {documents.map((d) => {
+              const item: CloudItem = { kind: 'document', id: d.id },
+                key = 'document:' + d.id;
+              return (
+                <div
+                  key={d.id}
+                  className="doc-card"
+                  draggable={!trash && !busy && renaming !== key}
+                  onDragStart={(e) => dragStart(e, item, d.name)}
+                  onDragEnd={dragEnd}
+                  onClick={() => !trash && renaming !== key && void open(d)}
+                  onContextMenu={(e) => renaming !== key && openCardMenu(e, key, documentMenu(d))}
+                >
+                  <div className="doc-thumb">
+                    {d.thumbnail ? (
+                      <img src={d.thumbnail} alt="" draggable={false} loading="lazy" referrerPolicy="no-referrer" />
+                    ) : (
+                      <Icon name="partStudio" size={40} />
+                    )}
+                  </div>
+                  {(d.cloud || d.locals.some((l) => l.cloudSource)) && (
+                    <span className="doc-folder" title={t('Cloud connected')}>
+                      <Icon name="cloud" size={13} />
+                    </span>
+                  )}
+                  <div className="doc-meta">
+                    {renaming === key ? (
+                      <RenameInput value={d.name} onDone={(value) => void rename(item, value)} />
+                    ) : (
+                      <div className="doc-name">{d.name}</div>
+                    )}
+                    <div className="doc-date">
+                      {t('Modified')}: {documentTime(d.modified)}
+                    </div>
+                    <div className="doc-date library-document-state">
+                      <Icon name={d.cloud ? 'cloud' : 'document'} size={12} />
+                      {t(libraryDocumentStatus(d))}
+                      {d.locals.length > 1 && ` · ${t('Local variants')}: ${d.locals.length}`}
+                    </div>
+                  </div>
+                  {trash && (
+                    <div className="doc-actions trash-actions">
+                      <button
+                        className="btn small"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void changeTrash(d, false);
+                        }}
+                      >
+                        <Icon name="undo" size={13} />
+                        {t('Restore')}
+                      </button>
+                      {!d.cloud && !d.locals.some((l) => l.cloudSource) && (
+                        <button
+                          className="btn small danger"
+                          disabled={busy}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirmDelete !== d.id) {
+                              setConfirmDelete(d.id);
+                              return;
+                            }
+                            void act(async () => {
+                              for (const local of d.locals) await useDoc.getState().deleteDocument(local.id);
+                              setConfirmDelete(null);
+                              await refresh();
+                            });
+                          }}
+                        >
+                          {t(confirmDelete === d.id ? 'Click again to delete' : 'Delete permanently')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <CardMenuButton owner={key} items={() => documentMenu(d)} />
+                </div>
+              );
+            })}
           </div>
-        </div>
+          {!children.length && !documents.length && !busy && (
+            <div className="empty-state">
+              <Icon name="folder" size={40} />
+              <h3>{t(trash ? 'The trash is empty' : 'No WebCAD documents in this folder yet')}</h3>
+              <div className="folder-hint">
+                {!trash && t('Create a document or a folder here, or save one of your documents into the folder from its card.')}
+              </div>
+            </div>
+          )}
+          {moving && (
+            <CloudMoveDialog
+              folders={view.folders}
+              documents={view.documents}
+              item={moving}
+              name={movingName ?? ''}
+              onClose={() => setMoving(null)}
+              onSave={(target) => finishMove(moving, target)}
+            />
+          )}
+          {variants && (
+            <div className="modal-backdrop" onPointerDown={() => setVariants(null)}>
+              <div
+                className="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-label={t('Local variants…')}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <div className="modal-header">{t('Local variants…')}</div>
+                <div className="modal-body">
+                  <div className="docs-hint">{t('Existing variants are kept. Choose which one to open.')}</div>
+                  {variants.locals.map((local) => (
+                    <button
+                      key={local.id}
+                      className="btn"
+                      onClick={() => {
+                        setVariants(null);
+                        onOpen(local.id);
+                      }}
+                    >
+                      {local.name} · {new Date(local.modified).toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+                <div className="modal-footer">
+                  <button className="btn" onClick={() => setVariants(null)}>
+                    {t('Close')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </>
   );

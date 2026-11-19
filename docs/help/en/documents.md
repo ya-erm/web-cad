@@ -137,7 +137,7 @@ How it works:
 
 ## My documents and folders {#libraries}
 
-**My documents** is one managed library. A document lives on this device and, when cloud storage is connected, has a cloud instance with a shared ID. One card shows its availability and pending cloud changes. **Recent documents** also groups known instances of the same document.
+**My documents** is one managed library. A document lives on this device and, when cloud storage is connected, has a cloud instance with a shared ID. One card shows its availability and pending cloud changes. **Recent documents** also groups known instances of the same document. The My documents and computer-folder trees remain visible when switching sections. Expanded branches are remembered in this browser; selection highlights only the current section. Click a folder in either tree to open it.
 
 Folders use the same bar and cards as computer folders:
 
