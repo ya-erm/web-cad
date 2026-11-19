@@ -1,6 +1,7 @@
 // Feature builders: each takes the current build state (already cloned) and mutates it.
 
 import * as R from 'replicad';
+import { fatalKernelError } from './errors';
 import { evaluate, evaluateTypedVariable, type EvalContext } from '../core/expr';
 import { sketchDims } from '../core/features';
 import { frameFromNormal, offsetFrame, rotateVec, STD_PLANES, v3 } from '../core/math';
@@ -24,6 +25,7 @@ import { expandTexts } from '../sketch/text';
 import { expandGears, gearSizeOf } from '../sketch/gear';
 import {
   bboxOf,
+  broadBoxOf,
   bodiesOf,
   compoundOf,
   fail,
@@ -127,14 +129,14 @@ function count(ctx: Ctx, s: string, what: string): number {
 }
 
 /** Size of the scene used for "through all" extents. */
-function sceneExtent(st: BuildState, extra: Shape3D[] = []): number {
+function sceneExtent(st: BuildState, extra: Shape3D[] = [], broad = false): number {
   let d = 100;
   const all = [...[...st.parts.values()].map((p) => p.shape), ...extra];
   if (all.length) {
     let lo: Vec3 = [Infinity, Infinity, Infinity];
     let hi: Vec3 = [-Infinity, -Infinity, -Infinity];
     for (const s of all) {
-      const [a, b] = bboxOf(s);
+      const [a, b] = broad ? broadBoxOf(s) : bboxOf(s);
       lo = [Math.min(lo[0], a[0]), Math.min(lo[1], a[1]), Math.min(lo[2], a[2])];
       hi = [Math.max(hi[0], b[0]), Math.max(hi[1], b[1]), Math.max(hi[2], b[2])];
     }
@@ -176,7 +178,29 @@ function scopeParts(st: BuildState, scope: MergeScope): PartState[] {
   return (scope.mergeAll ? [...st.parts.values()] : resolveParts(st, scope.parts)).filter((p) => !isSurface(p.shape));
 }
 
-/** Apply a tool body with a boolean operation (Onshape New/Add/Remove/Intersect semantics). */
+/** One target and several tools all touching it: fuse once, without the repeated rebuild of the growing body. */
+function batchAdd(st: BuildState, fid: string, solids: R.Solid[], scope: MergeScope): boolean {
+  if (solids.length < 2) return false;
+  const targets = scopeParts(st, scope);
+  if (targets.length !== 1) return false;
+  const part = targets[0];
+  // Compounds and composites keep the sequential path's part ordering and identity rules.
+  if (!(part.shape instanceof R.Solid) || st.composites.has(part.id)) return false;
+  if (!solids.every((solid) => shapesTouch(part.shape, solid))) return false;
+  let result: Shape3D;
+  try {
+    result = part.shape.fuse(compoundOf(solids));
+    if (solidsOf(result).length !== 1) return false;
+  } catch (e) {
+    if (fatalKernelError(e)) throw e;
+    // A compound fuse may fail where consecutive fuses work. No state has changed: retry the original path.
+    return false;
+  }
+  replacePart(st, part.id, result, fid);
+  return true;
+}
+
+/** Apply a tool body (Onshape New/Add/Remove/Intersect). Replicad Booleans already unify the result's faces/edges. */
 export function applyBodyOp(st: BuildState, fid: string, tool: Shape3D, op: BoolOp, scope: MergeScope) {
   if (isEmptyShape(tool)) fail('Feature produced no solid');
   if (op === 'new') {
@@ -184,7 +208,9 @@ export function applyBodyOp(st: BuildState, fid: string, tool: Shape3D, op: Bool
     return;
   }
   if (op === 'add') {
-    for (const solid of solidsOf(tool)) {
+    const solids = solidsOf(tool);
+    if (batchAdd(st, fid, solids, scope)) return;
+    for (const solid of solids) {
       const targets = scopeParts(st, scope).filter((p) => shapesTouch(p.shape, solid));
       if (targets.length === 0) {
         setPart(st, newPartId(st, `${fid}.0`), solid);
@@ -196,7 +222,7 @@ export function applyBodyOp(st: BuildState, fid: string, tool: Shape3D, op: Bool
         adoptThreads(st, targets[i].id, targets[0].id);
         removePart(st, targets[i].id);
       }
-      replacePart(st, targets[0].id, simplified(acc), fid);
+      replacePart(st, targets[0].id, acc, fid);
     }
     return;
   }
@@ -209,7 +235,7 @@ export function applyBodyOp(st: BuildState, fid: string, tool: Shape3D, op: Bool
     }
     touched++;
     const res = op === 'remove' ? p.shape.cut(tool) : p.shape.intersect(tool);
-    replacePart(st, p.id, simplified(res), fid);
+    replacePart(st, p.id, res, fid);
   }
   if (touched === 0) fail(op === 'remove' ? 'Nothing to remove: the tool does not touch any part' : 'Nothing to intersect');
 }
@@ -389,7 +415,7 @@ function buildExtrudeSurface(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
   const st = ctx.st;
   const refs = (p.curves ?? []).filter((r) => r.kind === 'sketchEntity');
   if (!refs.length) fail('Select sketch curves to extrude into a surface');
-  const big = sceneExtent(st);
+  const big = p.endType === 'throughAll' || (p.secondEnd && p.endType !== 'symmetric' && p.endType2 === 'throughAll') ? sceneExtent(st, [], true) : 0;
   const oc = R.getOC();
   const faces: R.Face[] = [];
   for (const r of refs) {
@@ -429,7 +455,7 @@ function buildExtrude(ctx: Ctx, f: FeatureOf<'extrude'>): FeatureOutput {
   if (p.bodyType === 'surface') return buildExtrudeSurface(ctx, f);
   const profiles = resolveProfiles(st, p.profiles);
   if (!profiles.length) fail('Select sketch regions or planar faces to extrude');
-  const big = sceneExtent(st);
+  const big = p.endType === 'throughAll' || (p.secondEnd && p.endType !== 'symmetric' && p.endType2 === 'throughAll') ? sceneExtent(st, [], true) : 0;
   const tools: Shape3D[] = [];
   for (const pf of profiles) {
     const dir = p.flip ? v3.neg(pf.frame.normal) : pf.frame.normal;
@@ -968,7 +994,6 @@ function onlySelected(shape: Shape3D, blended: Shape3D, selected: R.Edge[], extr
     let res: Shape3D = shape;
     if (removed.length) res = res.cut(fuseAll(removed));
     if (added.length) res = res.fuse(fuseAll(added));
-    res = simplified(res);
     return solidsOf(res).length ? res : null;
   } catch {
     return null;
@@ -1178,7 +1203,7 @@ function toPlanes(shape: Shape3D, faces: number[], target: (i: number) => { to: 
     if (c.add) s = s.fuse(c.add);
     if (c.remove) s = s.cut(c.remove);
   }
-  return simplified(s);
+  return s === shape ? simplified(s) : s;
 }
 
 function buildMoveFace(ctx: Ctx, f: FeatureOf<'moveFace'>): FeatureOutput {
@@ -1590,7 +1615,7 @@ function patternInstances(
         const copy = x(part.shape);
         if (op === 'add') {
           const cur = st.parts.get(part.id);
-          if (cur) setPart(st, part.id, simplified(cur.shape.fuse(copy)));
+          if (cur) setPart(st, part.id, cur.shape.fuse(copy));
           copyThreads(st, threads, part.id, part.id, x, ctx.fid, i + 1);
         } else {
           const id = newPartId(st, `${part.id}@${ctx.fid}.${i + 1}`);
@@ -1948,7 +1973,7 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
     const tool = fuseAll(tools.map((t) => t.shape));
     for (const t of targets) {
       if (!isSurface(t.shape)) {
-        replacePart(st, t.id, simplified(t.shape.cut(tool)), ctx.fid);
+        replacePart(st, t.id, t.shape.cut(tool), ctx.fid);
         continue;
       }
       // a surface (a lone face too — in a compound) keeps what lies outside the tools; none left — it is gone
@@ -1966,7 +1991,7 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
       let acc: Shape3D = t.shape;
       for (const x of tools) acc = acc.intersect(x.shape);
       if (isEmptyShape(acc)) fail('Parts do not intersect');
-      replacePart(st, t.id, simplified(acc), ctx.fid);
+      replacePart(st, t.id, acc, ctx.fid);
     }
   } else {
     if (tools.length < 2) fail('Select at least two parts to intersect');
@@ -1977,7 +2002,7 @@ function buildBoolean(ctx: Ctx, f: FeatureOf<'boolean'>): FeatureOutput {
       adoptThreads(st, t.id, tools[0].id);
       removePart(st, t.id);
     });
-    replacePart(st, tools[0].id, simplified(acc), ctx.fid);
+    replacePart(st, tools[0].id, acc, ctx.fid);
   }
   return {};
 }

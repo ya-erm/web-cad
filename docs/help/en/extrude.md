@@ -50,8 +50,10 @@ width: 650
 
 ## Tips {#tips}
 
+- If several profiles all join the same part, select them in one **Add** extrusion: WebCAD can fuse them together without rebuilding the growing part after each profile.
 - **Remove** + **Through all** is a quick way to make a through cut. For round holes, [Hole](hole) is more convenient.
 - You can link the depth to a variable: `#t`, `#height - 2 mm`.
+- For a specified depth, choose **Blind**: rebuilding does not need to calculate the extent of the whole scene. **Through all** automatically sizes the tool to the entire model, including for the second direction.
 - The message "Nothing to remove: the tool does not touch any part" means the cutting body does not touch any part — check the direction.
 
 > **Limitation.** In **Thin** mode, only the outer boundary of the profile is used; inner loops (holes in the region) are ignored.

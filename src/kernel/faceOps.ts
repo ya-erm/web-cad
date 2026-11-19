@@ -10,7 +10,7 @@
 import * as R from 'replicad';
 import { v3 } from '../core/math';
 import type { Vec3 } from '../core/types';
-import { bboxOf, fail, isEmptyShape, prism, simplified, type Shape3D } from './geom';
+import { bboxOf, fail, isEmptyShape, prism, type Shape3D } from './geom';
 import { topologyOf } from './meshing';
 
 /** A plane: a point on it and its normal (out of the material, for a face's plane). */
@@ -211,7 +211,7 @@ function aroundPlanes(shape: Shape3D, set: number[]): { pl: Plane; inside: boole
 export function deleteFaces(shape: Shape3D, selected: number[]): Shape3D {
   const set = withPieces(shape, selected);
   const v = enclosed(shape, set);
-  if (v) return simplified(isMaterial(shape, v) ? shape.cut(v) : shape.fuse(v));
+  if (v) return isMaterial(shape, v) ? shape.cut(v) : shape.fuse(v);
   const planes = aroundPlanes(shape, set);
   if (!planes) fail('The faces around the selected ones cannot close the gap: select a whole hole, pocket or boss, or a blend between planar faces');
   const b = facesBox(shape, set);
@@ -229,7 +229,7 @@ export function deleteFaces(shape: Shape3D, selected: number[]): Shape3D {
     for (const { pl } of outer) air = clip(air, pl, false, big);
     region = isEmptyShape(air) ? region : region.cut(air);
   }
-  return simplified(shape.cut(box(b)).fuse(region));
+  return shape.cut(box(b)).fuse(region);
 }
 
 /**
@@ -266,7 +266,7 @@ export function moveFeature(shape: Shape3D, selected: number[], motion: Motion):
   const material = isMaterial(shape, v);
   const healed = material ? shape.cut(v) : shape.fuse(v);
   const moved = motion.shape(v);
-  return simplified(material ? healed.fuse(moved) : healed.cut(moved));
+  return material ? healed.fuse(moved) : healed.cut(moved);
 }
 
 /**
@@ -310,7 +310,7 @@ export function offsetCylinder(shape: Shape3D, face: number, d: number): Shape3D
   const base = v3.add(info.axisPoint, v3.scale(a, v0));
   const ring = (R.makeCylinder(Math.max(r, r2), h, base, a) as Shape3D).cut(R.makeCylinder(Math.min(r, r2), h, base, a) as Shape3D);
   // out of the material: material comes; into it: material goes
-  return simplified(d > 0 ? shape.fuse(ring) : shape.cut(ring));
+  return d > 0 ? shape.fuse(ring) : shape.cut(ring);
 }
 
 /** Whether a set of faces encloses a feature of its own (a whole hole, pocket or boss). */

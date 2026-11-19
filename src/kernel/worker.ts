@@ -8,6 +8,7 @@ import { StudioBuilder, assemblyStepOf, errorMessage, placedShape, stepOf, stlOf
 import { transferablesOf } from './meshing';
 import { stlMeshes } from './stlMesh';
 import { loadFonts } from '../sketch/text';
+import { fatalKernelError } from './errors';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -123,16 +124,6 @@ async function handle(req: WorkerRequest) {
   }
 }
 
-/**
- * An error of the WebAssembly kernel itself (a trap: out of bounds, unreachable; an abort; out of memory), not of a
- * geometry operation: OpenCascade's memory may be broken — the worker is to be started anew.
- */
-function fatalError(e: unknown): boolean {
-  if (typeof WebAssembly !== 'undefined' && e instanceof WebAssembly.RuntimeError) return true;
-  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-  return /Aborted\(|out of memory|memory access out of bounds|unreachable|table index is out of bounds/i.test(m);
-}
-
 async function pump() {
   if (running) return;
   running = true;
@@ -154,7 +145,7 @@ async function pump() {
     try {
       await handle(req);
     } catch (e) {
-      post({ type: 'error', reqId: req.reqId, message: errorMessage(e), ...(fatalError(e) ? { fatal: true } : {}) });
+      post({ type: 'error', reqId: req.reqId, message: errorMessage(e), ...(fatalKernelError(e) ? { fatal: true } : {}) });
     }
   }
   running = false;

@@ -204,19 +204,12 @@ export function fuseAll(shapes: Shape3D[]): Shape3D {
   const fused = [...groups.values()].map((group) => {
     let acc = group[0];
     for (let i = 1; i < group.length; i++) acc = acc.fuse(group[i]);
-    if (group.length > 1) {
-      try {
-        acc = acc.simplify();
-      } catch {
-        /* keep unsimplified */
-      }
-    }
     return acc;
   });
   return compoundOf(fused);
 }
 
-/** The shape with coplanar / co-surface faces merged (as it is when that fails). */
+/** Merge coplanar / co-surface faces (keep the shape on failure). Replicad Booleans already do this themselves. */
 export function simplified(s: Shape3D): Shape3D {
   try {
     return s.simplify();
@@ -236,6 +229,7 @@ export function isEmptyShape(s: R.AnyShape | null | undefined): boolean {
 
 /** Shapes' exact boxes — once per shape (shapes are not changed in place). */
 const boxCache = new WeakMap<object, [Vec3, Vec3]>();
+const broadBoxCache = new WeakMap<object, [Vec3, Vec3]>();
 
 type OcBox = { CornerMin(): OcXYZ; CornerMax(): OcXYZ; IsVoid(): boolean; delete(): void };
 type OcXYZ = { X(): number; Y(): number; Z(): number };
@@ -301,14 +295,35 @@ export function bboxOf(s: R.AnyShape): [Vec3, Vec3] {
   return [[...box[0]], [...box[1]]];
 }
 
+/**
+ * A conservative box for rejection tests and oversized tools. Add encloses the whole shape without the expensive
+ * surface extrema of AddOptimal. Measurements and persistent references keep using the exact bboxOf instead.
+ */
+export function broadBoxOf(s: R.AnyShape): [Vec3, Vec3] {
+  const cached = boxCache.get(s) ?? broadBoxCache.get(s);
+  if (cached) return [[...cached[0]], [...cached[1]]];
+  const b = new R.BoundingBox();
+  try {
+    R.getOC().BRepBndLib.Add(s.wrapped, b.wrapped, false);
+    if (b.wrapped.IsVoid()) return bboxOf(s);
+    const [lo, hi] = b.bounds as [Vec3, Vec3];
+    if (![...lo, ...hi].every(Number.isFinite)) return bboxOf(s);
+    const box: [Vec3, Vec3] = [[...lo], [...hi]];
+    broadBoxCache.set(s, box);
+    return [[...box[0]], [...box[1]]];
+  } finally {
+    b.delete();
+  }
+}
+
 export function bboxDiag(b: [Vec3, Vec3]) {
   return v3.dist(b[0], b[1]);
 }
 
 /** Distance between shapes (0 when touching/intersecting). */
 export function shapesTouch(a: R.AnyShape, b: R.AnyShape, tol = 1e-6): boolean {
-  const [a0, a1] = bboxOf(a);
-  const [b0, b1] = bboxOf(b);
+  const [a0, a1] = broadBoxOf(a);
+  const [b0, b1] = broadBoxOf(b);
   for (let i = 0; i < 3; i++) {
     if (a1[i] < b0[i] - tol * 10 || b1[i] < a0[i] - tol * 10) return false;
   }

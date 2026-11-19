@@ -14,6 +14,8 @@ export interface Topology {
   vertices: Vec3[];
   faceInfo: FaceInfo[];
   edgeInfo: EdgeInfo[];
+  /** Geometric properties of one edge, without meshing or computing display adjacency for the whole shape. */
+  edgeInfoAt(index: number): EdgeInfo;
 }
 
 interface MeshData {
@@ -202,22 +204,45 @@ function edgeInfoOf(edge: R.Edge): EdgeInfo {
   return info;
 }
 
+/** Subshapes, geometry and display adjacency are cached separately: a lookup pays only for what it reads. */
 export function topologyOf(shape: Shape3D): Topology {
-  let t = topoCache.get(shape);
-  if (t) return t;
-  const faces = subShapes(shape, 'face');
-  const edges = subShapes(shape, 'edge');
-  const vertices: Vec3[] = subShapes(shape, 'vertex').map((v) => v.asTuple());
-  // Mesh first so that SurfaceProperties can use the triangulation.
-  ensureMesh(shape, 1);
-  t = {
-    faces,
-    edges,
-    vertices,
-    faceInfo: faces.map(faceInfoOf),
-    edgeInfo: edges.map(edgeInfoOf),
+  const cached = topoCache.get(shape);
+  if (cached) return cached;
+  let faces: R.Face[] | undefined;
+  let edges: R.Edge[] | undefined;
+  let vertices: Vec3[] | undefined;
+  let faceInfo: FaceInfo[] | undefined;
+  let edgeInfo: EdgeInfo[] | undefined;
+  const edgeProperties: (EdgeInfo | undefined)[] = [];
+  let adjacency: ReturnType<typeof adjacencyOf> | undefined;
+  const links = () => (adjacency ??= adjacencyOf(t.faces, t.edges));
+  const t: Topology = {
+    get faces() { return (faces ??= subShapes(shape, 'face')); },
+    get edges() { return (edges ??= subShapes(shape, 'edge')); },
+    get vertices() { return (vertices ??= subShapes(shape, 'vertex').map((v) => v.asTuple())); },
+    edgeInfoAt(index) { return (edgeProperties[index] ??= edgeInfoOf(t.edges[index])); },
+    get edgeInfo() {
+      if (!edgeInfo) {
+        const info = t.edges.map((_, i) => t.edgeInfoAt(i));
+        for (const i of links().seams) info[i].seam = true;
+        edgeInfo = info;
+      }
+      return edgeInfo;
+    },
+    get faceInfo() {
+      if (!faceInfo) {
+        // Keep the same triangulation-backed surface properties used by saved face references.
+        // An edge or vertex lookup never needs to reach this path.
+        ensureMesh(shape, 1);
+        const info = t.faces.map(faceInfoOf);
+        const { faceEdges } = links();
+        info.forEach((f, i) => { f.edges = faceEdges[i]; });
+        completeTori(info, t.edgeInfo);
+        faceInfo = info;
+      }
+      return faceInfo;
+    },
   };
-  markSeams(t);
   topoCache.set(shape, t);
   return t;
 }
@@ -226,36 +251,41 @@ export function topologyOf(shape: Shape3D): Topology {
  * Face → edge adjacency (FaceInfo.edges, for "Use" of a face). Edges bounded by a single face
  * (periodic seams) are flagged so the UI can hide them.
  */
-function markSeams(t: Topology) {
+function adjacencyOf(faces: R.Face[], edges: R.Edge[]): { faceEdges: number[][]; seams: Set<number> } {
   const buckets = new Map<number, number[]>();
-  t.edges.forEach((e, i) => {
+  edges.forEach((e, i) => {
     const h = e.hashCode;
     const b = buckets.get(h);
     if (b) b.push(i);
     else buckets.set(h, [i]);
   });
-  const faceSets: Set<number>[] = t.edges.map(() => new Set());
-  t.faces.forEach((f, fi) => {
+  const faceSets: Set<number>[] = edges.map(() => new Set());
+  const faceEdges = faces.map((f, fi) => {
     const own = new Set<number>();
     for (const fe of f.edges) {
       const cand = buckets.get(fe.hashCode) ?? [];
       for (const i of cand) {
-        if (t.edges[i].isSame(fe)) {
+        if (edges[i].isSame(fe)) {
           faceSets[i].add(fi);
           own.add(i);
           break;
         }
       }
     }
-    t.faceInfo[fi].edges = [...own];
+    return [...own];
   });
+  const seams = new Set<number>();
   faceSets.forEach((set, i) => {
-    if (set.size === 1) t.edgeInfo[i].seam = true;
+    if (set.size === 1) seams.add(i);
   });
+  return { faceEdges, seams };
+}
+
+function completeTori(faces: FaceInfo[], edges: EdgeInfo[]) {
   // torus (no binding for its axis): the axis of a circular boundary edge, seams excluded
-  for (const info of t.faceInfo) {
+  for (const info of faces) {
     if (info.type !== 'TORUS' || info.axis) continue;
-    const rim = (info.edges ?? []).map((i) => t.edgeInfo[i]).find((e) => !e.seam && e.type === 'CIRCLE' && e.axis && e.circleCenter);
+    const rim = (info.edges ?? []).map((i) => edges[i]).find((e) => !e.seam && e.type === 'CIRCLE' && e.axis && e.circleCenter);
     if (rim) {
       info.axis = rim.axis;
       info.axisPoint = rim.circleCenter;
@@ -311,6 +341,8 @@ export function meshPart(
   quality = 1,
 ): PartMesh {
   const topo = topologyOf(shape);
+  // Face signatures use the base triangulation before a higher-quality display mesh is requested.
+  const faces = topo.faceInfo;
   const m = ensureMesh(shape, quality);
   const verts = new Float32Array(topo.vertices.length * 3);
   topo.vertices.forEach((p, i) => verts.set(p, i * 3));
@@ -329,7 +361,7 @@ export function meshPart(
     edgePositions: m.edgePositions.slice(),
     edgeRanges: m.edgeRanges.slice(),
     vertices: verts,
-    faces: topo.faceInfo,
+    faces,
     edges: topo.edgeInfo,
     bbox: bboxOf(shape),
   };

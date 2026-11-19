@@ -20,6 +20,9 @@ import { openComposite, type BuildState, type PartState, type SketchState } from
 // Signature matching
 // ---------------------------------------------------------------------------
 
+const MIN_PART_SCALE = 1e-3;
+const HINT_SCORE_LIMIT = 1e-4;
+
 function sizeScore(a: number, b: number) {
   return Math.abs(Math.log((Math.abs(a) + 1e-9) / (Math.abs(b) + 1e-9)));
 }
@@ -31,9 +34,9 @@ function dirScore(a?: Vec3, b?: Vec3, unsigned = false) {
 }
 
 /** Geometric part of the score: best of absolute and bbox-relative position match. */
-function positionScore(sig: GeomSig, center: Vec3, scale: number, bbox: [Vec3, Vec3]) {
+function positionScore(sig: GeomSig, center: Vec3, scale: number, bbox?: [Vec3, Vec3]) {
   const abs = v3.dist(sig.center, center) / scale;
-  if (!sig.rel) return abs;
+  if (!sig.rel || !bbox) return abs;
   const rel = relativeTo(bbox, center)!;
   return Math.min(abs, v3.dist(sig.rel, rel) * 8);
 }
@@ -47,7 +50,7 @@ function faceScore(sig: GeomSig, f: FaceInfo, scale: number, bbox: [Vec3, Vec3])
   return s;
 }
 
-function edgeScore(sig: GeomSig, e: EdgeInfo, scale: number, bbox: [Vec3, Vec3]) {
+function edgeScore(sig: GeomSig, e: EdgeInfo, scale: number, bbox?: [Vec3, Vec3]) {
   let s = positionScore(sig, e.center, scale, bbox);
   if (sig.type !== e.type) s += 5;
   s += dirScore(sig.dir, e.dir, true) * 2;
@@ -56,17 +59,17 @@ function edgeScore(sig: GeomSig, e: EdgeInfo, scale: number, bbox: [Vec3, Vec3])
   return s;
 }
 
-function bestIndex<T>(items: T[], score: (t: T) => number, hint: number): number {
-  if (hint >= 0 && hint < items.length && score(items[hint]) < 1e-4) return hint;
+function bestIndex<T>(length: number, at: (i: number) => T, score: (t: T) => number, hint: number): number {
+  if (hint >= 0 && hint < length && score(at(hint)) < HINT_SCORE_LIMIT) return hint;
   let best = -1;
   let bestScore = Infinity;
-  items.forEach((it, i) => {
-    const s = score(it);
+  for (let i = 0; i < length; i++) {
+    const s = score(at(i));
     if (s < bestScore) {
       bestScore = s;
       best = i;
     }
-  });
+  }
   return bestScore < 4 ? best : -1;
 }
 
@@ -81,7 +84,7 @@ export function getPart(st: BuildState, partId: string): PartState {
 }
 
 function partScale(p: PartState) {
-  return Math.max(bboxDiag(bboxOf(p.shape)) * 0.05, 1e-3);
+  return Math.max(bboxDiag(bboxOf(p.shape)) * 0.05, MIN_PART_SCALE);
 }
 
 export function resolveFace(st: BuildState, ref: SelRef) {
@@ -90,7 +93,7 @@ export function resolveFace(st: BuildState, ref: SelRef) {
   const topo = topologyOf(part.shape);
   const scale = partScale(part);
   const bbox = bboxOf(part.shape);
-  const idx = bestIndex(topo.faceInfo, (f) => faceScore(ref.sig, f, scale, bbox), ref.index);
+  const idx = bestIndex(topo.faceInfo.length, (i) => topo.faceInfo[i], (f) => faceScore(ref.sig, f, scale, bbox), ref.index);
   if (idx < 0) fail('Referenced face could not be found');
   return { part, face: topo.faces[idx], index: idx, info: topo.faceInfo[idx] };
 }
@@ -99,11 +102,19 @@ export function resolveEdge(st: BuildState, ref: SelRef) {
   if (ref.kind !== 'edge') fail('Expected an edge');
   const part = getPart(st, ref.partId);
   const topo = topologyOf(part.shape);
+  const validRelative = !ref.sig.rel || (Array.isArray(ref.sig.rel) && ref.sig.rel.length === 3 && ref.sig.rel.every(Number.isFinite));
+  if (Number.isInteger(ref.index) && ref.index >= 0 && ref.index < topo.edges.length && validRelative) {
+    const info = topo.edgeInfoAt(ref.index);
+    // Use only absolute geometry and the smallest possible part scale. This score is an upper bound on the
+    // full score: a match here would also accept this same hint after calculating the exact body bounds.
+    if (edgeScore(ref.sig, info, MIN_PART_SCALE) < HINT_SCORE_LIMIT)
+      return { part, edge: topo.edges[ref.index], index: ref.index, info };
+  }
   const scale = partScale(part);
   const bbox = bboxOf(part.shape);
-  const idx = bestIndex(topo.edgeInfo, (e) => edgeScore(ref.sig, e, scale, bbox), ref.index);
+  const idx = bestIndex(topo.edges.length, (i) => topo.edgeInfoAt(i), (e) => edgeScore(ref.sig, e, scale, bbox), ref.index);
   if (idx < 0) fail('Referenced edge could not be found');
-  return { part, edge: topo.edges[idx], index: idx, info: topo.edgeInfo[idx] };
+  return { part, edge: topo.edges[idx], index: idx, info: topo.edgeInfoAt(idx) };
 }
 
 export function resolveVertex(st: BuildState, ref: SelRef): Vec3 {
