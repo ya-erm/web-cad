@@ -1,5 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { S3Client, PutObjectCommand, GetObjectCommand, CopyObjectCommand, getSignedUrl } from './vendor.mjs';
 import { CloudError } from './cloud-store.mjs';
 
 /** @param {string} bucket @param {string} token @param {AbortSignal} signal */

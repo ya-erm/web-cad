@@ -27,7 +27,8 @@ jobs:
           node-version: lts/*
           cache: npm
       - run: npm ci
-      - run: npm ci --prefix cloud/api --omit=dev --ignore-scripts
+      - run: npm ci --prefix cloud/api --ignore-scripts
+      - run: python3 scripts/package-cloud-api.py
       - run: npm test
       - run: npm run build
       - uses: actions/configure-pages@v6

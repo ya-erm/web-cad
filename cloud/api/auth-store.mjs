@@ -1,7 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { Driver } from '@ydbjs/core';
-import { AccessTokenCredentialsProvider } from '@ydbjs/auth/access-token';
-import { query } from '@ydbjs/query';
+import { Driver, AccessTokenCredentialsProvider, query } from './vendor.mjs';
 import { SESSION_LIFETIME_MS, SESSION_RENEWAL_INTERVAL_MS } from './auth-policy.mjs';
 
 /** @typedef {{id: string, displayName: string, email: string|null, avatarUrl: string|null}} AuthUser */

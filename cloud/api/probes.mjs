@@ -1,6 +1,4 @@
-import { Driver } from '@ydbjs/core';
-import { AccessTokenCredentialsProvider } from '@ydbjs/auth/access-token';
-import { query } from '@ydbjs/query';
+import { Driver, AccessTokenCredentialsProvider, query } from './vendor.mjs';
 
 /** @param {string} connectionString @param {string} token @param {AbortSignal} signal */
 export async function checkYdb(connectionString, token, signal) {

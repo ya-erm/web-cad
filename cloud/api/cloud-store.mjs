@@ -1,6 +1,4 @@
-import { Driver } from '@ydbjs/core';
-import { AccessTokenCredentialsProvider } from '@ydbjs/auth/access-token';
-import { query } from '@ydbjs/query';
+import { Driver, AccessTokenCredentialsProvider, query } from './vendor.mjs';
 
 export class CloudError extends Error {
   /** @param {number} status @param {string} code */
