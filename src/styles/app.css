@@ -512,11 +512,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 2px;
-  visibility: hidden;
-}
-.ver-item:hover .ver-buttons,
-.ver-item.viewing .ver-buttons {
-  visibility: visible;
+  color: var(--text-2);
 }
 .ver-workspace {
   cursor: pointer;
@@ -4368,3 +4364,10 @@ body.panel-resizing-y * {
 .upload-option-help:focus-visible { outline: 2px solid var(--accent); border-radius: 3px; }
 
 .library-heading-slot { display: inline-flex; align-items: center; height: 20px; }
+
+.version-action-menu { min-width: 230px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; z-index: 1200; }
+.version-action-menu .dropdown-item { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; background: transparent; text-align: left; font: inherit; }
+.version-action-menu .dropdown-item:hover:not(:disabled), .version-action-menu .dropdown-item:focus-visible { background: var(--hover); outline: none; }
+.version-action-menu .dropdown-item:disabled { opacity: .45; cursor: default; }
+.version-action-menu .dropdown-item > svg { flex: none; }
+.version-action-menu .dropdown-item > span { white-space: normal; }

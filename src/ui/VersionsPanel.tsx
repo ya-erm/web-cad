@@ -2,8 +2,19 @@
 // restore it — and the banner over a version being viewed.
 
 import { useState } from 'react';
+import { VersionActionMenu } from './VersionActionMenu';
 import type { CadDocument, DocumentVersion, FeatureType, ViewOrientation } from '../core/types';
-import { MAIN_WORKSPACE, mergeDependents, mergeNeeds, nextVersionName, type DocumentDiff, type ItemChange, type MergeItem, type MergePlan, type MergeTab } from '../core/versions';
+import {
+  MAIN_WORKSPACE,
+  mergeDependents,
+  mergeNeeds,
+  nextVersionName,
+  type DocumentDiff,
+  type ItemChange,
+  type MergeItem,
+  type MergePlan,
+  type MergeTab,
+} from '../core/versions';
 import { FEATURE_LABELS } from '../core/features';
 import { VIEW_NAMES } from '../drawing/sheet';
 import { useDoc } from '../store/docStore';
@@ -37,7 +48,8 @@ const REASONS: Record<NonNullable<DocumentVersion['reason']>, string> = {
   merge: 'Before a merge',
 };
 
-const when = (time: number) => new Date(time).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+const when = (time: number) =>
+  new Date(time).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
 /** A version by its name, an entry of the history by why it was saved. */
 const title = (v: DocumentVersion) => (v.kind === 'version' ? v.name : t('Autosave'));
 
@@ -99,12 +111,28 @@ function keyLabel(c: Pick<ItemChange, 'what' | 'type'> | null, key: string): str
 type Named = Pick<ItemChange, 'what' | 'name' | 'type'>;
 /** A changed item's name: a feature's (translated), a standard view's, none for dimensions, notes and balloons. */
 const itemName = (c: Named) =>
-  c.what === 'feature' ? tName(c.name) : c.what === 'view' && c.type && c.name === c.type ? t(VIEW_NAMES[c.type as ViewOrientation] ?? c.name) : c.what === 'dimension' || c.what === 'note' || c.what === 'balloon' ? '' : c.name;
+  c.what === 'feature'
+    ? tName(c.name)
+    : c.what === 'view' && c.type && c.name === c.type
+      ? t(VIEW_NAMES[c.type as ViewOrientation] ?? c.name)
+      : c.what === 'dimension' || c.what === 'note' || c.what === 'balloon'
+        ? ''
+        : c.name;
 /** What a changed item is: a feature's type, else its kind. */
 const itemWhat = (c: Named) => t(c.what === 'feature' && c.type ? (FEATURE_LABELS[c.type as FeatureType] ?? WHAT.feature) : WHAT[c.what]);
 
 /** What changed from a version to the workspace, tab by tab. */
-function DiffView({ version, diff, onBack, onModel }: { version: DocumentVersion; diff: DocumentDiff; onBack: () => void; onModel?: (tabId: string) => void }) {
+function DiffView({
+  version,
+  diff,
+  onBack,
+  onModel,
+}: {
+  version: DocumentVersion;
+  diff: DocumentDiff;
+  onBack: () => void;
+  onModel?: (tabId: string) => void;
+}) {
   const mark = { added: '+', removed: '−', changed: '~' } as const;
   return (
     <div className="ver-diff">
@@ -128,7 +156,11 @@ function DiffView({ version, diff, onBack, onModel }: { version: DocumentVersion
             <span className="ver-mark">{mark[tab.kind]}</span>
             <Icon name={tab.type === 'partStudio' ? 'partStudio' : tab.type === 'assembly' ? 'assembly' : 'drawing'} size={14} />
             <b>{tName(tab.name)}</b>
-            {tab.from && <span className="ver-was">({t('was')} {tName(tab.from)})</span>}
+            {tab.from && (
+              <span className="ver-was">
+                ({t('was')} {tName(tab.from)})
+              </span>
+            )}
             {tab.kind !== 'changed' && <span className="ver-was">{t(tab.kind === 'added' ? 'new tab' : 'tab deleted')}</span>}
             {/* a Part Studio changed: its faces new, changed and gone, on the model */}
             {onModel && tab.kind === 'changed' && tab.type === 'partStudio' && (
@@ -169,7 +201,19 @@ function DiffView({ version, diff, onBack, onModel }: { version: DocumentVersion
 const wsName = (name: string) => (name === MAIN_WORKSPACE.name ? t('Main') : name);
 
 /** What merging a workspace into the open one brings: the tabs to take (checked), the units; then Merge. */
-function MergeView({ from, into, plan, onMerge, onBack }: { from: string; into: string; plan: MergePlan; onMerge: (take: Set<string>, units: boolean) => void; onBack: () => void }) {
+function MergeView({
+  from,
+  into,
+  plan,
+  onMerge,
+  onBack,
+}: {
+  from: string;
+  into: string;
+  plan: MergePlan;
+  onMerge: (take: Set<string>, units: boolean) => void;
+  onBack: () => void;
+}) {
   // what can be taken of a tab: itself (merged item by item: its own keys, if changed) and its items
   const keysOf = (m: MergeTab) => [...(!m.items || m.keys?.length ? [m.id] : []), ...(m.items ?? []).map((f) => `${m.id}/${f.id}`)];
   const [take, setTake] = useState(() => new Set(plan.tabs.flatMap(keysOf)));
@@ -191,7 +235,8 @@ function MergeView({ from, into, plan, onMerge, onBack }: { from: string; into: 
       on,
     );
   /** An item for people: a feature by its name, anything else — what it is and its name (a note: its text). */
-  const label = (x: MergeItem) => (x.what === 'feature' ? tName(x.name) : [itemWhat(x), x.what === 'note' ? x.name : itemName(x)].filter(Boolean).join(' '));
+  const label = (x: MergeItem) =>
+    x.what === 'feature' ? tName(x.name) : [itemWhat(x), x.what === 'note' ? x.name : itemName(x)].filter(Boolean).join(' ');
   const itemLabel = (m: MergeTab, id: string) => {
     const x = m.items?.find((f) => f.id === id);
     return x ? label(x) : id;
@@ -214,7 +259,9 @@ function MergeView({ from, into, plan, onMerge, onBack }: { from: string; into: 
           <b>{wsName(from)}</b> → <b>{wsName(into)}</b>
         </span>
       </div>
-      {!plan.tabs.length && !plan.units && <div className="ver-empty">{t('Nothing to merge: the branch has not changed anything the open workspace lacks.')}</div>}
+      {!plan.tabs.length && !plan.units && (
+        <div className="ver-empty">{t('Nothing to merge: the branch has not changed anything the open workspace lacks.')}</div>
+      )}
       {plan.tabs.map((m) => {
         const keys = keysOf(m);
         const taken = keys.filter((k) => take.has(k)).length;
@@ -251,7 +298,11 @@ function MergeView({ from, into, plan, onMerge, onBack }: { from: string; into: 
               <label
                 key={f.id}
                 className={'ver-diff-line sub ver-merge ' + f.change}
-                title={f.needs.length ? `${t(f.change === 'removed' ? 'Removed with' : 'Taken with')}: ${f.needs.map((id) => itemLabel(m, id)).join(', ')}` : undefined}
+                title={
+                  f.needs.length
+                    ? `${t(f.change === 'removed' ? 'Removed with' : 'Taken with')}: ${f.needs.map((id) => itemLabel(m, id)).join(', ')}`
+                    : undefined
+                }
               >
                 <input type="checkbox" checked={take.has(`${m.id}/${f.id}`)} onChange={(e) => setItem(m, f, e.target.checked)} />
                 <span className="ver-mark">{mark[f.change]}</span>
@@ -294,7 +345,14 @@ function BranchForm({ versionId, onDone }: { versionId: string; onDone: () => vo
   return (
     <div className="ver-form" onKeyDown={(e) => e.stopPropagation()}>
       <label>{t('New branch')}</label>
-      <input type="text" value={name} placeholder={nextBranchName(versions)} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void create()} />
+      <input
+        type="text"
+        value={name}
+        placeholder={nextBranchName(versions)}
+        autoFocus
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && void create()}
+      />
       <div className="ver-form-actions">
         <button className="btn small" onClick={onDone}>
           {t('Cancel')}
@@ -321,7 +379,14 @@ function NewVersionForm({ onDone }: { onDone: () => void }) {
   return (
     <div className="ver-form" onKeyDown={(e) => e.stopPropagation()}>
       <label>{t('Name')}</label>
-      <input type="text" value={name} placeholder={nextVersionName(versions)} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void create()} />
+      <input
+        type="text"
+        value={name}
+        placeholder={nextVersionName(versions)}
+        autoFocus
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && void create()}
+      />
       <label>{t('Description')}</label>
       <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       <div className="ver-form-actions">
@@ -344,12 +409,19 @@ function VersionsPanel({ onClose }: { onClose: () => void }) {
   const [history, setHistory] = useState(true);
   /** A click on the trash asks once more. */
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [actionMenu, setActionMenu] = useState<string | null>(null);
+  const menuOpen = (id: string | null) => {
+    setActionMenu(id);
+    setDeleting(null);
+  };
   /** A version compared with the workspace: the list gives way to the differences. */
   const [comparing, setComparing] = useState<{ version: DocumentVersion; diff: DocumentDiff } | null>(null);
   /** The version a new branch is being named for. */
   const [branching, setBranching] = useState<string | null>(null);
   /** A kept workspace whose merge into the open one is being looked at. */
-  const [merging, setMerging] = useState<{ from: DocumentVersion; plan: MergePlan; source: CadDocument; base: CadDocument | null } | null>(null);
+  const [merging, setMerging] = useState<{ from: DocumentVersion; plan: MergePlan; source: CadDocument; base: CadDocument | null } | null>(
+    null,
+  );
   const doc = useDoc((s) => s.doc);
   const workspace = currentWorkspace(viewing?.workspace.doc ?? doc);
   const compare = async (v: DocumentVersion) => {
@@ -411,7 +483,7 @@ function VersionsPanel({ onClose }: { onClose: () => void }) {
       </div>
     );
   return (
-    <div className="dropdown ver-panel" onMouseLeave={() => setDeleting(null)}>
+    <div className="dropdown ver-panel">
       <div className="ver-head">
         <Icon name="history" size={16} />
         <span className="ver-head-title">{t('Versions and history')}</span>
@@ -424,7 +496,12 @@ function VersionsPanel({ onClose }: { onClose: () => void }) {
         <NewVersionForm onDone={() => setCreating(false)} />
       ) : (
         <div className="ver-actions">
-          <button className="btn small primary" disabled={readOnly} title={readOnly ? t('Return to the workspace to make a version') : undefined} onClick={() => setCreating(true)}>
+          <button
+            className="btn small primary"
+            disabled={readOnly}
+            title={readOnly ? t('Return to the workspace to make a version') : undefined}
+            onClick={() => setCreating(true)}
+          >
             <Icon name="plus" size={12} /> {t('Create version')}
           </button>
           <label className="fd-check">
@@ -475,30 +552,40 @@ function VersionsPanel({ onClose }: { onClose: () => void }) {
                 >
                   <Icon name="edit" size={14} />
                 </button>
-                <button
-                  className="icon-btn"
-                  title={t('Merge into the open workspace')}
-                  disabled={readOnly && !viewing}
-                  onClick={() => void planMerge(w.id).then((m) => m && setMerging({ from: w, ...m }))}
-                >
-                  <Icon name="merge" size={14} />
-                </button>
-                {w.name !== MAIN_WORKSPACE.name &&
-                  (deleting === w.id ? (
-                    <button
-                      className="btn small danger"
-                      onClick={() => {
-                        setDeleting(null);
-                        void deleteVersion(w.id);
-                      }}
-                    >
-                      {t('Delete')}?
-                    </button>
-                  ) : (
-                    <button className="icon-btn" title={t('Delete')} onClick={() => setDeleting(w.id)}>
-                      <Icon name="trash" size={14} />
-                    </button>
-                  ))}
+                <VersionActionMenu
+                  label={wsName(w.name)}
+                  open={actionMenu === w.id}
+                  onOpen={() => menuOpen(w.id)}
+                  onClose={() => menuOpen(null)}
+                  actions={[
+                    {
+                      id: 'merge',
+                      label: t('Merge into the open workspace'),
+                      icon: 'merge',
+                      disabled: readOnly && !viewing,
+                      run: () => void planMerge(w.id).then((m) => m && setMerging({ from: w, ...m })),
+                    },
+                    ...(w.name !== MAIN_WORKSPACE.name
+                      ? [
+                          {
+                            id: 'delete',
+                            label: t('Delete') + (deleting === w.id ? '?' : ''),
+                            icon: 'trash' as const,
+                            danger: true,
+                            keepOpen: deleting !== w.id,
+                            run: () => {
+                              if (deleting !== w.id) {
+                                setDeleting(w.id);
+                                return;
+                              }
+                              setDeleting(null);
+                              void deleteVersion(w.id);
+                            },
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
               </div>
             </div>
           ))}
@@ -518,57 +605,80 @@ function VersionsPanel({ onClose }: { onClose: () => void }) {
         )}
         {shown.map((v) => (
           <div key={v.id}>
-          <div className={'ver-item' + (v.kind === 'auto' ? ' auto' : '') + (viewing?.version.id === v.id ? ' viewing' : '')}>
-            <Icon name={v.kind === 'version' ? 'star' : 'history'} size={16} />
-            <div className="ver-text" title={t('Open for viewing')} onClick={() => void viewVersion(v.id).then((ok) => ok && resetEditor())}>
-              <b>{title(v)}</b>
-              <span>
-                {when(v.created)}
-                {v.reason ? ` · ${t(REASONS[v.reason])}` : ''}
-              </span>
-              {v.description && <span className="ver-desc">{v.description}</span>}
-            </div>
-            <div className="ver-buttons">
-              <button className="icon-btn" title={t('Open for viewing')} onClick={() => void viewVersion(v.id).then((ok) => ok && resetEditor())}>
-                <Icon name="eye" size={14} />
-              </button>
-              <button className="icon-btn" title={t('Compare with the workspace')} onClick={() => void compare(v)}>
-                <Icon name="compare" size={14} />
-              </button>
-              {v.kind === 'version' && (
-                <button className="icon-btn" title={t('Branch to create workspace')} onClick={() => setBranching(branching === v.id ? null : v.id)}>
-                  <Icon name="branch" size={14} />
-                </button>
-              )}
-              <button
-                className="icon-btn"
-                title={t('Restore this version')}
-                onClick={() => {
-                  resetEditor();
-                  void restoreVersion(v.id);
-                }}
+            <div
+              data-version-id={v.id}
+              className={'ver-item' + (v.kind === 'auto' ? ' auto' : '') + (viewing?.version.id === v.id ? ' viewing' : '')}
+            >
+              <Icon name={v.kind === 'version' ? 'star' : 'history'} size={16} />
+              <div
+                className="ver-text"
+                title={t('View version')}
+                aria-label={`${t('View version')} — ${title(v)}`}
+                onClick={() => void viewVersion(v.id).then((ok) => ok && resetEditor())}
               >
-                <Icon name="rollback" size={14} />
-              </button>
-              {deleting === v.id ? (
+                <b>{title(v)}</b>
+                <span>
+                  {when(v.created)}
+                  {v.reason ? ` · ${t(REASONS[v.reason])}` : ''}
+                </span>
+                {v.description && <span className="ver-desc">{v.description}</span>}
+              </div>
+              <div className="ver-buttons">
                 <button
-                  className="btn small danger"
-                  onClick={() => {
-                    if (viewing?.version.id === v.id) exitVersion();
-                    setDeleting(null);
-                    void deleteVersion(v.id);
-                  }}
+                  className="icon-btn"
+                  title={t('View version')}
+                  aria-label={`${t('View version')} — ${title(v)}`}
+                  onClick={() => void viewVersion(v.id).then((ok) => ok && resetEditor())}
                 >
-                  {t('Delete')}?
+                  <Icon name="eye" size={14} />
                 </button>
-              ) : (
-                <button className="icon-btn" title={t('Delete')} onClick={() => setDeleting(v.id)}>
-                  <Icon name="trash" size={14} />
-                </button>
-              )}
+                <VersionActionMenu
+                  label={title(v)}
+                  open={actionMenu === v.id}
+                  onOpen={() => menuOpen(v.id)}
+                  onClose={() => menuOpen(null)}
+                  actions={[
+                    { id: 'compare', label: t('Compare with the workspace'), icon: 'compare', run: () => void compare(v) },
+                    ...(v.kind === 'version'
+                      ? [
+                          {
+                            id: 'branch',
+                            label: t('Branch to create workspace'),
+                            icon: 'branch' as const,
+                            run: () => setBranching(branching === v.id ? null : v.id),
+                          },
+                        ]
+                      : []),
+                    {
+                      id: 'restore',
+                      label: t('Restore this version'),
+                      icon: 'rollback',
+                      run: () => {
+                        resetEditor();
+                        void restoreVersion(v.id);
+                      },
+                    },
+                    {
+                      id: 'delete',
+                      label: t('Delete') + (deleting === v.id ? '?' : ''),
+                      icon: 'trash',
+                      danger: true,
+                      keepOpen: deleting !== v.id,
+                      run: () => {
+                        if (deleting !== v.id) {
+                          setDeleting(v.id);
+                          return;
+                        }
+                        if (viewing?.version.id === v.id) exitVersion();
+                        setDeleting(null);
+                        void deleteVersion(v.id);
+                      },
+                    },
+                  ]}
+                />
+              </div>
             </div>
-          </div>
-          {branching === v.id && <BranchForm versionId={v.id} onDone={() => setBranching(null)} />}
+            {branching === v.id && <BranchForm versionId={v.id} onDone={() => setBranching(null)} />}
           </div>
         ))}
       </div>
@@ -585,7 +695,11 @@ export function VersionsButton() {
   const branch = useDoc((s) => s.doc?.workspace?.name);
   return (
     <div className="menu-wrap">
-      <button className={'btn small ver-button' + (open || viewing ? ' active' : '')} title={t('Versions and history')} onClick={() => setOpen(!open)}>
+      <button
+        className={'btn small ver-button' + (open || viewing ? ' active' : '')}
+        title={t('Versions and history')}
+        onClick={() => setOpen(!open)}
+      >
         <Icon name="history" size={14} /> {t('Versions')}
         {count > 0 && <span className="ver-count">{count}</span>}
         {branch && <span className="ver-branch">{branch}</span>}

@@ -37,6 +37,7 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'View version': 'Посмотреть',
   'Restore this document from the trash first.': 'Сначала восстановите документ из корзины.',
   'Click again to delete': 'Нажмите ещё раз для удаления',
   'Upload to cloud': 'Загрузить в облако',

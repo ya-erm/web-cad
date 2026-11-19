@@ -11,13 +11,13 @@ The **Versions** button (a clock icon) in the top bar next to the document name 
 | Action | How |
 |---|---|
 | Create a version | **Create version**, then a name (by default the next in order: **v1**, **v2**…) and an optional description; **Create** or `Enter` in the name field. The document is captured as it is now. |
-| Open for viewing | A click on the row or the eye icon — see [below](#view). |
-| Compare with the workspace | The **Compare with the workspace** icon — see [below](#compare). |
-| Restore | The **Restore this version** icon — see [below](#restore). |
-| Delete | The trash icon, then **Delete?** to confirm. Deleting a version does not touch the document. |
+| Open for viewing | A click on the row or the **View version** eye button — see [below](#view). |
+| Compare with the workspace | **⋯ → Compare with the workspace** — see [below](#compare). |
+| Restore | **⋯ → Restore this version** — see [below](#restore). |
+| Delete | **⋯ → Delete**, then **Delete?** in the same menu to confirm. Deleting a version does not touch the document. |
 | Hide the history | Clear **Show history** — only versions stay in the list. |
 
-A row's buttons appear when you hover over it.
+Each row has two buttons: view/open and **⋯**. Hover over **⋯**, click, or tap to open a menu with icons and action names. From the keyboard, use `Enter`, `Space`, or `↑` / `↓` to open it, arrow keys and `Home` / `End` to choose an action, and `Esc` to close and return focus to the button. The menu stays visible outside the list's scrolling area.
 
 ## History {#history}
 
@@ -77,10 +77,10 @@ A banner over the model says what it is compared with and shows the colour legen
 
 As in Onshape, a document can have several **workspaces**: **Main** and **branches** made from versions. Try changes in a branch without touching Main, then bring them over with a merge.
 
-- **Create branch**: the branch icon of a version in the list, then a name (**Branch 1**, **Branch 2**… by default) and **Create branch**. The open workspace is kept, and the document becomes the branch with that version's content. The open branch's name shows on the **Versions** button.
+- **Create branch**: **⋯ → Branch to create workspace** in the list, then a name (**Branch 1**, **Branch 2**… by default) and **Create branch**. The open workspace is kept, and the document becomes the branch with that version's content. The open branch's name shows on the **Versions** button.
 - **Workspaces**: the section above the list of versions — the one open now (with the version it was branched from) and the others. A click on a row or the pencil icon opens that workspace: the open one is kept, and the undo history starts anew.
-- **Merge into the open workspace**: the merge icon of another workspace. The merge window lists the tabs the branch changed, added, or deleted since the version it was made from: the checked ones are taken from the branch. A tab the open workspace changed too is marked — the branch's replaces it; uncheck it to keep yours. Units the branch changed can be taken too. **Merge** is one undo step; the state before the merge goes to the history (**Before a merge**).
-- Delete a branch with the trash icon (Main cannot be deleted). Workspaces are kept in the browser with the versions and are written to the [project file](#file).
+- **Merge into the open workspace**: **⋯ → Merge into the open workspace** of another workspace. The merge window lists the tabs the branch changed, added, or deleted since the version it was made from: the checked ones are taken from the branch. A tab the open workspace changed too is marked — the branch's replaces it; uncheck it to keep yours. Units the branch changed can be taken too. **Merge** is one undo step; the state before the merge goes to the history (**Before a merge**).
+- Delete a branch with **⋯ → Delete** (Main cannot be deleted). Workspaces are kept in the browser with the versions and are written to the [project file](#file).
 - **Merging by items.** A tab both the branch and the open workspace have is merged item by item: a Part Studio's features; an assembly's instances, mates, groups, relations and exploded views; a drawing's views, dimensions, notes and balloons. Under the tab's row are the items the branch added (**+**), changed (**~**) or deleted (**−**), each with its own checkbox. A separate **Tab settings** row covers the tab itself: its name; for a Part Studio, also its parts (colour, material…), hidden items, rollback bar and configuration; for a drawing, its format, title block and bill of materials table. The open workspace's changes to the other items stay. A new item goes right after the same item as in the branch.
   - An item from the branch comes with the new items it refers to (a sketch, a `#name` variable, faces of a feature's parts, a mate's instances, a dimension's view), and items referring to it are left out without it. Deleting an instance goes together with deleting its mates. The tooltip shows what an item comes or goes with.
   - An item changed here too gets both sides' changes, field by field (say, the branch changed an extrude's depth and this workspace changed the feature's name). Where both changed the same field, the branch's value is taken, and the mark names those fields. A sketch's geometry (entities, constraints, patterns) is combined only whole. An item deleted here comes back from the branch.
