@@ -93,7 +93,8 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
             !folder(input.folderId) ||
             !id(input.revision) ||
             !Number.isSafeInteger(input.modified) ||
-            (input.name !== undefined && !name(input.name))
+            (input.name !== undefined && !name(input.name)) ||
+            (input.trashed !== undefined && typeof input.trashed !== 'boolean')
           )
             return respond(400, { error: 'invalid_request' });
           return respond(200, { document: await db.move(user, input) });
@@ -132,6 +133,7 @@ export function createCloudHandler({ store = createCloudStore, storage = createC
           if (!id(input.id)) return respond(400, { error: 'invalid_request' });
           const document = await db.document(user, input.id);
           if (!document) return respond(404, { error: 'document_not_found' });
+          if (document.trashed) return respond(410, { error: 'document_trashed' });
           return respond(200, {
             userId: user,
             document,

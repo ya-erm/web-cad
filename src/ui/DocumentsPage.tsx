@@ -26,7 +26,10 @@ import { CardMenuButton, openCardMenu, RenameInput, FolderPreview } from './Docu
 import { Icon } from './icons';
 import { ContextMenu } from './Overlays';
 import { AppSettingsButton, LangSwitch } from './AppSettings';
-import { t, getLang } from '../i18n';
+import { t } from '../i18n';
+import { setDocumentTrash } from '../cloud/client';
+import { documentTime as fmtDate } from './documentTime';
+import { documentsLocation, documentsHash } from './documentsLocation';
 import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
 import { copyDocumentToLibrary } from '../cloud/client';
@@ -35,16 +38,6 @@ import { CloudLibrary, CloudUploadDialog } from './CloudLibrary';
 import { AccountButton } from './AccountButton';
 import { listLibraryFolders, changeLibrary } from '../store/persistence';
 import { folderTrail, type LibraryFolder } from '../store/library';
-
-function fmtDate(ts: number) {
-  return new Date(ts).toLocaleString(getLang() === 'ru' ? 'ru-RU' : 'en-US', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 const fmtSize = (n: number) => (n < 1e6 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1e6).toFixed(1)} MB`);
 
@@ -325,7 +318,7 @@ function FolderView({
               <Icon name="folder" size={14} /> {t('New folder')}
             </button>
             <button className="btn small" onClick={() => void run(() => refreshFolder(folderId))}>
-              {t('Refresh')}
+              <Icon name="refresh" size={14} /> {t('Refresh')}
             </button>
           </>
         )}
@@ -563,28 +556,24 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   useEffect(() => {
     void listLibraryFolders().then(setLibraryFolders);
   }, []);
-  const {
-    loadList,
-    createDocument,
-    deleteDocument,
-    renameDocument,
-    duplicateDocument,
-    importDocument,
-    trashDocument,
-    restoreDocument,
-    emptyTrash,
-  } = useDoc.getState();
+  const { loadList, createDocument, deleteDocument, renameDocument, duplicateDocument, importDocument, restoreDocument } =
+    useDoc.getState();
   const folders = useFolder((s) => s.folders);
   const links = useFolder((s) => s.links);
   const ready = useFolder((s) => s.ready);
   /** Folders a document can be saved into now. */
   const writable = folders.filter((f) => f.access);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const saved = useState(() => loadJson(() => sessionStorage, VIEW_KEY, isView, { view: 'docs', path: '' }))[0];
+  const saved = useState(() =>
+    documentsLocation(location.hash) && location.hash
+      ? documentsLocation(location.hash)!
+      : loadJson(() => sessionStorage, VIEW_KEY, isView, { view: 'docs', path: '' }),
+  )[0];
   /** Documents, the trash, a folder on the computer (`folder:<id>`) or the page about folders (`folders`). */
   const [view, setView] = useState<string>(saved.view === 'browser' || saved.view === 'cloud' ? 'library' : saved.view);
   /** The subfolder of the folder shown ("" — the folder itself). */
   const [path, setPath] = useState(saved.path);
+  const [libraryHeading, setLibraryHeading] = useState<HTMLSpanElement | null>(null);
   /** The open branches of the folders' tree: `<folder id>:<subfolder>`. */
   const [expanded, setExpanded] = useState(() => loadJson(() => localStorage, TREE_KEY, isKeys, []));
   /** The file or subfolder whose "Move to folder" window is open. */
@@ -599,12 +588,30 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
   useEffect(() => saveJson(() => localStorage, TREE_KEY, expanded), [expanded]);
   // the folder shown last is no longer in the list
   useEffect(() => {
-    if (ready && view.startsWith('folder:') && !shownFolder) setView('docs');
+    if (ready && view.startsWith('folder:') && !shownFolder) navigate('docs');
   }, [ready, view, shownFolder]);
+  const navigate = (nextView: string, nextPath = '') => {
+    setView(nextView);
+    setPath(nextPath);
+    const hash = documentsHash({ view: nextView, path: nextPath });
+    if (location.hash !== hash) location.hash = hash;
+  };
+  useEffect(() => {
+    const read = () => {
+      const next = documentsLocation(location.hash);
+      if (next) {
+        setView(next.view);
+        setPath(next.path);
+      }
+    };
+    const initial = { view: saved.view === 'browser' || saved.view === 'cloud' ? 'library' : saved.view, path: saved.path };
+    if (!location.hash) history.replaceState(history.state, '', documentsHash(initial));
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
   /** Show a subfolder of a folder: its branch of the tree opens down to it. */
   const go = (folderId: string, to: string) => {
-    setView(`folder:${folderId}`);
-    setPath(to);
+    navigate(`folder:${folderId}`, to);
     const above = to
       ? to
           .split('/')
@@ -620,7 +627,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     return f ? `${t('A file of the folder on this computer')}: ${f.dir.name}/${l.name}` : undefined;
   };
   const add = async () => {
-    if (!folderSupported()) return setView('folders');
+    if (!folderSupported()) return navigate('folders');
     const id = await addFolder().catch(() => null);
     if (id) go(id, '');
   };
@@ -667,7 +674,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           ...(!l
             ? [
                 {
-                  label: t('Save to cloud…'),
+                  label: t('Upload to cloud'),
                   icon: 'cloud',
                   action: () => {
                     setUploadFolder(d.folderId ?? '');
@@ -688,8 +695,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                   label: t('Show in My documents'),
                   icon: 'folder',
                   action: () => {
-                    setView('library');
-                    setPath(d.folderId ?? '');
+                    navigate('library', d.folderId ?? '');
                   },
                 },
               ]
@@ -709,10 +715,11 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             label: t('Move to trash'),
             icon: 'trash',
             danger: true,
-            action: () => {
-              void trashDocument(d.id);
-              setNotice({ id: d.id, name: d.name });
-            },
+            action: () =>
+              void run(async () => {
+                await setDocumentTrash(d, true);
+                setNotice({ id: d.id, name: d.name });
+              }),
           },
         ];
   };
@@ -760,6 +767,11 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             {linkTitle(d.id) && (
               <span className="doc-folder" title={linkTitle(d.id)}>
                 <Icon name="folder" size={13} />
+              </span>
+            )}
+            {d.cloudSource && (
+              <span className="doc-folder doc-cloud" title={t('Cloud connected')} style={linkTitle(d.id) ? { left: 32 } : undefined}>
+                <Icon name="cloud" size={13} />
               </span>
             )}
             <div className="doc-meta">
@@ -855,8 +867,11 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             <button
               className="btn small"
               onClick={() => {
-                void restoreDocument(notice.id);
-                setNotice(null);
+                void run(async () => {
+                  const summary = useDoc.getState().docs.find((d) => d.id === notice.id);
+                  if (summary) await setDocumentTrash(summary, false);
+                  setNotice(null);
+                });
               }}
             >
               {t('Restore')}
@@ -905,20 +920,19 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             }}
           />
           <div className="docs-nav">
-            <button className={'docs-nav-item' + (view === 'docs' ? ' active' : '')} onClick={() => setView('docs')}>
+            <button className={'docs-nav-item' + (view === 'docs' ? ' active' : '')} onClick={() => navigate('docs')}>
               <Icon name="document" size={16} /> {t('Recent documents')}
             </button>
             <button
-              className={'docs-nav-item' + (view === 'library' ? ' active' : '')}
+              className={'docs-nav-item' + (view === 'library' && !path ? ' active' : '')}
               onClick={() => {
-                setView('library');
-                setPath('');
+                navigate('library');
               }}
             >
               <Icon name="folder" size={16} /> {t('My documents')}
             </button>
             {view === 'library' && <div className="library-sidebar" ref={setLibrarySidebar} />}
-            <button className={'docs-nav-item' + (view === 'trash' ? ' active' : '')} onClick={() => setView('trash')}>
+            <button className={'docs-nav-item' + (view === 'trash' ? ' active' : '')} onClick={() => navigate('trash')}>
               <Icon name="trash" size={16} /> {t('Trash')}
               {trashed.length > 0 && <span className="docs-nav-count">{trashed.length}</span>}
             </button>
@@ -937,7 +951,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               />
             ))}
             {folders.length === 0 ? (
-              <button className={'docs-nav-item' + (view === 'folders' ? ' active' : '')} onClick={() => setView('folders')}>
+              <button className={'docs-nav-item' + (view === 'folders' ? ' active' : '')} onClick={() => navigate('folders')}>
                 <Icon name="folder" size={16} /> {t('Folder on this computer')}
               </button>
             ) : (
@@ -960,27 +974,35 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                       : 'Folder on this computer',
               )}
             </h2>
-            {view === 'trash' && trashed.length > 0 && (
+            <span className="library-heading-slot" ref={setLibraryHeading} />
+            {view === 'trash' && trashed.some((d) => !d.cloudSource) && (
               <button
                 className={'btn small' + (confirming === 'empty' ? ' danger' : '')}
-                onClick={() => confirmThen('empty', () => void emptyTrash())}
+                onClick={() =>
+                  confirmThen('empty', () => {
+                    void Promise.all(trashed.filter((d) => !d.cloudSource).map((d) => deleteDocument(d.id)));
+                  })
+                }
               >
-                <Icon name="trash" size={14} /> {t(confirming === 'empty' ? 'Click again to empty the trash' : 'Empty trash')}
+                <Icon name="trash" size={14} />{' '}
+                {t(confirming === 'empty' ? 'Click again to delete local documents' : 'Delete local documents permanently')}
               </button>
             )}
           </div>
           {view === 'trash' && (
             <div className="docs-hint">
-              {t('Documents in the trash can be restored. Deleting them from the trash removes them permanently.')}
+              {t('Restore documents from their card menu. Cloud documents stay in the trash until restored.')}
             </div>
           )}
           {error && <div className="docs-error">{error}</div>}
-          {view === 'library' && (
+          {(view === 'library' || view === 'trash') && (
             <CloudLibrary
-              key={cloudGeneration}
+              key={String(view) + cloudGeneration}
+              trash={view === 'trash'}
+              heading={libraryHeading}
               onOpen={onOpen}
               path={path}
-              onGo={setPath}
+              onGo={(id) => navigate('library', id)}
               sidebar={librarySidebar}
               onUpload={(folderId, ids = []) => {
                 setUploadFolder(folderId);
@@ -995,12 +1017,12 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
               path={shownPath}
               onGo={(p) => go(shownFolder.id, p)}
               onOpen={onOpen}
-              onRemoved={() => setView('docs')}
+              onRemoved={() => navigate('docs')}
               onMove={setMoving}
               run={run}
               drop={drop}
             />
-          ) : view === 'docs' || view === 'trash' ? (
+          ) : view === 'docs' ? (
             list
           ) : view === 'folders' ? (
             <FolderIntro onAdded={(id) => go(id, '')} />
@@ -1014,8 +1036,7 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           onClose={() => setUploading(null)}
           onComplete={(folderId) => {
             setCloudGeneration((n) => n + 1);
-            setView('library');
-            setPath(folderId);
+            navigate('library', folderId);
           }}
         />
       )}

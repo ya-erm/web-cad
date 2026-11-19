@@ -68,3 +68,22 @@ describe('one managed document across browser and cloud', () => {
     expect(libraryDocumentStatus(entry)).toBe('Cloud version changed');
   });
 });
+
+describe('logical document trash', () => {
+  it('hides a remote trashed document and all variants from the active library', () => {
+    const local = doc('logical'),
+      copy = { ...doc('copy'), cloudSource: { userId: 'user', documentId: 'logical', revision: 'r1' } };
+    const remote: CloudList = { userId: 'user', folders: [], documents: [{ ...cloud('logical'), trashed: 100 }] };
+    expect(unifiedLibrary([], [local, copy], remote).documents).toHaveLength(0);
+    expect(unifiedLibrary([], [local, copy], remote, true).documents[0].locals).toHaveLength(2);
+    expect(unifiedLibrary([], [], remote, true).documents).toHaveLength(1);
+  });
+  it('shows local trash offline and respects an explicitly restored cloud document', () => {
+    const local = { ...doc('logical'), trashed: 100 };
+    expect(unifiedLibrary([], [local], null).documents).toHaveLength(0);
+    expect(unifiedLibrary([], [local], null, true).documents).toHaveLength(1);
+    const remote: CloudList = { userId: 'user', folders: [], documents: [cloud('logical')] };
+    expect(unifiedLibrary([], [local], remote).documents).toHaveLength(1);
+    expect(unifiedLibrary([], [local], remote, true).documents).toHaveLength(0);
+  });
+});

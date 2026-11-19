@@ -101,6 +101,7 @@ export async function createCloudStore(connection, token, signal) {
         trail(folders, pending.folderId);
         const result = rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${pending.documentId}`);
         const old = result.length ? JSON.parse(result[0].payload) : null;
+        if (old?.trashed) throw new CloudError(409, 'document_trashed');
         if ((old?.revision ?? '') !== pending.expectedRevision || (old && old.modified !== pending.expectedModified))
           throw new CloudError(409, 'revision_conflict');
         await tx`INSERT INTO cloud_uploads (user_id, id, payload, expires_at) VALUES (${user}, ${pending.id}, ${JSON.stringify(pending)}, CAST(${new Date(Date.now() + 86400000)} AS Timestamp))`;
@@ -119,6 +120,7 @@ export async function createCloudStore(connection, token, signal) {
         const old = current.length ? JSON.parse(current[0].payload) : null;
         // Retrying a commit whose response was lost is safe.
         if (old?.revision === upload.id) return old;
+        if (old?.trashed) throw new CloudError(409, 'document_trashed');
         if ((old?.revision ?? '') !== upload.expectedRevision || (old && old.modified !== upload.expectedModified))
           throw new CloudError(409, 'revision_conflict');
         const folders = unpack(rows(await tx`SELECT payload FROM cloud_folders WHERE user_id = ${user}`));
@@ -146,6 +148,7 @@ export async function createCloudStore(connection, token, signal) {
         const result = rows(await tx`SELECT payload FROM cloud_documents WHERE user_id = ${user} AND id = ${input.id}`);
         if (!result.length) throw new CloudError(404, 'document_not_found');
         const old = JSON.parse(result[0].payload);
+        if (old.trashed && input.trashed !== false) throw new CloudError(409, 'document_trashed');
         if (old.revision !== input.revision || old.modified !== input.modified) throw new CloudError(409, 'revision_conflict');
         const folders = unpack(rows(await tx`SELECT payload FROM cloud_folders WHERE user_id = ${user}`));
         trail(folders, input.folderId);
@@ -155,6 +158,8 @@ export async function createCloudStore(connection, token, signal) {
           folderId: input.folderId,
           modified: Math.max(Date.now(), old.modified + 1),
         };
+        if (input.trashed === true) doc.trashed = Date.now();
+        if (input.trashed === false) delete doc.trashed;
         await tx`UPDATE cloud_documents SET payload = ${JSON.stringify(doc)} WHERE user_id = ${user} AND id = ${input.id}`;
         return doc;
       });

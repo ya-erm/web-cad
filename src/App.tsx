@@ -8,6 +8,7 @@ import { startVersions } from './store/versions';
 import { startCompare } from './store/compare';
 import { startLinkChecks } from './store/linkedSources';
 import { TooltipLayer } from './ui/Tooltip';
+import { documentsHash } from './ui/documentsLocation';
 import { isHelpHash } from './help/toc';
 
 // Help (#/help/<lang>/<page>) is a separate chunk, loaded only when opened.
@@ -76,7 +77,16 @@ export default function App() {
   return (
     <>
       {docId && doc?.id === docId ? (
-        <Editor onBack={() => (location.hash = '')} />
+        <Editor
+          onBack={() => {
+            try {
+              const saved = JSON.parse(sessionStorage.getItem('webcad.docsView') ?? 'null');
+              location.hash = saved ? documentsHash(saved) : '#/documents';
+            } catch {
+              location.hash = '#/documents';
+            }
+          }}
+        />
       ) : docId ? null : (
         <DocumentsPage onOpen={(id) => (location.hash = `#/doc/${id}`)} />
       )}

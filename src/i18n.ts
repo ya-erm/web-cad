@@ -37,6 +37,18 @@ export function setLang(l: Lang) {
 }
 
 const RU: Record<string, string> = {
+  'Restore this document from the trash first.': 'Сначала восстановите документ из корзины.',
+  'Click again to delete': 'Нажмите ещё раз для удаления',
+  'Upload to cloud': 'Загрузить в облако',
+  'Choose documents to upload.': 'Выберите документы для загрузки.',
+  'Create the same subfolders inside the destination folder.': 'Создать ту же структуру подпапок внутри папки назначения.',
+  'Create independent cloud documents instead of updating connected documents.': 'Создать независимые облачные документы, не обновляя уже подключённые.',
+  'Replace the current cloud snapshot with the selected local version.': 'Заменить текущий облачный снимок выбранной локальной версией.',
+  'Restore documents from their card menu. Cloud documents stay in the trash until restored.': 'Восстановление — в меню карточки. Облачные документы остаются в корзине до восстановления.',
+  'Delete local documents permanently': 'Удалить локальные документы навсегда',
+  'Click again to delete local documents': 'Нажмите ещё раз для удаления локальных документов',
+  'document_trashed': 'Документ находится в корзине. Сначала восстановите его.',
+
   'Preserve library folders': 'Сохранить структуру папок',
   'Cloud connected': 'Подключено облако',
   'Confirm updating the existing cloud version.': 'Подтвердите обновление существующего облачного варианта.',

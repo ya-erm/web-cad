@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
+import { documentTime } from './documentTime';
 import { Icon } from './icons';
 import { createPortal } from 'react-dom';
 import { CardMenuButton, openCardMenu, RenameInput, FolderPreview } from './DocumentCards';
@@ -10,7 +11,7 @@ import type { ContextMenuItem } from '../store/editorStore';
 import { folderTrail, validateLibraryChange, type LibraryFolder } from '../store/library';
 import { useDoc } from '../store/docStore';
 import { useFolder } from '../store/folderStore';
-import { markCloudCopy, changeLibrary, rememberLibraryFolders, listLibraryFolders } from '../store/persistence';
+import { markCloudCopy, changeLibrary, rememberLibraryFolders, listLibraryFolders, setTrashed } from '../store/persistence';
 import {
   CloudFailure,
   listCloud,
@@ -18,6 +19,7 @@ import {
   deleteCloudFolder,
   moveCloudDocument,
   renameCloudDocument,
+  trashCloudDocument,
   openCloudDocument,
   uploadCloudDocument,
   type CloudList,
@@ -26,6 +28,7 @@ import {
 function errorText(error: unknown): string {
   if (error instanceof CloudFailure) {
     const messages: Record<string, string> = {
+      document_trashed: 'Restore this document from the trash first.',
       sign_in_required: 'Sign in to use cloud documents.',
       revision_conflict: 'This document already exists or has changed. Refresh the list or upload a separate copy.',
       folder_not_empty: 'Only empty folders can be deleted',
@@ -44,12 +47,16 @@ export function CloudLibrary({
   path,
   onGo,
   sidebar,
+  heading,
+  trash = false,
 }: {
   onOpen: (id: string) => void;
   onUpload: (folderId: string, ids?: string[]) => void;
   path: string;
   onGo: (id: string) => void;
   sidebar?: HTMLElement | null;
+  heading?: HTMLElement | null;
+  trash?: boolean;
 }) {
   const localDocs = useDoc((s) => s.docs),
     diskLinks = useFolder((s) => s.links);
@@ -59,14 +66,15 @@ export function CloudLibrary({
     [busy, setBusy] = useState(true);
   const [renaming, setRenaming] = useState<string | null>(null),
     [moving, setMoving] = useState<CloudItem | null>(null),
-    [variants, setVariants] = useState<LibraryDocument | null>(null);
+    [variants, setVariants] = useState<LibraryDocument | null>(null),
+    [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [dragged, setDragged] = useState<CloudItem | null>(null),
     [over, setOver] = useState<string | null>(null),
     [expanded, setExpanded] = useState<string[]>([]);
   const epoch = useRef(0),
     working = useRef(false);
-  const browserDocs = localDocs.filter((d) => !diskLinks[d.id] && !d.trashed);
-  const view = unifiedLibrary(localFolders, browserDocs, data);
+  const browserDocs = localDocs.filter((d) => !diskLinks[d.id] || Boolean(d.trashed));
+  const view = unifiedLibrary(localFolders, browserDocs, data, trash);
   const current = view.folders.some((f) => f.id === path) ? path : '';
   const refresh = async () => {
     const request = ++epoch.current;
@@ -79,7 +87,11 @@ export function CloudLibrary({
     try {
       const remote = await listCloud();
       if (request !== epoch.current) return;
-      const local = useDoc.getState().docs.filter((d) => !useFolder.getState().links[d.id] && !d.trashed);
+      const local = useDoc.getState().docs.filter((d) => !useFolder.getState().links[d.id]);
+      for (const d of local) {
+        const remoteDoc = remote.documents.find((r) => r.id === d.cloudSource?.documentId && d.cloudSource.userId === remote.userId);
+        if (remoteDoc && Boolean(d.trashed) !== Boolean(remoteDoc.trashed)) await setTrashed(d.id, remoteDoc.trashed ?? null);
+      }
       const merged = unifiedLibrary(folders, local, remote),
         locations: Record<string, string> = {};
       for (const d of merged.documents) if (d.cloud) for (const local of d.locals) locations[local.id] = d.folderId;
@@ -313,16 +325,37 @@ export function CloudLibrary({
         }),
     },
   ];
-  const documentMenu = (d: LibraryDocument): ContextMenuItem[] => [
-    { label: t('Open'), icon: 'document', action: () => void open(d) },
-    ...(d.cloud ? [{ label: t('Open cloud version'), icon: 'cloud', action: () => void open(d, true) }] : []),
-    { label: t('Rename'), icon: 'rename', disabled: busy, action: () => setRenaming('document:' + d.id) },
-    { label: t('Move to folder…'), icon: 'folder', disabled: busy, action: () => setMoving({ kind: 'document', id: d.id }) },
-    ...(d.locals.length
-      ? [{ label: t(d.cloud ? 'Save to cloud…' : 'Upload to cloud…'), icon: 'cloud', action: () => onUpload(d.folderId, [d.locals[0].id]) }]
-      : []),
-    ...(d.locals.length > 1 ? [{ label: t('Local variants…'), icon: 'copy', action: () => setVariants(d) }] : []),
-  ];
+  const changeTrash = async (d: LibraryDocument, remove: boolean) =>
+    act(async () => {
+      if (!d.cloud && d.locals.some((l) => l.cloudSource)) throw new Error('Connect to organise cloud documents.');
+      if (d.cloud) {
+        const changed = await trashCloudDocument(d.cloud, remove);
+        for (const local of d.locals)
+          if (local.cloudSource) await markCloudCopy(local.id, { ...local.cloudSource, cloudModified: changed.document.modified });
+      }
+      for (const local of d.locals)
+        await (remove ? useDoc.getState().trashDocument(local.id) : useDoc.getState().restoreDocument(local.id));
+      await refresh();
+    });
+  const documentMenu = (d: LibraryDocument): ContextMenuItem[] =>
+    trash
+      ? [
+          { label: t('Restore'), icon: 'undo', disabled: busy, action: () => void changeTrash(d, false) },
+          ...(!d.cloud && !d.locals.some((l) => l.cloudSource)
+            ? [{ label: t('Delete permanently'), icon: 'trash', danger: true, disabled: busy, action: () => setConfirmDelete(d.id) }]
+            : []),
+        ]
+      : [
+          { label: t('Open'), icon: 'document', action: () => void open(d) },
+          ...(d.cloud ? [{ label: t('Open cloud version'), icon: 'cloud', action: () => void open(d, true) }] : []),
+          { label: t('Rename'), icon: 'rename', disabled: busy, action: () => setRenaming('document:' + d.id) },
+          { label: t('Move to folder…'), icon: 'folder', disabled: busy, action: () => setMoving({ kind: 'document', id: d.id }) },
+          ...(d.locals.length
+            ? [{ label: t('Upload to cloud'), icon: 'cloud', action: () => onUpload(d.folderId, [d.locals[0].id]) }]
+            : []),
+          ...(d.locals.length > 1 ? [{ label: t('Local variants…'), icon: 'copy', action: () => setVariants(d) }] : []),
+          { label: t('Move to trash'), icon: 'trash', danger: true, disabled: busy, action: () => void changeTrash(d, true) },
+        ];
   const node = (parent: string, depth = 0): React.ReactNode =>
     view.folders
       .filter((f) => f.parentId === parent)
@@ -356,55 +389,60 @@ export function CloudLibrary({
           </Fragment>
         );
       });
-  const children = view.folders.filter((f) => f.parentId === current).sort((a, b) => a.name.localeCompare(b.name)),
-    documents = view.documents.filter((d) => d.folderId === current);
+  const children = view.folders.filter((f) => !trash && f.parentId === current).sort((a, b) => a.name.localeCompare(b.name)),
+    documents = view.documents.filter((d) => trash || d.folderId === current);
   const crumbs = [{ id: '', name: t('My documents') }, ...folderTrail(view.folders, current)];
   const movingName =
     moving?.kind === 'folder' ? view.folders.find((f) => f.id === moving.id)?.name : view.documents.find((d) => d.id === moving?.id)?.name;
   return (
     <>
+      {heading &&
+        createPortal(
+          <span className="library-loading" role={busy ? 'status' : undefined} aria-label={busy ? t('Loading…') : undefined}>
+            {busy && <span className="spinner" />}
+          </span>,
+          heading,
+        )}
       {sidebar && createPortal(<div className="library-sidebar-tree">{node('')}</div>, sidebar)}
-      <div className="folder-bar">
-        <Icon name="folder" size={16} />
-        <nav className="folder-crumbs" aria-label={t('Folder path')}>
-          {crumbs.map((c, i) => (
-            <Fragment key={c.id}>
-              {i > 0 && <Icon name="chevronRight" size={12} />}
-              <button
-                className={'folder-crumb' + (current === c.id ? ' current' : '') + dropClass(c.id)}
-                onClick={() => onGo(c.id)}
-                {...dropProps(c.id)}
-              >
-                {c.name}
-              </button>
-            </Fragment>
-          ))}
-        </nav>
-        <span className="spacer" />
-        <button className="btn small primary" disabled={busy} onClick={createDocument}>
-          <Icon name="plus" size={14} />
-          {t('New document in the folder')}
-        </button>
-        <button className="btn small" disabled={busy} onClick={createFolder}>
-          <Icon name="folder" size={14} />
-          {t('New folder')}
-        </button>
-        <button className="btn small" disabled={busy} onClick={() => void refresh()}>
-          {t('Refresh')}
-        </button>
-        <button className="btn small" disabled={busy || !data} onClick={() => onUpload(current)}>
-          <Icon name="cloud" size={14} />
-          {t('Save to cloud…')}
-        </button>
-      </div>
+      {!trash && (
+        <div className="folder-bar">
+          <Icon name="folder" size={16} />
+          <nav className="folder-crumbs" aria-label={t('Folder path')}>
+            {crumbs.map((c, i) => (
+              <Fragment key={c.id}>
+                {i > 0 && <Icon name="chevronRight" size={12} />}
+                <button
+                  className={'folder-crumb' + (current === c.id ? ' current' : '') + dropClass(c.id)}
+                  onClick={() => onGo(c.id)}
+                  {...dropProps(c.id)}
+                >
+                  {c.name}
+                </button>
+              </Fragment>
+            ))}
+          </nav>
+          <span className="spacer" />
+          <button className="btn small primary" disabled={busy} onClick={createDocument}>
+            <Icon name="plus" size={14} />
+            {t('New document in the folder')}
+          </button>
+          <button className="btn small" disabled={busy} onClick={createFolder}>
+            <Icon name="folder" size={14} />
+            {t('New folder')}
+          </button>
+          <button className="btn small" disabled={busy} onClick={() => void refresh()}>
+            <Icon name="refresh" size={14} />
+            {t('Refresh')}
+          </button>
+          <button className="btn small" disabled={busy || !data} onClick={() => onUpload(current)}>
+            <Icon name="cloud" size={14} />
+            {t('Upload to cloud')}
+          </button>
+        </div>
+      )}
       {error && (
         <div className="docs-error" role="alert">
           {error}
-        </div>
-      )}
-      {busy && (
-        <div className="docs-hint" role="status">
-          {t('Loading…')}
         </div>
       )}
       {children.length > 0 && (
@@ -417,7 +455,7 @@ export function CloudLibrary({
               <div
                 key={f.id}
                 className={'doc-card folder-card' + dropClass(f.id)}
-                draggable={!busy && renaming !== key}
+                draggable={!trash && !busy && renaming !== key}
                 onDragStart={(e) => dragStart(e, item, f.name)}
                 onDragEnd={dragEnd}
                 {...dropProps(f.id)}
@@ -449,10 +487,10 @@ export function CloudLibrary({
             <div
               key={d.id}
               className="doc-card"
-              draggable={!busy && renaming !== key}
+              draggable={!trash && !busy && renaming !== key}
               onDragStart={(e) => dragStart(e, item, d.name)}
               onDragEnd={dragEnd}
-              onClick={() => renaming !== key && void open(d)}
+              onClick={() => !trash && renaming !== key && void open(d)}
               onContextMenu={(e) => renaming !== key && openCardMenu(e, key, documentMenu(d))}
             >
               <div className="doc-thumb">
@@ -462,6 +500,11 @@ export function CloudLibrary({
                   <Icon name="partStudio" size={40} />
                 )}
               </div>
+              {(d.cloud || d.locals.some((l) => l.cloudSource)) && (
+                <span className="doc-folder" title={t('Cloud connected')}>
+                  <Icon name="cloud" size={13} />
+                </span>
+              )}
               <div className="doc-meta">
                 {renaming === key ? (
                   <RenameInput value={d.name} onDone={(value) => void rename(item, value)} />
@@ -469,7 +512,7 @@ export function CloudLibrary({
                   <div className="doc-name">{d.name}</div>
                 )}
                 <div className="doc-date">
-                  {t('Modified')}: {new Date(d.modified).toLocaleString()}
+                  {t('Modified')}: {documentTime(d.modified)}
                 </div>
                 <div className="doc-date library-document-state">
                   <Icon name={d.cloud ? 'cloud' : 'document'} size={12} />
@@ -477,6 +520,41 @@ export function CloudLibrary({
                   {d.locals.length > 1 && ` · ${t('Local variants')}: ${d.locals.length}`}
                 </div>
               </div>
+              {trash && (
+                <div className="doc-actions trash-actions">
+                  <button
+                    className="btn small"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void changeTrash(d, false);
+                    }}
+                  >
+                    <Icon name="undo" size={13} />
+                    {t('Restore')}
+                  </button>
+                  {!d.cloud && !d.locals.some((l) => l.cloudSource) && (
+                    <button
+                      className="btn small danger"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirmDelete !== d.id) {
+                          setConfirmDelete(d.id);
+                          return;
+                        }
+                        void act(async () => {
+                          for (const local of d.locals) await useDoc.getState().deleteDocument(local.id);
+                          setConfirmDelete(null);
+                          await refresh();
+                        });
+                      }}
+                    >
+                      {t(confirmDelete === d.id ? 'Click again to delete' : 'Delete permanently')}
+                    </button>
+                  )}
+                </div>
+              )}
               <CardMenuButton owner={key} items={() => documentMenu(d)} />
             </div>
           );
@@ -485,9 +563,9 @@ export function CloudLibrary({
       {!children.length && !documents.length && !busy && (
         <div className="empty-state">
           <Icon name="folder" size={40} />
-          <h3>{t('No WebCAD documents in this folder yet')}</h3>
+          <h3>{t(trash ? 'The trash is empty' : 'No WebCAD documents in this folder yet')}</h3>
           <div className="folder-hint">
-            {t('Create a document or a folder here, or save one of your documents into the folder from its card.')}
+            {!trash && t('Create a document or a folder here, or save one of your documents into the folder from its card.')}
           </div>
         </div>
       )}
@@ -661,7 +739,6 @@ export function CloudUploadDialog({
       >
         <div className="modal-header">{t('Upload documents…')}</div>
         <div className="modal-body library-form">
-          <div className="docs-hint">{t('Choose documents to copy to the cloud. Files on this device stay in place.')}</div>
           {data && (
             <>
               <label>
@@ -677,6 +754,7 @@ export function CloudUploadDialog({
                   ))}
                 </select>
               </label>
+              <div className="docs-hint">{t('Choose documents to upload.')}</div>
               <div className="cloud-upload-list">
                 {docs.map((d) => (
                   <label key={d.id}>
@@ -693,25 +771,29 @@ export function CloudUploadDialog({
                   </label>
                 ))}
               </div>
-              <label className="library-check">
-                <input type="checkbox" checked={keepFolders} disabled={busy} onChange={(e) => setKeepFolders(e.target.checked)} />
-                {t('Preserve library folders')}
-              </label>
-              {needsReplacement && !copy && (
+              <div className="cloud-upload-options">
                 <label className="library-check">
-                  <input
-                    type="checkbox"
-                    checked={replaceExisting}
-                    disabled={busy || copy}
-                    onChange={(e) => setReplaceExisting(e.target.checked)}
-                  />
-                  {t('Update existing cloud versions')}
+                  <input type="checkbox" checked={keepFolders} disabled={busy} onChange={(e) => setKeepFolders(e.target.checked)} />
+                  {t('Preserve library folders')} <OptionHelp text="Create the same subfolders inside the destination folder." />
                 </label>
-              )}
-              <label className="library-check">
-                <input type="checkbox" checked={copy} disabled={busy} onChange={(e) => setCopy(e.target.checked)} />
-                {t('Upload as separate copies')}
-              </label>
+                {needsReplacement && !copy && (
+                  <label className="library-check">
+                    <input
+                      type="checkbox"
+                      checked={replaceExisting}
+                      disabled={busy || copy}
+                      onChange={(e) => setReplaceExisting(e.target.checked)}
+                    />
+                    {t('Update existing cloud versions')}{' '}
+                    <OptionHelp text="Replace the current cloud snapshot with the selected local version." />
+                  </label>
+                )}
+                <label className="library-check">
+                  <input type="checkbox" checked={copy} disabled={busy} onChange={(e) => setCopy(e.target.checked)} />
+                  {t('Upload as separate copies')}{' '}
+                  <OptionHelp text="Create independent cloud documents instead of updating connected documents." />
+                </label>
+              </div>
             </>
           )}
           {progress && <div role="status">{progress}</div>}
@@ -732,5 +814,13 @@ export function CloudUploadDialog({
         </div>
       </form>
     </div>
+  );
+}
+
+function OptionHelp({ text }: { text: string }) {
+  return (
+    <span className="upload-option-help" tabIndex={0} role="img" aria-label={t(text)} title={t(text)} onClick={(e) => e.preventDefault()}>
+      <Icon name="help" size={14} />
+    </span>
   );
 }

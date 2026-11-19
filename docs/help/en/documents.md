@@ -46,7 +46,7 @@ placeholder appears while the account is being checked. Your name and email appe
 in the account menu, opened by clicking your avatar. **Sign out** ends the current session in this browser.
 
 Signing in is optional. Documents are saved on this device: signing in
-does not upload them to the cloud. Upload them explicitly with **Save to cloud…**. Signing out does not delete local documents.
+does not upload them to the cloud. Upload them explicitly with **Upload to cloud**. Signing out does not delete local documents.
 If the account service is unavailable or you are offline, editing still works;
 **Retry sign-in** checks the account service again.
 
@@ -59,7 +59,9 @@ page returns to WebCAD with a “Sign-in was cancelled” message.
 1. Click **Trash** on the left of the Documents page.
 2. Find the document and click **Restore** to return it to **Documents**.
 
-**Delete permanently** removes one trashed document; **Empty trash** removes all of them. These actions require a second button click. **Restore** and **Delete permanently** are also in the menu you get by right-clicking the card; after **Delete permanently** in the menu, confirm with the button on the card. Once permanently deleted, a document can only be recovered from a previously saved project file.
+**Move to trash** in a My documents card menu also moves its known local variants. Cloud-connected documents require a connection and sign-in to the same account to trash or restore; other devices receive the trash state when refreshing the list. Use **Restore** on a trash card or in its menu. Cloud documents remain in the trash until restored; permanent cloud deletion is not available yet.
+
+For documents stored only on this device, **Delete permanently** on a card and **Delete local documents permanently** in the trash header require a second click. Once deleted, a document can only be recovered from a previously exported project file.
 
 ## Document tabs {#tabs}
 
@@ -148,9 +150,11 @@ Folder names and locations are metadata: moving or renaming them does not rebuil
 
 Old local copies with a known cloud identity appear under one card. **Local variants…** lets you choose an existing variant. Their data is retained; differing models are not merged automatically. Independent IDs are not merged merely because names match.
 
+Card modification dates use local time in **DD.MM.YYYY HH:mm:ss** format, with hours from 00 to 23. A cloud badge in the upper-left corner indicates a cloud connection; the card status shows changes awaiting upload. Folder navigation updates the page address, so browser **Back** / **Forward** and the iOS back gesture traverse folders.
+
 ## Saving to the cloud {#cloud}
 
-Choose **Save to cloud…** from the bar or a document menu. Select documents, a destination, and optionally **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
+Choose **Upload to cloud** from the bar or a document menu. Select documents, a destination, and optionally **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
 
 On another device, sign in to the same account and open **My documents**. Lists and thumbnails load first; the project downloads when opened. A first download keeps the shared ID if that local ID is free. It then works offline. Existing changed content with that ID is never overwritten.
 
@@ -161,6 +165,8 @@ Saving checks both the revision and metadata baseline. A concurrent edit, rename
 **Automatic edit uploading is not enabled yet.** Local autosave does not send changes. Bounded technical snapshot retention and background synchronisation are later stages.
 
 Projects include named versions and branches, as gzip archives up to 20 MiB. Thumbnails are separate S3 objects, converted to WebP, up to 1 MiB. Disposable 3D geometry caches and automatic local history are excluded. A broken thumbnail never prevents the project upload. Temporary upload objects expire after 3 days.
+
+The upload dialog has **?** tooltips explaining its options. **Preserve library folders** recreates subfolders inside the destination. **Upload as separate copies** creates independent cloud documents instead of updating connected documents.
 
 ## Copying computer files to the library {#disk-library-copy}
 

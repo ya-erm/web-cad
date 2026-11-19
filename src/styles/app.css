@@ -4356,3 +4356,11 @@ body.panel-resizing-y * {
 .library-sidebar-tree .docs-nav-item { width: 100%; }
 .library-document-state { display: flex; align-items: center; gap: 4px; }
 @media(max-width:900px) { .docs-main > .folder-bar { flex-wrap: wrap; } }
+
+.folder-bar > .spacer { flex: 1; }
+.library-loading { display: inline-flex; align-items: center; width: 16px; height: 20px; }
+.cloud-upload-options { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 10px; }
+.upload-option-help { display: inline-flex; color: var(--text-2); cursor: help; }
+.upload-option-help:focus-visible { outline: 2px solid var(--accent); border-radius: 3px; }
+
+.library-heading-slot { display: inline-flex; align-items: center; height: 20px; }

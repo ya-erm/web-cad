@@ -7,6 +7,7 @@ import { fileVersions, importVersions, copiedVersionIds, withCopiedVersions } fr
 
 const API = 'https://api.cad.ya-erm.ru';
 export interface CloudDocument {
+  trashed?: number;
   id: string;
   name: string;
   folderId: string;
@@ -60,6 +61,36 @@ export const renameCloudDocument = (doc: CloudDocument, name: string) =>
   });
 export const moveCloudDocument = (doc: CloudDocument, folderId: string) =>
   cloudRequest<{ document: CloudDocument }>('/cloud/document', { id: doc.id, revision: doc.revision, modified: doc.modified, folderId });
+
+export const trashCloudDocument = (doc: CloudDocument, trashed: boolean) =>
+  cloudRequest<{ document: CloudDocument }>('/cloud/document', {
+    id: doc.id,
+    revision: doc.revision,
+    modified: doc.modified,
+    folderId: doc.folderId,
+    trashed,
+  });
+
+/** Trash the logical cloud document before changing any of its local variants. */
+export async function setDocumentTrash(summary: DocumentSummary, trashed: boolean) {
+  const source = summary.cloudSource;
+  let locals = [summary];
+  if (source) {
+    const remote = await listCloud();
+    if (remote.userId !== source.userId) throw new Error('Connect to organise cloud documents.');
+    const doc = remote.documents.find((d) => d.id === source.documentId);
+    if (!doc) throw new Error('Document not found');
+    const changed = await trashCloudDocument(doc, trashed);
+    locals = useDoc
+      .getState()
+      .docs.filter(
+        (d) => d.id === source.documentId || (d.cloudSource?.userId === source.userId && d.cloudSource.documentId === source.documentId),
+      );
+    for (const local of locals)
+      if (local.cloudSource) await db.markCloudCopy(local.id, { ...local.cloudSource, cloudModified: changed.document.modified });
+  }
+  for (const local of locals) await (trashed ? useDoc.getState().trashDocument(local.id) : useDoc.getState().restoreDocument(local.id));
+}
 
 export async function blobHash(blob: Blob): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]

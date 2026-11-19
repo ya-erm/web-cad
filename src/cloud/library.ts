@@ -19,7 +19,7 @@ const pathKey = (folders: LibraryFolder[], id: string) =>
     .join('/');
 
 /** One visible entry per logical document. Old local variants remain stored and selectable. */
-export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: DocumentSummary[], remote: CloudList | null) {
+export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: DocumentSummary[], remote: CloudList | null, trash = false) {
   const folders: UnifiedFolder[] = localFolders.map((f) => ({ ...f }));
   const remoteToLocal = new Map<string, string>();
   if (remote) {
@@ -61,7 +61,6 @@ export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: Do
       owners.set(source.documentId, set);
     }
   for (const local of localDocuments) {
-    if (local.trashed) continue;
     const source = local.cloudSource;
     const identity = source?.documentId ?? local.id;
     // A previous account's cache is a local document here; never attach it to another account's remote object.
@@ -90,7 +89,12 @@ export function unifiedLibrary(localFolders: LibraryFolder[], localDocuments: Do
   }
   for (const group of groups.values())
     group.locals.sort((a, b) => Number(b.id === group.id) - Number(a.id === group.id) || b.modified - a.modified);
-  return { folders, documents: [...groups.values()].sort((a, b) => b.modified - a.modified) };
+  return {
+    folders,
+    documents: [...groups.values()]
+      .filter((g) => Boolean(g.cloud ? g.cloud.trashed : g.locals.length && g.locals.every((l) => l.trashed)) === trash)
+      .sort((a, b) => b.modified - a.modified),
+  };
 }
 
 export function recentDocuments(documents: DocumentSummary[], diskIds = new Set<string>()): DocumentSummary[] {

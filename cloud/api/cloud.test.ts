@@ -122,3 +122,20 @@ describe('cloud API ownership and publication', () => {
     expect(s.db.move).not.toHaveBeenCalled();
   });
 });
+
+describe('cloud trash contract', () => {
+  it('does not issue a download URL for a trashed snapshot', async () => {
+    const s = setup();
+    s.db.document.mockResolvedValue({ id: 'doc', trashed: 1 } as never);
+    expect((await s.request('/cloud/open', { id: 'doc' })).statusCode).toBe(410);
+    expect(s.objects.download).not.toHaveBeenCalled();
+  });
+  it('requires a boolean trash flag and keeps CAS and owner scoping for restore', async () => {
+    const s = setup();
+    const body = { id: 'doc', folderId: '', revision: 'revision', modified: 1 };
+    expect((await s.request('/cloud/document', { ...body, trashed: 'yes' })).statusCode).toBe(400);
+    expect(s.db.move).not.toHaveBeenCalled();
+    expect((await s.request('/cloud/document', { ...body, trashed: false })).statusCode).toBe(200);
+    expect(s.db.move.mock.calls[0]).toEqual(['owner', { ...body, trashed: false }]);
+  });
+});
