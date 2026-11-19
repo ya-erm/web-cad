@@ -16,6 +16,8 @@ The view rotates around the point on the part under the cursor (if there is no p
 - **Free rotation**: the model rotates around the screen axes (as in Onshape);
 - **Turntable (Z up)**: rotation around the Z axis; the horizon does not tilt. Keep tilting over the top or the bottom of the model to look at its far side: the view turns upside down and the horizon stays level. Upside down, dragging sideways still pulls the side of the model nearest to you along with the pointer.
 
+**Turntable (Z up)** is selected by default. Your choice is saved in the browser.
+
 ## iPad and Apple Pencil {#touch}
 
 In **Settings** → **Touch and Apple Pencil**, enable **Navigate with fingers** (on by default). This preference is saved in this browser. This section appears only on iPad, including Safari in desktop mode. An attached Apple Pencil cannot be detected in advance: pen input is recognized from pointer events.

@@ -433,9 +433,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
   })(),
   rotationMode: ((): 'free' | 'turntable' => {
     try {
-      return localStorage.getItem('webcad.rotation') === 'turntable' ? 'turntable' : 'free';
+      return localStorage.getItem('webcad.rotation') === 'free' ? 'free' : 'turntable';
     } catch {
-      return 'free';
+      return 'turntable';
     }
   })(),
   touchNavigation: (() => {
