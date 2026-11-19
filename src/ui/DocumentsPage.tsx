@@ -34,7 +34,7 @@ import { openHelp } from '../help/context';
 import { APP_VERSION, appVersionTitle } from './version';
 import { copyDocumentToLibrary } from '../cloud/client';
 import { recentDocuments } from '../cloud/library';
-import { CloudLibrary, CloudUploadDialog } from './CloudLibrary';
+import { CloudLibrary, CloudUploadDialog, CloudDirectUpload } from './CloudLibrary';
 import { AccountButton } from './AccountButton';
 import { DocumentsSidebar } from './DocumentsSidebar';
 import { listLibraryFolders, changeLibrary } from '../store/persistence';
@@ -627,6 +627,8 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
     if (id) go(id, '');
   };
   /** Last document moved to the trash (the "Restore" bar). */
+  const [directUpload, setDirectUpload] = useState(false);
+  const [resolveUpload, setResolveUpload] = useState(false);
   const [notice, setNotice] = useState<{ id: string; name: string } | null>(null);
   /** Two-click confirmation for permanent deletion (no native confirm(): blocked in embedded browsers). */
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -671,8 +673,12 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
                 {
                   label: t('Upload to cloud'),
                   icon: 'cloud',
+                  disabled: uploading !== null,
                   action: () => {
+                    if (uploading !== null) return;
                     setUploadFolder(d.folderId ?? '');
+                    setResolveUpload(false);
+                    setDirectUpload(true);
                     setUploading([d.id]);
                   },
                 },
@@ -999,8 +1005,12 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
             path={view === 'library' ? path : ''}
             onGo={(id) => navigate('library', id)}
             sidebar={librarySidebar}
-            onUpload={(folderId, ids = []) => {
+            uploadBusy={uploading !== null}
+            onUpload={(folderId, ids = [], direct = false) => {
+              if (uploading !== null) return;
               setUploadFolder(folderId);
+              setResolveUpload(false);
+              setDirectUpload(direct);
               setUploading(ids);
             }}
           />
@@ -1023,16 +1033,26 @@ export function DocumentsPage({ onOpen }: { onOpen: (id: string) => void }) {
           ) : null}
         </div>
       </div>
-      {uploading && (
-        <CloudUploadDialog
-          initial={uploading}
-          initialFolder={uploadFolder}
+      {uploading && directUpload && !resolveUpload ? (
+        <CloudDirectUpload
+          key={uploading[0]}
+          id={uploading[0]}
           onClose={() => setUploading(null)}
-          onComplete={(folderId) => {
-            setCloudGeneration((n) => n + 1);
-            navigate('library', folderId);
-          }}
+          onResolve={() => setResolveUpload(true)}
+          onComplete={() => setCloudGeneration((n) => n + 1)}
         />
+      ) : (
+        uploading && (
+          <CloudUploadDialog
+            initial={uploading}
+            initialFolder={uploadFolder}
+            onClose={() => setUploading(null)}
+            onComplete={(folderId) => {
+              setCloudGeneration((n) => n + 1);
+              navigate('library', folderId);
+            }}
+          />
+        )
       )}
       {moving && <MoveDialog what={moving} onClose={() => setMoving(null)} run={run} />}
       <ContextMenu />

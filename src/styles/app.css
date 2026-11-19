@@ -4390,3 +4390,31 @@ body.panel-resizing-y * {
   .docs-sidebar-resizer { width: 13px; right: -7px; }
   .docs-sidebar-resizer::after { left: 6px; }
 }
+
+/* Cloud upload keeps source and destination hierarchies separate and scrollable. */
+.cloud-upload-dialog { width: min(680px, 94vw); }
+.cloud-upload-heading { display: flex; align-items: center; gap: 10px; }
+.cloud-upload-list { display: block; max-height: 32vh; border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; }
+.upload-destination-tree { max-height: 18vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; }
+.upload-tree-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding-right: 8px; }
+.upload-tree-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
+.upload-tree-row input { width: auto; flex-shrink: 0; margin: 0; }
+.upload-tree-row svg { flex-shrink: 0; }
+.upload-tree-row span:not(.upload-tree-toggle) { overflow-wrap: anywhere; }
+.upload-tree-row small { margin-left: auto; white-space: nowrap; }
+.upload-tree-toggle { display: inline-flex; align-items: center; justify-content: center; width: 18px; min-width: 18px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+.upload-section-title { font-weight: 500; }
+.upload-source-folder { background: var(--panel-2); }
+.cloud-upload-list .upload-source-document { gap: 10px; padding-top: 5px; padding-right: 8px; padding-bottom: 5px; cursor: pointer; }
+.upload-source-document input { margin: 0; flex-shrink: 0; }
+.upload-source-thumbnail { width: 68px; height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--panel-2); border-radius: 3px; overflow: hidden; color: var(--text-2); }
+.upload-source-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+.upload-source-name { min-width: 0; overflow-wrap: anywhere; }
+.cloud-upload-progress { display: grid; gap: 6px; min-width: 0; }
+.cloud-upload-progress > span { overflow-wrap: anywhere; }
+.cloud-upload-progress progress { display: block; width: 100%; height: 10px; accent-color: var(--accent); }
+.cloud-upload-progress small { color: var(--text-2); }
+.cloud-upload-notice { position: fixed; z-index: 1100; bottom: 24px; right: 16px; width: min(380px, calc(100vw - 32px)); box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 24px #0003; padding: 14px; display: grid; gap: 12px; }
+.cloud-upload-notice-heading, .cloud-upload-notice-actions { display: flex; gap: 8px; align-items: center; }
+.cloud-upload-notice-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.cloud-upload-notice-actions { flex-wrap: wrap; }

@@ -156,7 +156,11 @@ Card modification dates use local time in **DD.MM.YYYY HH:mm:ss** format, with h
 
 ## Saving to the cloud {#cloud}
 
-Choose **Upload to cloud** from the bar or a document menu. Select documents, a destination, and optionally **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
+**Upload to cloud** in the bar opens the selection dialog. Documents appear with thumbnails inside their folders: expand branches and select individual documents or entire folders. Choose a destination in its separate folder tree. Optionally enable **Preserve library folders**. The first save connects the existing document; subsequent manual saves update the same ID. **Upload as separate copies** explicitly creates independent documents.
+
+**Upload to cloud** in a document menu starts uploading immediately, without the selection dialog. A connected document keeps its cloud location; a new one recreates its library folders. If the original cloud version has changed, the upload stops: the notification lets you explicitly open the selection dialog to confirm replacement or create a separate copy.
+
+The progress bar shows project preparation, file transfer, and server confirmation. Multiple uploads show overall progress and the current document name. Transferred bytes alone do not mean completion: the upload completes after server confirmation. Errors leave local data intact.
 
 On another device, sign in to the same account and open **My documents**. Lists and thumbnails load first; the project downloads when opened. A first download keeps the shared ID if that local ID is free. It then works offline. Existing changed content with that ID is never overwritten.
 

@@ -5,7 +5,7 @@ import { Icon } from './icons';
 import { createPortal } from 'react-dom';
 import { CardMenuButton, openCardMenu, RenameInput, FolderPreview, FolderCardMeta } from './DocumentCards';
 import { CloudMoveDialog } from './CloudMoveDialog';
-import { canMoveCloudItem, cloudFolderPreview, type CloudItem } from '../cloud/folders';
+import { canMoveCloudItem, cloudFolderPreview, cloudFolderRows, type CloudItem } from '../cloud/folders';
 import { libraryDocumentStatus, recentDocuments, unifiedLibrary, type UnifiedFolder, type LibraryDocument } from '../cloud/library';
 import type { ContextMenuItem } from '../store/editorStore';
 import { folderTrail, validateLibraryChange, type LibraryFolder } from '../store/library';
@@ -23,6 +23,7 @@ import {
   openCloudDocument,
   uploadCloudDocument,
   type CloudList,
+  type CloudUploadProgress,
 } from '../cloud/client';
 
 function errorText(error: unknown): string {
@@ -61,15 +62,17 @@ export function CloudLibrary({
   heading,
   trash = false,
   active = true,
+  uploadBusy = false,
 }: {
   onOpen: (id: string) => void;
-  onUpload: (folderId: string, ids?: string[]) => void;
+  onUpload: (folderId: string, ids?: string[], direct?: boolean) => void;
   path: string;
   onGo: (id: string) => void;
   sidebar?: HTMLElement | null;
   heading?: HTMLElement | null;
   trash?: boolean;
   active?: boolean;
+  uploadBusy?: boolean;
 }) {
   const localDocs = useDoc((s) => s.docs),
     diskLinks = useFolder((s) => s.links);
@@ -404,7 +407,14 @@ export function CloudLibrary({
           { label: t('Rename'), icon: 'rename', disabled: busy, action: () => setRenaming('document:' + d.id) },
           { label: t('Move to folder…'), icon: 'folder', disabled: busy, action: () => setMoving({ kind: 'document', id: d.id }) },
           ...(d.locals.length
-            ? [{ label: t('Upload to cloud'), icon: 'cloud', action: () => onUpload(d.folderId, [d.locals[0].id]) }]
+            ? [
+                {
+                  label: t('Upload to cloud'),
+                  icon: 'cloud',
+                  disabled: uploadBusy,
+                  action: () => onUpload(d.folderId, [d.locals[0].id], true),
+                },
+              ]
             : []),
           ...(d.locals.length > 1 ? [{ label: t('Local variants…'), icon: 'copy', action: () => setVariants(d) }] : []),
           { label: t('Move to trash'), icon: 'trash', danger: true, disabled: busy, action: () => void changeTrash(d, true) },
@@ -490,7 +500,7 @@ export function CloudLibrary({
                 <Icon name="refresh" size={14} />
                 {t('Refresh')}
               </button>
-              <button className="btn small" disabled={busy || !data} onClick={() => onUpload(current)}>
+              <button className="btn small" disabled={busy || !data || uploadBusy} onClick={() => onUpload(current)}>
                 <Icon name="cloud" size={14} />
                 {t('Upload to cloud')}
               </button>
@@ -667,6 +677,151 @@ export function CloudLibrary({
   );
 }
 
+/** Resolve local folder aliases without flattening their hierarchy or moving connected documents. */
+function uploadFolders(localFolders: LibraryFolder[], data: CloudList) {
+  const folders = [...data.folders];
+  const combined = unifiedLibrary(localFolders, [], data);
+  const ensureTarget = async (id: string) => {
+    let parent = '';
+    for (const f of folderTrail(combined.folders, id)) {
+      let found =
+        folders.find((r) => r.id === combined.folders.find((v) => v.id === f.id)?.cloudId) ??
+        folders.find((r) => r.parentId === parent && r.name.toLocaleLowerCase() === f.name.toLocaleLowerCase());
+      if (!found) {
+        found = { ...f, id: f.id, parentId: parent };
+        await saveCloudFolder(found);
+        folders.push(found);
+      }
+      if (localFolders.some((l) => l.id === f.id))
+        await changeLibrary({ kind: 'folder', folder: { ...f, cloudSource: { userId: data.userId, folderId: found.id } } });
+      parent = found.id;
+    }
+    return parent;
+  };
+  return { folders, ensureTarget };
+}
+
+function UploadProgress({
+  progress,
+  completed = 0,
+  total = 1,
+  name,
+}: {
+  progress: CloudUploadProgress | null;
+  completed?: number;
+  total?: number;
+  name?: string;
+}) {
+  const fraction =
+    progress?.phase === 'uploading' && progress.total
+      ? Math.min(0.95, (progress.loaded / progress.total) * 0.9 + 0.05)
+      : progress?.phase === 'committing'
+        ? 0.98
+        : 0;
+  return (
+    <div className="cloud-upload-progress" role="status">
+      <span>
+        {name}
+        {total > 1 ? ` · ${completed + 1} / ${total}` : ''}
+      </span>
+      <progress aria-label={t('Upload progress')} max={total} value={completed + fraction} />
+      <small>
+        {t(progress?.phase === 'committing' ? 'Finishing upload…' : progress?.phase === 'uploading' ? 'Uploading…' : 'Preparing upload…')}
+      </small>
+    </div>
+  );
+}
+
+/** A document action starts immediately; only a failed/conflicting upload offers explicit choices. */
+export function CloudDirectUpload({
+  id,
+  onClose,
+  onComplete,
+  onResolve,
+}: {
+  id: string;
+  onClose: () => void;
+  onComplete: (folderId: string) => void;
+  onResolve: () => void;
+}) {
+  const doc = useDoc((s) => s.docs.find((d) => d.id === id));
+  const [progress, setProgress] = useState<CloudUploadProgress | null>(null);
+  const [error, setError] = useState('');
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void (async () => {
+      try {
+        if (!doc) throw new Error('Document not found');
+        const [data, folders] = await Promise.all([listCloud(), listLibraryFolders()]);
+        if (doc.cloudSource && doc.cloudSource.userId !== data.userId) throw new Error('Connect to organise cloud documents.');
+        const existing = data.documents.find((d) => d.id === (doc.cloudSource?.documentId ?? doc.id));
+        const target = existing?.folderId ?? (await uploadFolders(folders, data).ensureTarget(doc.folderId ?? ''));
+        await uploadCloudDocument(doc, target, false, undefined, undefined, { onProgress: setProgress });
+        onComplete(doc.folderId ?? '');
+        onClose();
+      } catch (e) {
+        setError(errorText(e));
+      }
+    })();
+  }, []);
+  return (
+    <div className="cloud-upload-notice" role="region" aria-label={t('Upload to cloud')}>
+      <div className="cloud-upload-notice-heading">
+        <Icon name="cloud" size={18} />
+        <strong>{doc?.name}</strong>
+      </div>
+      {error ? (
+        <>
+          <div className="docs-error" role="alert">
+            {error}
+          </div>
+          <div className="cloud-upload-notice-actions">
+            <button className="btn" onClick={onResolve}>
+              {t('Choose upload options…')}
+            </button>
+            <button className="btn" onClick={onClose}>
+              {t('Close')}
+            </button>
+          </div>
+        </>
+      ) : (
+        <UploadProgress progress={progress} name={doc?.name} />
+      )}
+    </div>
+  );
+}
+
+function FolderCheckbox({
+  checked,
+  partial,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  partial: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = partial;
+  }, [partial]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={label}
+      disabled={disabled}
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  );
+}
+
 export function CloudUploadDialog({
   initial,
   initialFolder = '',
@@ -681,7 +836,6 @@ export function CloudUploadDialog({
   const allDocs = useDoc((s) => s.docs);
   const diskLinks = useFolder((s) => s.links);
   const docs = recentDocuments(allDocs.filter((d) => !diskLinks[d.id]));
-  const links = useFolder((s) => s.links);
   const [selected, setSelected] = useState<string[]>(initial ?? []),
     [data, setData] = useState<CloudList | null>(null),
     [localFolders, setLocalFolders] = useState<LibraryFolder[]>([]);
@@ -691,12 +845,26 @@ export function CloudUploadDialog({
     [replaceExisting, setReplaceExisting] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [progress, setProgress] = useState('');
+    [progress, setProgress] = useState<CloudUploadProgress | null>(null),
+    [currentName, setCurrentName] = useState(''),
+    [completed, setCompleted] = useState(0),
+    [expanded, setExpanded] = useState<string[]>([]),
+    [destinationExpanded, setDestinationExpanded] = useState<string[]>([]);
   useEffect(() => {
     void Promise.all([listCloud(), listLibraryFolders()])
       .then(([cloud, folders]) => {
         setData(cloud);
         setLocalFolders(folders);
+        const combined = unifiedLibrary(folders, [], cloud).folders;
+        setDestinationExpanded(initialFolder ? folderTrail(combined, initialFolder).map((f) => f.id) : []);
+        setExpanded([
+          ...new Set(
+            (initial ?? []).flatMap((id) => {
+              const doc = docs.find((d) => d.id === id);
+              return doc?.folderId ? folderTrail(folders, doc.folderId).map((f) => f.id) : [];
+            }),
+          ),
+        ]);
       })
       .catch((e) => setError(errorText(e)));
   }, []);
@@ -719,32 +887,16 @@ export function CloudUploadDialog({
     setError('');
     const done: string[] = [];
     try {
-      const folders = [...data.folders];
-      const combined = unifiedLibrary(localFolders, [], data);
-      const ensureTarget = async (id: string) => {
-        let parent = '';
-        for (const f of folderTrail(combined.folders, id)) {
-          let found =
-            folders.find((r) => r.id === combined.folders.find((v) => v.id === f.id)?.cloudId) ??
-            folders.find((r) => r.parentId === parent && r.name.toLocaleLowerCase() === f.name.toLocaleLowerCase());
-          if (!found) {
-            found = { ...f, id: f.id, parentId: parent };
-            await saveCloudFolder(found);
-            folders.push(found);
-          }
-          if (localFolders.some((l) => l.id === f.id))
-            await changeLibrary({ kind: 'folder', folder: { ...f, cloudSource: { userId: data.userId, folderId: found.id } } });
-          parent = found.id;
-        }
-        return parent;
-      };
+      const { folders, ensureTarget } = uploadFolders(localFolders, data);
       const destination = await ensureTarget(target);
       for (const id of selected) {
         const doc = docs.find((d) => d.id === id);
         if (!doc) continue;
-        setProgress(`${done.length + 1} / ${selected.length}: ${doc.name}`);
+        setCompleted(done.length);
+        setCurrentName(doc.name);
+        setProgress(null);
         let folderId = destination;
-        if (keepFolders && !links[id] && doc.folderId) {
+        if (keepFolders && doc.folderId) {
           for (const f of folderTrail(localFolders, doc.folderId)) {
             let destination = folders.find((p) => p.parentId === folderId && p.name.toLowerCase() === f.name.toLowerCase());
             if (!destination) {
@@ -763,6 +915,7 @@ export function CloudUploadDialog({
           copy,
           replaceExisting ? existing?.revision : undefined,
           replaceExisting ? existing?.modified : undefined,
+          { onProgress: setProgress },
         );
         done.push(id);
       }
@@ -773,54 +926,150 @@ export function CloudUploadDialog({
       setError(errorText(e));
     } finally {
       setBusy(false);
-      setProgress('');
+      setProgress(null);
     }
   };
+  const destinationFolders = unifiedLibrary(localFolders, [], data).folders;
+  const sourceFolders = localFolders.filter((f) =>
+    docs.some((d) => d.folderId === f.id || folderTrail(localFolders, d.folderId ?? '').some((p) => p.id === f.id)),
+  );
+  const renderSource = (parent: string, depth = 0): React.ReactNode => (
+    <>
+      {sourceFolders
+        .filter((f) => f.parentId === parent)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((f) => {
+          const ids = docs
+            .filter((d) => d.folderId === f.id || folderTrail(localFolders, d.folderId ?? '').some((p) => p.id === f.id))
+            .map((d) => d.id);
+          const count = ids.filter((id) => selected.includes(id)).length;
+          const open = expanded.includes(f.id);
+          return (
+            <Fragment key={f.id}>
+              <div className="upload-tree-row upload-source-folder" style={{ paddingLeft: 8 + depth * 18 }}>
+                <button
+                  type="button"
+                  className="upload-tree-toggle"
+                  aria-label={`${t('Expand folder')}: ${f.name}`}
+                  aria-expanded={open}
+                  onClick={() => setExpanded((s) => (open ? s.filter((id) => id !== f.id) : [...s, f.id]))}
+                >
+                  <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
+                </button>
+                <FolderCheckbox
+                  checked={count === ids.length}
+                  partial={count > 0 && count < ids.length}
+                  disabled={busy}
+                  label={`${t('Select folder')}: ${f.name}`}
+                  onChange={(checked) => setSelected((s) => (checked ? [...new Set([...s, ...ids])] : s.filter((id) => !ids.includes(id))))}
+                />
+                <Icon name="folder" size={18} />
+                <span>{f.name}</span>
+                <small>
+                  {count} / {ids.length}
+                </small>
+              </div>
+              {open && renderSource(f.id, depth + 1)}
+            </Fragment>
+          );
+        })}
+      {docs
+        .filter((d) => (d.folderId && sourceFolders.some((f) => f.id === d.folderId) ? d.folderId : '') === parent)
+        .map((d) => (
+          <label className="upload-source-document" key={d.id} style={{ paddingLeft: 28 + depth * 18 }}>
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={selected.includes(d.id)}
+              onChange={(e) => setSelected((s) => (e.target.checked ? [...s, d.id] : s.filter((id) => id !== d.id)))}
+            />
+            <span className="upload-source-thumbnail">
+              {d.thumbnail ? <img src={d.thumbnail} alt="" loading="lazy" /> : <Icon name="partStudio" size={26} />}
+            </span>
+            <span className="upload-source-name">
+              {d.name}
+              <small>{d.cloudSource ? t('Cloud connected') : t('Only on this device')}</small>
+            </span>
+          </label>
+        ))}
+    </>
+  );
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (!busy) onClose();
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [busy, onClose]);
   return (
     <div className="modal-backdrop">
       <form
         className="modal cloud-upload-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={t('Upload documents…')}
+        aria-label={t('Upload documents to cloud')}
         onSubmit={(e) => {
           e.preventDefault();
           void upload();
         }}
       >
-        <div className="modal-header">{t('Upload documents…')}</div>
+        <div className="modal-header cloud-upload-heading">
+          <Icon name="cloud" size={22} />
+          {t('Upload documents to cloud')}
+        </div>
         <div className="modal-body library-form">
           {data && (
             <>
-              <label>
+              <div className="upload-section-title" id="upload-destination-label">
                 {t('Destination folder')}
-                <select value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)}>
-                  <option value="">{t('Cloud')}</option>
-                  {unifiedLibrary(localFolders, [], data).folders.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {folderTrail(unifiedLibrary(localFolders, [], data).folders, f.id)
-                        .map((p) => p.name)
-                        .join(' / ')}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              </div>
+              <div className="upload-destination-tree" role="group" aria-labelledby="upload-destination-label">
+                {[
+                  { id: '', name: t('Cloud'), depth: 0, parentId: '' },
+                  ...cloudFolderRows(destinationFolders).map(({ folder, depth }) => ({ ...folder, depth: depth + 1 })),
+                ]
+                  .filter(
+                    (f) => !f.parentId || folderTrail(destinationFolders, f.parentId).every((p) => destinationExpanded.includes(p.id)),
+                  )
+                  .map((f) => {
+                    const children = destinationFolders.some((p) => p.parentId === f.id);
+                    return (
+                      <div key={f.id} className="upload-tree-row" style={{ paddingLeft: 8 + f.depth * 16 }}>
+                        {f.id && children ? (
+                          <button
+                            type="button"
+                            className="upload-tree-toggle"
+                            aria-label={`${t('Expand folder')}: ${f.name}`}
+                            aria-expanded={destinationExpanded.includes(f.id)}
+                            onClick={() => setDestinationExpanded((s) => (s.includes(f.id) ? s.filter((id) => id !== f.id) : [...s, f.id]))}
+                          >
+                            <Icon name={destinationExpanded.includes(f.id) ? 'chevronDown' : 'chevronRight'} size={12} />
+                          </button>
+                        ) : (
+                          <span className="upload-tree-toggle" />
+                        )}
+                        <label>
+                          <input
+                            type="radio"
+                            name="upload-destination"
+                            value={f.id}
+                            checked={target === f.id}
+                            disabled={busy}
+                            onChange={() => setTarget(f.id)}
+                          />
+                          <Icon name={f.id ? 'folder' : 'cloud'} size={16} />
+                          <span>{f.name}</span>
+                        </label>
+                      </div>
+                    );
+                  })}
+              </div>
               <div className="docs-hint">{t('Choose documents to upload.')}</div>
-              <div className="cloud-upload-list">
-                {docs.map((d) => (
-                  <label key={d.id}>
-                    <input
-                      type="checkbox"
-                      disabled={busy}
-                      checked={selected.includes(d.id)}
-                      onChange={(e) => setSelected((s) => (e.target.checked ? [...s, d.id] : s.filter((id) => id !== d.id)))}
-                    />
-                    <span>
-                      {d.name}
-                      <small>{links[d.id] ? links[d.id].name : d.cloudSource ? t('Cloud connected') : t('Only on this device')}</small>
-                    </span>
-                  </label>
-                ))}
+              <div className="cloud-upload-list" role="group" aria-label={t('Documents to upload')}>
+                {renderSource('')}
               </div>
               <div className="cloud-upload-options">
                 <label className="library-check">
@@ -847,7 +1096,7 @@ export function CloudUploadDialog({
               </div>
             </>
           )}
-          {progress && <div role="status">{progress}</div>}
+          {busy && <UploadProgress progress={progress} completed={completed} total={selected.length} name={currentName} />}
           {error && (
             <div className="docs-error" role="alert">
               {error}

@@ -4,6 +4,7 @@ import * as db from '../store/persistence';
 import { useDoc } from '../store/docStore';
 import { projectText, readProject } from '../store/folderStore';
 import { fileVersions, importVersions, copiedVersionIds, withCopiedVersions } from '../store/versions';
+import { putCloudObject } from './uploadProgress';
 
 const API = 'https://api.cad.ya-erm.ru';
 export interface CloudDocument {
@@ -60,7 +61,12 @@ export const renameCloudDocument = (doc: CloudDocument, name: string) =>
     name,
   });
 export const moveCloudDocument = (doc: CloudDocument, folderId: string) =>
-  cloudRequest<{ document: CloudDocument }>('/cloud/document', { id: doc.id, revision: doc.revision, modified: doc.modified, folderId });
+  cloudRequest<{ document: CloudDocument }>('/cloud/document', {
+    id: doc.id,
+    revision: doc.revision,
+    modified: doc.modified,
+    folderId,
+  });
 
 export const trashCloudDocument = (doc: CloudDocument, trashed: boolean) =>
   cloudRequest<{ document: CloudDocument }>('/cloud/document', {
@@ -87,7 +93,11 @@ export async function setDocumentTrash(summary: DocumentSummary, trashed: boolea
         (d) => d.id === source.documentId || (d.cloudSource?.userId === source.userId && d.cloudSource.documentId === source.documentId),
       );
     for (const local of locals)
-      if (local.cloudSource) await db.markCloudCopy(local.id, { ...local.cloudSource, cloudModified: changed.document.modified });
+      if (local.cloudSource)
+        await db.markCloudCopy(local.id, {
+          ...local.cloudSource,
+          cloudModified: changed.document.modified,
+        });
   }
   for (const local of locals) await (trashed ? useDoc.getState().trashDocument(local.id) : useDoc.getState().restoreDocument(local.id));
 }
@@ -115,20 +125,36 @@ export async function cloudThumbnail(source?: string): Promise<Blob | null> {
   }
 }
 
+export interface CloudUploadProgress {
+  phase: 'preparing' | 'uploading' | 'committing';
+  loaded: number;
+  total: number;
+}
+export interface UploadOptions {
+  onProgress?: (progress: CloudUploadProgress) => void;
+  signal?: AbortSignal;
+}
+
 export async function uploadCloudDocument(
   summary: DocumentSummary,
   folderId: string,
   asCopy = false,
   expectedRevision?: string,
   expectedModified?: number,
+  options: UploadOptions = {},
 ): Promise<CloudDocument> {
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase: 'preparing', loaded: 0, total: 0 });
   if (!asCopy && summary.cloudSource?.revision && summary.cloudSource.cloudModified === undefined && expectedModified === undefined)
     throw new Error('Confirm updating the existing cloud version.');
   await useDoc.getState().flushSave();
   if (useDoc.getState().saveError) throw new Error('Save your changes before uploading.');
   const doc = await db.loadDocument(summary.id);
   if (!doc) throw new Error('Document not found');
-  const source = { ...doc, id: asCopy ? crypto.randomUUID() : (summary.cloudSource?.documentId ?? doc.id) };
+  const source = {
+    ...doc,
+    id: asCopy ? crypto.randomUUID() : (summary.cloudSource?.documentId ?? doc.id),
+  };
   const text = projectText(source, await fileVersions(doc.id));
   if (new Blob([text]).size > 100 * 1024 * 1024) throw new Error('The project is too large to upload.');
   const compressed = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
@@ -136,32 +162,54 @@ export async function uploadCloudDocument(
   if (compressed.size > 20 * 1024 * 1024 || (thumbnail?.size ?? 0) > 1024 * 1024) throw new Error('The project is too large to upload.');
   const hash = await blobHash(compressed),
     thumbnailHash = thumbnail ? await blobHash(thumbnail) : '';
-  const prepared = await cloudRequest<{ userId: string; uploadId: string; projectUrl: string; thumbnailUrl: string | null }>(
-    '/cloud/prepare',
-    {
-      documentId: source.id,
-      name: source.name,
-      folderId,
-      expectedRevision: asCopy ? '' : (expectedRevision ?? summary.cloudSource?.revision ?? ''),
-      expectedModified: asCopy ? undefined : (expectedModified ?? summary.cloudSource?.cloudModified),
-      size: compressed.size,
-      thumbnailSize: thumbnail?.size ?? 0,
-      hash,
-      thumbnailHash,
-    },
-  );
+  const prepared = await cloudRequest<{
+    userId: string;
+    uploadId: string;
+    projectUrl: string;
+    thumbnailUrl: string | null;
+  }>('/cloud/prepare', {
+    documentId: source.id,
+    name: source.name,
+    folderId,
+    expectedRevision: asCopy ? '' : (expectedRevision ?? summary.cloudSource?.revision ?? ''),
+    expectedModified: asCopy ? undefined : (expectedModified ?? summary.cloudSource?.cloudModified),
+    size: compressed.size,
+    thumbnailSize: thumbnail?.size ?? 0,
+    hash,
+    thumbnailHash,
+  });
+  const total = compressed.size + (thumbnail?.size ?? 0);
+  let uploaded = 0;
+  options.onProgress?.({ phase: 'uploading', loaded: 0, total });
   const put = async (url: string, body: Blob) => {
+    if (options.onProgress) {
+      await putCloudObject(
+        url,
+        body,
+        (loaded) =>
+          options.onProgress!({
+            phase: 'uploading',
+            loaded: uploaded + loaded,
+            total,
+          }),
+        options.signal,
+      );
+      uploaded += body.size;
+      return;
+    }
     const result = await fetch(url, {
       method: 'PUT',
       body,
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
-      signal: AbortSignal.timeout(120000),
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
     });
     if (!result.ok) throw new Error('Upload failed. Your local document is safe.');
   };
   await put(prepared.projectUrl, compressed);
   if (thumbnail && prepared.thumbnailUrl) await put(prepared.thumbnailUrl, thumbnail);
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase: 'committing', loaded: total, total });
   const result = await cloudRequest<{ document: CloudDocument }>('/cloud/commit', { uploadId: prepared.uploadId });
   if (!asCopy && prepared.userId) {
     await db.markCloudCopy(summary.id, {
@@ -178,7 +226,12 @@ export async function uploadCloudDocument(
 
 /** Cloud opening makes a local copy; changed local files and drafts are never replaced. */
 export async function openCloudDocument(id: string): Promise<string> {
-  const result = await cloudRequest<{ userId: string; document: CloudDocument; url: string; thumbnailUrl: string | null }>('/cloud/open', {
+  const result = await cloudRequest<{
+    userId: string;
+    document: CloudDocument;
+    url: string;
+    thumbnailUrl: string | null;
+  }>('/cloud/open', {
     id,
   });
   const existing = (await db.listDocuments()).find(
@@ -189,7 +242,11 @@ export async function openCloudDocument(id: string): Promise<string> {
       d.cloudSource.revision === result.document.revision,
   );
   if (existing && existing.name === result.document.name && existing.cloudSource?.savedModified === existing.modified) return existing.id;
-  const response = await fetch(result.url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(120000) });
+  const response = await fetch(result.url, {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+    signal: AbortSignal.timeout(120000),
+  });
   if (!response.ok) throw new Error('Download failed. Try again.');
   const blob = await response.blob();
   if (blob.size > 20 * 1024 * 1024 || (await blobHash(blob)) !== result.document.hash)
@@ -210,7 +267,11 @@ export async function openCloudDocument(id: string): Promise<string> {
   }
   const parsed = readProject(JSON.parse(await new Blob(chunks).text()), result.document.name);
   const copies = copiedVersionIds(parsed.versions);
-  const candidate = { ...withCopiedVersions(parsed.doc, copies), id: result.document.id, name: result.document.name };
+  const candidate = {
+    ...withCopiedVersions(parsed.doc, copies),
+    id: result.document.id,
+    name: result.document.name,
+  };
   const localId = (await db.addDocumentIfAbsent(candidate)) ? candidate.id : await useDoc.getState().importDocument(candidate);
   await importVersions(localId, parsed.versions, false, copies);
   await db.markCloudCopy(localId, {
